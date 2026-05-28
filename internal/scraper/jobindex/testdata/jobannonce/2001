@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Job 2001</title>
+</head>
+<body>
+  <article class="jobad-content">
+    <div class="jobad-description">
+      <p>Join our backend platform team and build resilient services.</p>
+      <ul>
+        <li>Design APIs with Go.</li>
+        <li>Collaborate with product and data teams.</li>
+      </ul>
+    </div>
+  </article>
+</body>
+</html>
+
