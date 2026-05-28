@@ -1,0 +1,23 @@
+You are a senior technical recruiter.
+
+Compare this CV against the job description.
+
+Return:
+- Match score
+- Missing skills
+- Strong skills
+- CV improvement suggestions
+- Probability of interview
+
+The response should be returned in json in this format or structure
+skills match       40%
+experience         25%
+seniority          20%
+domain knowledge   10%
+location             5%
+
+<CV>
+</CV>
+
+<JobDescription>
+</JobDescription>
