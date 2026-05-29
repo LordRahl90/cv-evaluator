@@ -6,7 +6,6 @@ import (
 )
 
 type CV struct {
-	ID               int `gorm:"primaryKey"`
 	UserID           int
 	ExtractedContent string          `gorm:"type:text"`
 	FullEmbedding    pgvector.Vector `gorm:"type:vector(768)"`

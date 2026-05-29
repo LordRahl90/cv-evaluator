@@ -1,8 +1,12 @@
 package deepseek
 
 import (
+	"bytes"
 	"context"
+	"cv-solution/internal/entities"
 	"fmt"
+	"html/template"
+	"log/slog"
 
 	"cv-solution/internal/llm/prompts"
 
@@ -21,12 +25,24 @@ func New(key string) *Service {
 }
 
 func (s *Service) CleanupCV(ctx context.Context, content string) (string, error) {
+	slog.DebugContext(ctx, "Cleaning up CV content with DeepSeek LLM", "content_length", len(content))
 	promptContent, err := s.loadPrompt("cv-cleanup.txt")
 	if err != nil {
 		return "", err
 	}
 
 	prompt := fmt.Sprintf("%s\n\n%s", string(promptContent), content)
+	return s.callLLM(ctx, prompt)
+}
+
+func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput) (string, error) {
+	slog.DebugContext(ctx, "Matching CV with job description using DeepSeek LLM", "job_description_length", len(matchInput.JobDescription))
+
+	prompt, err := s.buildPrompt(matchInput)
+	if err != nil {
+		return "", err
+	}
+
 	return s.callLLM(ctx, prompt)
 }
 
@@ -54,4 +70,22 @@ func (s *Service) callLLM(ctx context.Context, content string) (string, error) {
 
 func (s *Service) loadPrompt(fileName string) ([]byte, error) {
 	return prompts.Prompts.ReadFile(fileName)
+}
+
+func (s *Service) buildPrompt(input *entities.MatchInput) (string, error) {
+	promptContent, err := s.loadPrompt("jobmatch.tpl")
+	if err != nil {
+		return "", err
+	}
+	tmpl, err := template.New("jobmatch").Parse(string(promptContent))
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, input); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
 }

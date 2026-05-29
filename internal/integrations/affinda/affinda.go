@@ -82,22 +82,22 @@ func (s *Service) sendPostRequest(ctx context.Context, url string, body []byte) 
 	return b, nil
 }
 
-func (s *Service) sendGetRequest(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.token)
-
-	res, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", res.StatusCode)
-	}
-
-	return io.ReadAll(res.Body)
-}
+//func (s *Service) sendGetRequest(ctx context.Context, url string) ([]byte, error) {
+//	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	req.Header.Set("Authorization", "Bearer "+s.token)
+//
+//	res, err := s.client.Do(req)
+//	if err != nil {
+//		return nil, err
+//	}
+//	defer res.Body.Close()
+//	if res.StatusCode != http.StatusOK {
+//		return nil, fmt.Errorf("unexpected status code: %d", res.StatusCode)
+//	}
+//
+//	return io.ReadAll(res.Body)
+//}

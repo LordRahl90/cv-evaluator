@@ -1,9 +1,10 @@
 package migrator
 
 import (
-	"cv-solution/internal/models"
 	"fmt"
 	"log/slog"
+
+	"cv-solution/internal/models"
 
 	"gorm.io/gorm"
 )
@@ -18,14 +19,18 @@ var appModels = []interface{}{
 func Migrate(db *gorm.DB) error {
 	slog.Info("migrating database")
 
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
+		slog.Warn("could not create vector extension", "error", err)
+	}
+
 	for _, model := range appModels {
 		slog.Info(fmt.Sprintf("migrating model %T", model))
 		if err := db.AutoMigrate(model); err != nil {
-			slog.Warn(fmt.Sprintf("could not migrate %T: %v", model, err))
+			slog.Error("failed to migrate model", "model", fmt.Sprintf("%T", model), "error", err)
+			return err
 		}
-		slog.Info(fmt.Sprintf("migrated model %T", model))
 	}
 
-	slog.Info("migrated database, starting the seeder")
+	slog.Info("migrated database")
 	return nil
 }
