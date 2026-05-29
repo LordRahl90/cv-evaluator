@@ -4,6 +4,7 @@ import (
 	"context"
 	"cv-solution/internal/services/matcher"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,7 +19,16 @@ import (
 	"gorm.io/gorm"
 )
 
+var (
+	userID int
+	jobID  string
+)
+
 func main() {
+	flag.IntVar(&userID, "user-id", 1, "User ID")
+	flag.StringVar(&jobID, "job-id", "", "Job ID")
+	flag.Parse()
+
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(err)
 	}
@@ -35,9 +45,6 @@ func main() {
 		Timeout: 30 * time.Minute,
 	}
 	embeddingLLMService := ollama.New(client, os.Getenv("OLLAMA_BASE_URL"))
-
-	jobID := "4403122114"
-	userID := 1
 
 	matchService := matcher.New(db, embeddingLLMService, chatLLM)
 

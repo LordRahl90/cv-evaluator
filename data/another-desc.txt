@@ -1,60 +1,55 @@
 About the job
-Are you passionate about shaping the future of engineering in an AI‑first world? Can you translate strategic ambitions into hands-on technical execution? And are you motivated by influencing cross-organisational technology direction through a platform engineering mindset? Then this is your opportunity to play a defining role in DFDS’s engineering transformation.
+Role:- Senior Java Developer
 
-About The Role
+Type:-Contract
 
-Be part of the movement - and play your part.
+Location:- Amsterdam, Netherlands
 
-DFDS is entering a new era where agentic AI, AI-augmented development, and automation will fundamentally change how we create value through technology. To help shape it, we're looking for a hands-on architect who can define how we build Agentic AI solutions, and how we use Agentic AI to build solutions.
+We are looking for a Senior Backend Developer with strong experience in Java, Spring Boot, microservices architectures to design, build, and scale backend systems in a cloud-native environment. The role requires a hands-on engineer who can deliver high-quality services, collaborate across teams, and contribute to architectural and design decisions.
 
-You will report to our Head of Architecture and join a team of skilled architects covering security, enterprise, and cloud architecture, who will be your base for peer sparring and support. Your day-to-day home will be our "Agent Lab," where data engineers, data scientists, and agent leads translate business processes into agentic flows, both the ones we run today and the ones we haven't discovered yet. Together you'll turn that work into scalable, value-driven AI use cases.
 
-It's a role that asks you to balance experimentation, value delivery, and the longer work of maturing our AI platform, which means being pragmatic in how you design solutions and knowing which compromises are worth making. A big part of how we get there is what we call the "factory" mindset: when something breaks, you don't fix the code, you fix the factory that wrote it, meaning the harness of skills, agents, and tools that produced it. The leverage is in improving the factory, not patching its output. If that way of thinking excites you, you'll feel at home here.
 
-Additional tasks:
+Roles & Responsibilities
 
-Establish composable architecture as a guideline across our agentic development processes
-Translate high-level architecture requirements into agents and skills
-Define and implement architecture fitness functions to support evolutionary architectures, ensuring our solutions stay within the architecture guardrails
-Help us think through security and auth in agentic systems
-Shape solution design and processes for rapid prototyping
+• Design, develop, and maintain scalable backend services using Java and Spring Boot
 
-About You
+• Build and support microservices-based architectures with high availability and performance
 
-We think the strongest teams are built on diversity and inclusivity. Contrasting opinions, varied skills and strong characters bring out the best in us all. With this in mind, we think that you are a pragmatic, team-oriented individual who listens to and values others opinions.
+• Develop and consume RESTful APIs and event-driven services
 
-You bring a platform engineering mindset: knowing when a solution should be elevated to a platform, and how to build platforms that help engineers make the right choices.
+• Collaborate with frontend, DevOps, and product teams to deliver end-to-end solutions
 
-You are comfortable in ambiguity, translating unclear problems into clear architectural steps, and evaluating new technologies in a structured, pragmatic way
+• Participate in design discussions, code reviews, and technical decision-making
 
-The ideal person for this position will have the following qualifications:
+• Ensure code quality through unit testing, integration testing, and best practices
 
-Deep experience in cloud-native architecture on AWS, Azure, or hybrid environments, including container orchestration and identity
-Proven track record of designing event-driven, composable architectures, including streaming patterns (e.g. Kafka)
-Several years' experience with modern shift-left engineering practices: CI/CD, GitOps, IaC, and DevSecOps
-Hands-on familiarity with AI in engineering, such as AI-enabled developer workflows, tools, or automation
-Deep understanding of relevant AI protocols such as MCP, A2A, and ACP
-Experience building or working within agent harnesses, agentic frameworks, or similar systems
+• Troubleshoot and resolve production issues and performance bottlenecks
 
-Nice To Have
+• Contribute to continuous improvement of engineering standards and processes
 
-Experience with Microsoft Agent Framework (MAF) or equivalent multi-agent frameworks
-Familiarity with n8n or equivalent low-code workflow platforms
+Technical Skills
 
-A background in logistics or the maritime industry is an advantage, but not a requirement.
+• 8+ years of hands-on backend development experience
 
-Working at DFDS
+• Strong proficiency in Java (8+) and Spring Boot
 
-Join the movement and grow with us.
+• Solid experience designing and implementing microservices architectures
 
-While you’re with us, we want you to develop and move yourself on. We’ll encourage you to challenge yourself to acquire new skills and perspectives.  Collaboration, knowledge sharing, and individual development are core values within the architecture team you’ll be part of at DFDS.
+• Experience with REST APIs, messaging, and asynchronous processing
 
-It is important to us that DFDS is a great workplace with a diverse and vibrant community and a healthy work/life balance with flexible work arrangements. Our newly built headquarters in Copenhagen is a unique, modern workplace. Here, we enjoy different work zones, our own game room, fitness facilities, cantina and café and a rooftop terrace with a beautiful ocean view, all just 5 minutes from the nearest train & metro station.
+• Hands-on experience with cloud platforms (AWS / Azure / GCP)
 
-Are we a match? Then what are you waiting for? Apply Now.
+• Good experience in SQL and NoSQL databases
 
-If you think your personality, skills, experience and ambition match this role, we’d love to hear from you. Apply as soon as possible and no later than June 7th as we’re keen to meet potential candidates on an ongoing basis.
+• Familiarity with CI/CD pipelines, Git, and build tools
 
-Is there something you need to know, we haven’t covered here, please do not hesitate to reach out to Martin Oskarsson, Head of Architecture on maosk@dfds.com
+• Experience with Docker and containerized deployment
 
-We look forward to hearing from you.
+
+Requirements added by the job poster
+
+• 6+ years of work experience with Docker
+
+• 6+ years of Travel Arrangements experience
+
+• 6+ years of work experience with REST APIs

@@ -19,3 +19,6 @@ start:
 
 clean:
 	go clean --testcache
+
+by-job:
+	@go run ./cmd/byjobs -job-id=$(jobId) -user-id=$(userId)
