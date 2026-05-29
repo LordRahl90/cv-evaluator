@@ -24,7 +24,8 @@ func main() {
 	}
 
 	userID := 1
-	searchLink := "http://127.0.0.1:5500/linkedin/linkedin.html?position=1&pageNum=0"
+	//searchLink := "http://127.0.0.1:5500/linkedin/linkedin.html?position=1&pageNum=0"
+	searchLink := "https://www.linkedin.com/jobs/search?keywords=Senior%20Software%20Engineer&location=Copenhagen&geoId=&trk=public_jobs_jobs-search-bar_search-submit&position=1&pageNum=0"
 
 	db, err := setupDatabase()
 	if err != nil {

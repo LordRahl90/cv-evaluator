@@ -11,3 +11,9 @@ The entire Journey:
 * Generate Embeddings for Job description/Link.
 * Compare the embeddings of the CV and the Job description/Link.
 * Return the similarity score.
+
+# Models
+
+* nomic-embed-text for embeddings
+* ollama for chat
+* deepseek for chat
