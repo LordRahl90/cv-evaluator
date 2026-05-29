@@ -21,39 +21,23 @@ const (
 	defaultMaxPages = 3
 )
 
-var linkedInJobIDPattern = regexp.MustCompile(`/jobs/view/(\d+)`)
-
-func extractLinkedInJobID(detailsURL string) string {
-	detailsURL = strings.TrimSpace(detailsURL)
-	if detailsURL == "" {
-		return ""
-	}
-
-	if matches := linkedInJobIDPattern.FindStringSubmatch(detailsURL); len(matches) == 2 {
-		return matches[1]
-	}
-
-	u, parseErr := url.Parse(detailsURL)
-	if parseErr != nil {
-		return ""
-	}
-
-	for _, key := range []string{"currentJobId", "jobId"} {
-		if id := strings.TrimSpace(u.Query().Get(key)); id != "" {
-			return id
-		}
-	}
-
-	return ""
-}
+var linkedInJobIDPattern = regexp.MustCompile(`/jobs/view/(?:[^/?]*-)?(\d+)(?:[/?]|$)`)
+var linkedInNumericIDPattern = regexp.MustCompile(`^\d+$`)
 
 type Service struct {
 	SearchLinkPage string
 	MaxPages       int
 }
 
-func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
-	startURL := strings.TrimSpace(s.SearchLinkPage)
+func New() *Service {
+	return &Service{
+		//SearchLinkPage: searchLink,
+		//MaxPages:       defaultMaxPages,
+	}
+}
+
+func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages int) ([]entities.JobPost, error) {
+	startURL := strings.TrimSpace(searchLink)
 	if startURL == "" {
 		startURL = searchLink
 	}
@@ -73,7 +57,6 @@ func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
 		allowedDomains = append(allowedDomains, host)
 	}
 
-	maxPages := s.MaxPages
 	if maxPages <= 0 {
 		maxPages = defaultMaxPages
 	}
@@ -256,5 +239,34 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 		return nil, errors.New("job details not found")
 	}
 
+	details.Location = job.Location
+	details.PostedAt = job.PostedAt
+
 	return details, nil
+}
+
+func extractLinkedInJobID(detailsURL string) string {
+	detailsURL = strings.TrimSpace(detailsURL)
+	if detailsURL == "" {
+		return ""
+	}
+
+	if matches := linkedInJobIDPattern.FindStringSubmatch(detailsURL); len(matches) == 2 {
+		return matches[1]
+	}
+
+	u, parseErr := url.Parse(detailsURL)
+	if parseErr != nil {
+		return ""
+	}
+
+	for _, key := range []string{"currentJobId", "jobId"} {
+		if id := strings.TrimSpace(u.Query().Get(key)); id != "" {
+			if linkedInNumericIDPattern.MatchString(id) {
+				return id
+			}
+		}
+	}
+
+	return ""
 }

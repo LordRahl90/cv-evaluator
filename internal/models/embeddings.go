@@ -1,13 +1,16 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"github.com/pgvector/pgvector-go"
+	"gorm.io/gorm"
+)
 
 type SectionEmbedding struct {
-	ID             int `gorm:"primaryKey"`
+	UserID         int `gorm:"index"`
 	CVID           int `gorm:"index"`
 	SectionHeading string
-	Section        string `gorm:"type:text"`
-	Embedding      []float64
+	Section        string          `gorm:"type:text"`
+	Embedding      pgvector.Vector `gorm:"type:vector(768)"`
 
 	gorm.Model
 }

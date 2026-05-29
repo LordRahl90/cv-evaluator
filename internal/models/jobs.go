@@ -1,6 +1,9 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"github.com/pgvector/pgvector-go"
+	"gorm.io/gorm"
+)
 
 const (
 	StatusPending   = "pending"
@@ -9,7 +12,7 @@ const (
 )
 
 type Job struct {
-	ID         int `gorm:"primaryKey"`
+	UserID     uint
 	JobID      string
 	Provider   string
 	Title      string
@@ -19,6 +22,10 @@ type Job struct {
 	DetailsURL string
 	Visited    bool
 	Status     string
+	Detail     string          `gorm:"type:text"`
+	Embedding  pgvector.Vector `gorm:"type:vector(768)"`
 
 	gorm.Model
+
+	User *User `gorm:"foreignKey:UserID;references:ID"`
 }

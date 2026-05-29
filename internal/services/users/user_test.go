@@ -1,4 +1,4 @@
-package user
+package users
 
 import (
 	"cv-solution/internal/testutil/postgres"
@@ -10,11 +10,6 @@ import (
 	"cv-solution/internal/llm/ollama"
 
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-)
-
-var (
-	db *gorm.DB
 )
 
 func TestMain(m *testing.M) {
@@ -37,7 +32,7 @@ func TestService_processCV(t *testing.T) {
 		Timeout: 30 * time.Minute,
 	}, "http://localhost:11434")
 
-	svc := New(db, llmClient)
+	svc := New(db, llmClient, llmClient)
 	cv, err := os.Open("./testdata/alugbin-abiodun-resume.pdf")
 	require.NoError(t, err)
 	require.NotNil(t, cv)
@@ -45,6 +40,6 @@ func TestService_processCV(t *testing.T) {
 		require.NoError(t, cv.Close())
 	}()
 
-	err = svc.processCV(t.Context(), 123, cv)
+	err = svc.ProcessCV(t.Context(), 123, cv)
 	require.NoError(t, err)
 }

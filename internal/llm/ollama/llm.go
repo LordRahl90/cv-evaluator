@@ -52,7 +52,8 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 	return response.Response, nil
 }
 
-func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float64, error) {
+func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float32, error) {
+	slog.DebugContext(ctx, "Creating embedding with Ollama", "content", content)
 	req := Request{
 		Model:  "nomic-embed-text",
 		Prompt: content,
@@ -64,7 +65,7 @@ func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float6
 	}
 
 	response := struct {
-		Embedding []float64 `json:"embedding"`
+		Embedding []float32 `json:"embedding"`
 	}{}
 
 	if err := json.NewDecoder(bytes.NewBuffer(res)).Decode(&response); err != nil {
