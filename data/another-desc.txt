@@ -1,55 +1,57 @@
-About the job
-Role:- Senior Java Developer
-
-Type:-Contract
-
-Location:- Amsterdam, Netherlands
-
-We are looking for a Senior Backend Developer with strong experience in Java, Spring Boot, microservices architectures to design, build, and scale backend systems in a cloud-native environment. The role requires a hands-on engineer who can deliver high-quality services, collaborate across teams, and contribute to architectural and design decisions.
+Senior Software Engineer – Building infrastructure
 
 
 
-Roles & Responsibilities
-
-• Design, develop, and maintain scalable backend services using Java and Spring Boot
-
-• Build and support microservices-based architectures with high availability and performance
-
-• Develop and consume RESTful APIs and event-driven services
-
-• Collaborate with frontend, DevOps, and product teams to deliver end-to-end solutions
-
-• Participate in design discussions, code reviews, and technical decision-making
-
-• Ensure code quality through unit testing, integration testing, and best practices
-
-• Troubleshoot and resolve production issues and performance bottlenecks
-
-• Contribute to continuous improvement of engineering standards and processes
-
-Technical Skills
-
-• 8+ years of hands-on backend development experience
-
-• Strong proficiency in Java (8+) and Spring Boot
-
-• Solid experience designing and implementing microservices architectures
-
-• Experience with REST APIs, messaging, and asynchronous processing
-
-• Hands-on experience with cloud platforms (AWS / Azure / GCP)
-
-• Good experience in SQL and NoSQL databases
-
-• Familiarity with CI/CD pipelines, Git, and build tools
-
-• Experience with Docker and containerized deployment
+Are you a fundamentally strong software engineer who loves solving hard problems from first principles? Do you believe great engineering is language-agnostic—and that the right engineer can learn anything?
 
 
-Requirements added by the job poster
 
-• 6+ years of work experience with Docker
+A high-performing quant research team is looking for a Senior Software Engineer to build the systems and tooling that power their research environment. This is not an MLOps role. It’s not a narrow data engineering role. It’s a pure engineering challenge at the intersection of software, data infrastructure, and quantitative research.
 
-• 6+ years of Travel Arrangements experience
 
-• 6+ years of work experience with REST APIs
+
+What You’ll Do:
+
+🔧 Build for Quants – Design and develop robust tools that allow researchers seamless access to large, complex datasets.
+
+🏗 Engineer the Foundations – Create scalable infrastructure and internal platforms that make experimentation fast, reliable, and reproducible.
+
+⚡ Solve Hard Problems – Optimize performance, manage data flows, and remove bottlenecks in a high-intensity research environment.
+
+🔍 Think in Systems – Work across the stack to improve developer experience, reliability, and architectural clarity.
+
+🧠 Learn the Domain – Partner closely with quantitative researchers, understanding their workflows and translating needs into elegant engineering solutions.
+
+
+
+The Team:
+
+You’ll join a lean, intellectually rigorous quant environment where engineering quality truly matters. There’s no unnecessary process or hierarchy—just strong technical people solving complex problems together.
+
+They believe great engineers can solve almost anything. That belief shapes how they hire and how they work.
+
+
+
+What They’re Looking For:
+
+-4+ years of strong software development experience
+
+-Experience building production systems—not just prototypes
+
+-Language flexibility – they primarily use Python and C#, but you can come from any modern language background
+
+-Curiosity, ownership, and the desire to tackle ambiguous, complex challenges
+
+-No prior quant, data engineering, or MLOps experience required.
+
+
+
+What They Offer:
+
+Highly competitive compensation with strong bonus potential
+
+Pension, healthcare, and comprehensive benefits
+
+A chance to apply pure engineering skill in a high-impact, intellectually demanding environment
+
+💰 Total comp: €120K – €160K equivalent
