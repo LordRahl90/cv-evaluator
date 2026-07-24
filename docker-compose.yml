@@ -1,10 +1,10 @@
 services:
   database:
     image: pgvector/pgvector:pg16
-    container_name: cv_solution_postgres
+    container_name: cv_evaluator_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: cv_solution
+      POSTGRES_DB: cv_evaluator
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:

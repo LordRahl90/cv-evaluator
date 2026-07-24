@@ -2,12 +2,13 @@ package postgres
 
 import (
 	"context"
-	"cv-solution/internal/migrator"
 	"database/sql"
 	"fmt"
 	"net/url"
 	"testing"
 	"time"
+
+	"cv-evaluator/internal/migrator"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"

@@ -8,9 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"cv-solution/internal/entities"
-	"cv-solution/internal/models"
+	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/models"
 
+	"github.com/oklog/ulid/v2"
 	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 )
@@ -47,7 +48,7 @@ func New(db *gorm.DB, embeddingLLM EmbeddingLLMService, jobMatchLLM JobMatchLLMS
 	}
 }
 
-func (s *Service) MatchByJobID(ctx context.Context, userID int, jobID string) (*Response, error) {
+func (s *Service) MatchByJobID(ctx context.Context, userID ulid.ULID, jobID string) (*Response, error) {
 	slog.DebugContext(ctx, "matching user CV with job description", "user_id", userID, "job_id", jobID)
 
 	var job *models.Job
@@ -57,10 +58,10 @@ func (s *Service) MatchByJobID(ctx context.Context, userID int, jobID string) (*
 		return nil, fmt.Errorf("failed to retrieve job: %w", err)
 	}
 
-	return s.Match(ctx, userID, job.Detail)
+	return s.MatchByJobDescription(ctx, userID, job.Detail)
 }
 
-func (s *Service) Match(ctx context.Context, userID int, jobDescription string) (*Response, error) {
+func (s *Service) MatchByJobDescription(ctx context.Context, userID ulid.ULID, jobDescription string) (*Response, error) {
 	slog.DebugContext(ctx, "matching user CV with job description", "user_id", userID)
 
 	jobDescriptionEmbeddings, err := s.embeddingLLM.CreateEmbedding(ctx, jobDescription)

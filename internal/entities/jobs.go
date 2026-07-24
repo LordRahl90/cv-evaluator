@@ -1,6 +1,6 @@
 package entities
 
-import "cv-solution/internal/models"
+import "cv-evaluator/internal/models"
 
 type JobPost struct {
 	ID         string

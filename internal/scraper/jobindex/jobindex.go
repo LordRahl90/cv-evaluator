@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"cv-solution/internal/entities"
+	"cv-evaluator/internal/entities"
 
 	"github.com/gocolly/colly"
 )

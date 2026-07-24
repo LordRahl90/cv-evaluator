@@ -2,20 +2,19 @@ package main
 
 import (
 	"context"
+	"cv-evaluator/db"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"cv-solution/internal/llm/ollama"
-	"cv-solution/internal/migrator"
-	"cv-solution/internal/scraper/linkedin"
-	"cv-solution/internal/services/jobs"
+	"cv-evaluator/internal/llm/ollama"
+	"cv-evaluator/internal/scraper/linkedin"
+	"cv-evaluator/internal/services/jobs"
 
 	"github.com/joho/godotenv"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/oklog/ulid/v2"
 )
 
 func main() {
@@ -23,11 +22,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	userID := 1
+	userID, err := ulid.ParseStrict("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	if err != nil {
+		log.Fatal(err)
+	}
 	//searchLink := "http://127.0.0.1:5500/linkedin/linkedin.html?position=1&pageNum=0"
 	searchLink := "https://www.linkedin.com/jobs/search?keywords=Senior%20Software%20Engineer&location=Copenhagen&geoId=&trk=public_jobs_jobs-search-bar_search-submit&position=1&pageNum=0"
 
-	db, err := setupDatabase()
+	dbase, err := db.SetupDatabase()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -38,7 +40,7 @@ func main() {
 	}
 	embeddingLLMService := ollama.New(client, os.Getenv("OLLAMA_BASE_URL"))
 
-	jobService := jobs.New(db, embeddingLLMService)
+	jobService := jobs.New(dbase, embeddingLLMService)
 
 	linkedinService := linkedin.New()
 	jobListings, err := linkedinService.SearchJobs(ctx, searchLink, 1)
@@ -53,7 +55,7 @@ func main() {
 			log.Fatal(err)
 		}
 		if exists != nil {
-			fmt.Printf("job already processed for user %d: %s\n", userID, job.ID)
+			fmt.Printf("job already processed for user %s: %s\n", userID.String(), job.ID)
 			continue
 		}
 
@@ -71,25 +73,4 @@ func main() {
 
 		time.Sleep(1 * time.Second)
 	}
-}
-
-func setupDatabase() (*gorm.DB, error) {
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbParams := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	db, err := gorm.Open(postgres.Open(dbParams), &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := migrator.Migrate(db); err != nil {
-		return nil, err
-	}
-
-	return db, nil
 }

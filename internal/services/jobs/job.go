@@ -2,11 +2,13 @@ package jobs
 
 import (
 	"context"
-	"cv-solution/internal/entities"
-	"cv-solution/internal/models"
 	"errors"
 	"log/slog"
 
+	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/models"
+
+	"github.com/oklog/ulid/v2"
 	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 )
@@ -27,7 +29,7 @@ func New(db *gorm.DB, embeddingLLMService EmbeddingLLMService) *Service {
 	}
 }
 
-func (s *Service) ProcessJob(ctx context.Context, userID int, job *entities.JobPost) error {
+func (s *Service) ProcessJob(ctx context.Context, userID ulid.ULID, job *entities.JobPost) error {
 	// let's check if we've processed this job before
 	exists, err := s.IsJobProcessed(ctx, userID, job.ID)
 	if err != nil {
@@ -40,7 +42,7 @@ func (s *Service) ProcessJob(ctx context.Context, userID int, job *entities.JobP
 
 	// we need to store jobs per user.
 	jobModel := job.ToModel()
-	jobModel.UserID = uint(userID)
+	jobModel.UserID = userID
 
 	descEmbedding, err := s.embeddingService.CreateEmbedding(ctx, job.Details.Details)
 	if err != nil {
@@ -51,7 +53,7 @@ func (s *Service) ProcessJob(ctx context.Context, userID int, job *entities.JobP
 	return s.db.WithContext(ctx).Create(&jobModel).Error
 }
 
-func (s *Service) IsJobProcessed(ctx context.Context, userID int, jobID string) (*models.Job, error) {
+func (s *Service) IsJobProcessed(ctx context.Context, userID ulid.ULID, jobID string) (*models.Job, error) {
 	var exists *models.Job
 
 	err := s.db.WithContext(ctx).

@@ -3,8 +3,9 @@ package jobs
 import (
 	"context"
 
-	"cv-solution/internal/models"
+	"cv-evaluator/internal/models"
 
+	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 )
 
@@ -20,7 +21,7 @@ func (s *Service) SaveJob(ctx context.Context, job *models.Job) error {
 	return s.db.WithContext(ctx).Create(job).Error
 }
 
-func (s *Service) FindByID(ctx context.Context, id int) (*models.Job, error) {
+func (s *Service) FindByID(ctx context.Context, id ulid.ULID) (*models.Job, error) {
 	var job models.Job
 	if err := s.db.WithContext(ctx).
 		Where("id = ?", id).First(&job).Error; err != nil {

@@ -2,7 +2,7 @@ package cleanup
 
 import (
 	"context"
-	"cv-solution/internal/integrations/extractor"
+	"cv-evaluator/internal/integrations/extractor"
 )
 
 type LLMClient interface {

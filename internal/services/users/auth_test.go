@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"cv-solution/internal/models"
-	"cv-solution/internal/testutil/postgres"
+	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/testutil/postgres"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"

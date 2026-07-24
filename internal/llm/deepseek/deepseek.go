@@ -3,22 +3,25 @@ package deepseek
 import (
 	"bytes"
 	"context"
-	"cv-solution/internal/entities"
 	"fmt"
 	"html/template"
 	"log/slog"
 
-	"cv-solution/internal/llm/prompts"
+	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/llm/prompts"
 
 	"github.com/cohesion-org/deepseek-go"
 )
 
-type Service struct {
-	client *deepseek.Client
+type Client interface {
+	CreateChatCompletion(ctx context.Context, req *deepseek.ChatCompletionRequest) (*deepseek.ChatCompletionResponse, error)
 }
 
-func New(key string) *Service {
-	client := deepseek.NewClient(key)
+type Service struct {
+	client Client
+}
+
+func New(client Client) *Service {
 	return &Service{
 		client: client,
 	}

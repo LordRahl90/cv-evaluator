@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"cv-solution/internal/llm/prompts"
+	"cv-evaluator/internal/llm/prompts"
 )
 
 type Service struct {

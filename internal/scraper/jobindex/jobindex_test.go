@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"cv-solution/internal/entities"
+	"cv-evaluator/internal/entities"
 
 	"github.com/stretchr/testify/require"
 )

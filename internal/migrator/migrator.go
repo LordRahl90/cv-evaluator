@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"cv-solution/internal/models"
+	"cv-evaluator/internal/models"
 
 	"gorm.io/gorm"
 )

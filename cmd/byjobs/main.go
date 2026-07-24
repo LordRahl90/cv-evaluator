@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"cv-solution/internal/services/matcher"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,44 +10,52 @@ import (
 	"os"
 	"time"
 
-	"cv-solution/internal/llm/deepseek"
-	"cv-solution/internal/llm/ollama"
+	"cv-evaluator/db"
+	"cv-evaluator/internal/llm/deepseek"
+	"cv-evaluator/internal/llm/ollama"
+	"cv-evaluator/internal/services/matcher"
 
+	deepseekLib "github.com/cohesion-org/deepseek-go"
 	"github.com/joho/godotenv"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/oklog/ulid/v2"
 )
 
 var (
-	userID int
+	userID string
 	jobID  string
 )
 
 func main() {
-	flag.IntVar(&userID, "user-id", 1, "User ID")
+	flag.StringVar(&userID, "user-id", "", "User ULID")
 	flag.StringVar(&jobID, "job-id", "", "Job ID")
 	flag.Parse()
+
+	parsedUserID, err := ulid.ParseStrict(userID)
+	if err != nil {
+		log.Fatalf("invalid --user-id ULID: %v", err)
+	}
 
 	if err := godotenv.Load(); err != nil {
 		log.Fatal(err)
 	}
 
-	db, err := setupDatabase()
+	dbase, err := db.SetupDatabase()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// llm service
 	deepseekKey := os.Getenv("DEEPSEEK_API_KEY")
-	chatLLM := deepseek.New(deepseekKey)
+	deepseekClient := deepseekLib.NewClient(deepseekKey)
+	chatLLM := deepseek.New(deepseekClient)
 	client := &http.Client{
 		Timeout: 30 * time.Minute,
 	}
 	embeddingLLMService := ollama.New(client, os.Getenv("OLLAMA_BASE_URL"))
 
-	matchService := matcher.New(db, embeddingLLMService, chatLLM)
+	matchService := matcher.New(dbase, embeddingLLMService, chatLLM)
 
-	res, err := matchService.MatchByJobID(context.Background(), userID, jobID)
+	res, err := matchService.MatchByJobID(context.Background(), parsedUserID, jobID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -59,25 +66,4 @@ func main() {
 	}
 
 	fmt.Printf("\n\n%s\n\n", b)
-}
-
-func setupDatabase() (*gorm.DB, error) {
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbParams := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	db, err := gorm.Open(postgres.Open(dbParams), &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	//if err := migrator.Migrate(db); err != nil {
-	//	return nil, err
-	//}
-
-	return db, nil
 }
