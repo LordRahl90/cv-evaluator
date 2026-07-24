@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"cv-solution/internal/entities"
+	"cv-evaluator/internal/entities"
 
 	"github.com/gocolly/colly"
 )
@@ -17,7 +17,6 @@ const (
 	baseDomain = "www.linkedin.com"
 	provider   = "linkedin"
 
-	searchLink      = "https://www.linkedin.com/jobs/search/?currentJobId=4419983256&distance=25&f_E=4&f_JT=F&f_TPR=r604800&f_WT=1%2C3&keywords=Senior%20Software%20Engineer&location=Denmark&origin=JOB_SEARCH_PAGE_JOB_FILTER&sortBy=DD"
 	defaultMaxPages = 3
 )
 

@@ -1,14 +1,17 @@
 package cleanup
 
 import (
-	"cv-solution/internal/llm/deepseek"
-	"cv-solution/internal/llm/ollama"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"cv-evaluator/internal/llm/deepseek"
+	"cv-evaluator/internal/llm/ollama"
+
+	deepseekLib "github.com/cohesion-org/deepseek-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,9 +25,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestService_CleanupCV(t *testing.T) {
+	baseURL := strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL"))
+	if baseURL == "" {
+		t.Skip("OLLAMA_BASE_URL not set; skipping Ollama integration test")
+	}
+
 	llmClient := ollama.New(&http.Client{
 		Timeout: 30 * time.Minute,
-	}, "http://localhost:11434/api/generate")
+	}, strings.TrimRight(baseURL, "/"))
 
 	svc := New(llmClient)
 
@@ -36,8 +44,12 @@ func TestService_CleanupCV(t *testing.T) {
 }
 
 func TestService_CleanupDeepSeek(t *testing.T) {
-	key := "sk-3f601982cfe149538e5493c50f87a06b"
-	llmClient := deepseek.New(key)
+	key := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
+	if key == "" {
+		t.Skip("DEEPSEEK_API_KEY not set; skipping DeepSeek integration test")
+	}
+
+	llmClient := deepseek.New(deepseekLib.NewClient(key))
 	svc := New(llmClient)
 
 	res, err := svc.CleanupCV(t.Context(), "./testdata/alugbin-abiodun-resume.pdf")

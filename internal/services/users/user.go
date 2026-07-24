@@ -2,28 +2,29 @@ package users
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"mime/multipart"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	"cv-solution/internal/integrations/extractor"
-	"cv-solution/internal/models"
+	"cv-evaluator/internal/integrations/extractor"
+	"cv-evaluator/internal/models"
 
 	jwt "github.com/golang-jwt/jwt/v5"
+	"github.com/oklog/ulid/v2"
 	"github.com/pgvector/pgvector-go"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 const (
-	defaultJWTSecret = "change-me-in-production"
-	defaultTokenTTL  = 24 * time.Hour
+	defaultTokenTTL = 24 * time.Hour
 )
 
 var (
@@ -50,12 +51,13 @@ type Service struct {
 }
 
 func New(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMService) *Service {
-	return NewWithAuth(db, llm, embeddingLLM, defaultJWTSecret, defaultTokenTTL)
+	return NewWithAuth(db, llm, embeddingLLM, os.Getenv("JWT_SECRET"), defaultTokenTTL)
 }
 
 func NewWithAuth(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMService, jwtSecret string, tokenTTL time.Duration) *Service {
 	if strings.TrimSpace(jwtSecret) == "" {
-		jwtSecret = defaultJWTSecret
+		jwtSecret = mustGenerateJWTSecret()
+		slog.Warn("JWT secret not configured; using an ephemeral in-memory secret", "env", "JWT_SECRET")
 	}
 	if tokenTTL <= 0 {
 		tokenTTL = defaultTokenTTL
@@ -155,7 +157,7 @@ func (s *Service) UploadCV(ctx context.Context, cv *multipart.FileHeader) error 
 	return nil
 }
 
-func (s *Service) ProcessCV(ctx context.Context, userID int, cv *os.File) error {
+func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) error {
 	cvContent, err := extractor.ExtractFromFile(cv)
 	if err != nil {
 		return err
@@ -209,7 +211,8 @@ func (s *Service) ProcessCV(ctx context.Context, userID int, cv *os.File) error 
 
 		// we store the embeddings in the database
 		sectionEmbeddings = append(sectionEmbeddings, models.SectionEmbedding{
-			CVID:           int(cvModel.ID),
+			UserID:         userID,
+			CVID:           cvModel.ID,
 			SectionHeading: heading,
 			Section:        string(b),
 			Embedding:      pgvector.NewVector(sectionEmbedding),
@@ -267,10 +270,10 @@ func (s *Service) createUser(ctx context.Context, req SignupRequest) (*models.Us
 	return newUser, nil
 }
 
-func (s *Service) generateToken(userID uint) (string, error) {
+func (s *Service) generateToken(userID ulid.ULID) (string, error) {
 	now := time.Now()
 	claims := jwt.RegisteredClaims{
-		Subject:   strconv.FormatUint(uint64(userID), 10),
+		Subject:   userID.String(),
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenTTL)),
@@ -280,28 +283,28 @@ func (s *Service) generateToken(userID uint) (string, error) {
 	return token.SignedString(s.jwtSecret)
 }
 
-func (s *Service) parseTokenUserID(rawToken string) (uint, error) {
+func (s *Service) parseTokenUserID(rawToken string) (ulid.ULID, error) {
 	if strings.TrimSpace(rawToken) == "" {
-		return 0, ErrInvalidToken
+		return ulid.ULID{}, ErrInvalidToken
 	}
 
 	claims := &jwt.RegisteredClaims{}
 	token, err := jwt.ParseWithClaims(rawToken, claims, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method != jwt.SigningMethodHS256 {
 			return nil, ErrInvalidToken
 		}
 		return s.jwtSecret, nil
 	})
 	if err != nil || !token.Valid {
-		return 0, ErrInvalidToken
+		return ulid.ULID{}, ErrInvalidToken
 	}
 
-	userID, err := strconv.ParseUint(claims.Subject, 10, 64)
-	if err != nil || userID == 0 {
-		return 0, ErrInvalidToken
+	userID, err := ulid.ParseStrict(claims.Subject)
+	if err != nil || userID == (ulid.ULID{}) {
+		return ulid.ULID{}, ErrInvalidToken
 	}
 
-	return uint(userID), nil
+	return userID, nil
 }
 
 func (s *Service) profileFromModel(user *models.User) Profile {
@@ -312,4 +315,13 @@ func (s *Service) profileFromModel(user *models.User) Profile {
 		Email:     user.Email,
 		Phone:     user.Phone,
 	}
+}
+
+func mustGenerateJWTSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Errorf("generate JWT secret: %w", err))
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b)
 }

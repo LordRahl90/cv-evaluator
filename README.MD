@@ -46,16 +46,18 @@ cp .env.example .env
 Current `.env.example` keys:
 
 ```dotenv
-DEEPSEEK_API_KEY={{Deepseek API key}}
+DEEPSEEK_API_KEY=your-deepseek-api-key
 OLLAMA_BASE_URL=http://localhost:11434
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=cv_solution
+DB_NAME=cv_evaluator
 DB_USER=postgres
 DB_PASSWORD=postgres
+JWT_SECRET=change-me-with-a-long-random-value
 ```
 
 > Note: the CLI entrypoints call `godotenv.Load()` and fail if `.env` is missing.
+> Use a unique local/dev password and a long random `JWT_SECRET`; never commit real secrets.
 
 ## Quick start
 
@@ -104,7 +106,7 @@ Equivalent Make target:
 make by-job jobId=<linkedin_job_id> userId=1
 ```
 
-Run local matching against text in `data/another-desc.txt`:
+Run local matching against text in `data/senior-software-engineer.txt`:
 
 ```bash
 go run ./cmd/local
@@ -125,7 +127,7 @@ make clean
 
 - `cmd/loader` runs migrations automatically.
 - `cmd/byjobs` and `cmd/local` assume required DB data already exists (for example `userID=1` and a processed CV).
-- `cmd/local` reads `data/another-desc.txt` by default.
+- `cmd/local` reads `data/senior-software-engineer.txt` by default.
 - `make start` runs `go run ./cmd/api/`, which currently prints a placeholder message.
 
 ## Limitations
