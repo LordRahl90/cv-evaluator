@@ -52,10 +52,8 @@ func defaultConfig() Config {
 
 func Run(ctx context.Context, opts ...Option) (*Container, error) {
 	cfg := defaultConfig()
-	if opts != nil {
-		for _, opt := range opts {
-			opt(&cfg)
-		}
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
 	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -70,7 +68,7 @@ func Run(ctx context.Context, opts ...Option) (*Container, error) {
 			WaitingFor: wait.ForAll(
 				wait.ForListeningPort("5432/tcp"),
 				wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
-			).WithStartupTimeout(2 * time.Minute),
+			).WithDeadline(2 * time.Minute),
 		},
 		Started: true,
 	})
