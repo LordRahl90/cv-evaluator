@@ -147,7 +147,7 @@ func (s *Service) buildCVContext(ctx context.Context, input []MatchResult) strin
 		if i >= 5 {
 			break
 		}
-		b.WriteString(fmt.Sprintf("- %s\n", m.Content))
+		_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
 	}
 	// EXPERIENCE (top 5)
 	b.WriteString("\n[EXPERIENCE - MOST RELEVANT]\n")
@@ -155,7 +155,7 @@ func (s *Service) buildCVContext(ctx context.Context, input []MatchResult) strin
 		if i >= 5 {
 			break
 		}
-		b.WriteString(fmt.Sprintf("- %s\n", m.Content))
+		_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
 	}
 	// SUMMARY (top 2)
 	b.WriteString("\n[SUMMARY]\n")
@@ -163,7 +163,8 @@ func (s *Service) buildCVContext(ctx context.Context, input []MatchResult) strin
 		if i >= 2 {
 			break
 		}
-		b.WriteString(fmt.Sprintf("- %s\n", m.Content))
+		//_, _ = b.WriteString(fmt.Sprintf("- %s\n", m.Content))
+		_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
 	}
 	// OPTIONAL: OTHER CONTEXT (small cap)
 	if len(grouped.Other) > 0 {
@@ -172,7 +173,7 @@ func (s *Service) buildCVContext(ctx context.Context, input []MatchResult) strin
 			if i >= 3 {
 				break
 			}
-			b.WriteString(fmt.Sprintf("- %s\n", m.Content))
+			_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
 		}
 	}
 	return b.String()

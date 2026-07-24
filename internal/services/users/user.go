@@ -32,6 +32,7 @@ var (
 	ErrEmailAlreadyUsed   = errors.New("email already used")
 	ErrPhoneAlreadyUsed   = errors.New("phone already used")
 	ErrInvalidToken       = errors.New("invalid token")
+	ErrCVNotFound         = errors.New("cv not found")
 )
 
 type EmbeddingLLMService interface {
@@ -72,14 +73,8 @@ func NewWithAuth(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMServi
 	}
 }
 
-func (s *Service) Create(ctx context.Context, req CreateUserRequest) (*User, error) {
-	newUser, err := s.createUser(ctx, SignupRequest{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Password:  req.Password,
-	})
+func (s *Service) Create(ctx context.Context, req SignupRequest) (*User, error) {
+	newUser, err := s.createUser(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +149,44 @@ func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, er
 }
 
 func (s *Service) UploadCV(ctx context.Context, cv *multipart.FileHeader) error {
+	return nil
+}
+
+func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.CV, error) {
+	var cvs []models.CV
+	if err := s.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&cvs).Error; err != nil {
+		return nil, err
+	}
+	return cvs, nil
+}
+
+func (s *Service) GetCV(ctx context.Context, userID, cvID ulid.ULID) (*models.CV, error) {
+	var cv models.CV
+	err := s.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", cvID, userID).
+		First(&cv).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrCVNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cv, nil
+}
+
+func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
+	result := s.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", cvID, userID).
+		Delete(&models.CV{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrCVNotFound
+	}
 	return nil
 }
 
