@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime/multipart"
 	"os"
@@ -148,8 +149,37 @@ func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, er
 	return &profile, nil
 }
 
-func (s *Service) UploadCV(ctx context.Context, cv *multipart.FileHeader) error {
-	return nil
+func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) error {
+	if cv == nil {
+		return errors.New("cv file is required")
+	}
+
+	src, err := cv.Open()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = src.Close()
+	}()
+
+	tmp, err := os.CreateTemp("", "cv-upload-*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
+
+	if _, err := io.Copy(tmp, src); err != nil {
+		return err
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	return s.ProcessCV(ctx, userID, tmp)
 }
 
 func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.CV, error) {

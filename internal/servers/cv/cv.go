@@ -3,9 +3,8 @@ package cv
 import (
 	"context"
 	"errors"
-	"io"
+	"mime/multipart"
 	"net/http"
-	"os"
 	"time"
 
 	"cv-evaluator/internal/models"
@@ -18,7 +17,7 @@ import (
 
 // Service is the domain interface the handler depends on.
 type Service interface {
-	ProcessCV(ctx context.Context, userID ulid.ULID, file *os.File) error
+	UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) error
 	ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.CV, error)
 	GetCV(ctx context.Context, userID, cvID ulid.ULID) (*models.CV, error)
 	DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error
@@ -69,33 +68,7 @@ func (h *Handler) uploadCV(c *gin.Context) {
 		return
 	}
 
-	src, err := fileHeader.Open()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, errorResponse("failed to read uploaded file"))
-		return
-	}
-	defer func() { _ = src.Close() }()
-
-	tmp, err := os.CreateTemp("", "cv-upload-*")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, errorResponse("failed to process upload"))
-		return
-	}
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-	}()
-
-	if _, err := io.Copy(tmp, src); err != nil {
-		c.JSON(http.StatusInternalServerError, errorResponse("failed to process upload"))
-		return
-	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		c.JSON(http.StatusInternalServerError, errorResponse("failed to process upload"))
-		return
-	}
-
-	if err := h.svc.ProcessCV(c.Request.Context(), userID, tmp); err != nil {
+	if err := h.svc.UploadCV(c.Request.Context(), userID, fileHeader); err != nil {
 		handleServiceError(c, err)
 		return
 	}
