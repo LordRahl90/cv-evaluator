@@ -1,49 +1,49 @@
-# CV Solution
+# CV Evaluator
 
-CV Solution is a Go project for CV-to-job matching. It stores vector embeddings in PostgreSQL (`pgvector`), retrieves the most relevant CV context for a job, and returns an LLM-generated match result.
+CV Evaluator is a Go project for CV-to-job matching. It stores CV and job embeddings in PostgreSQL (`pgvector`), retrieves relevant CV context by vector similarity, and uses an LLM to produce a structured match result.
 
 ## Current status
 
-- CLI flows are the primary working interface: `cmd/loader`, `cmd/byjobs`, and `cmd/local`.
-- `cmd/api` exists but is currently a stub entrypoint.
-- Scraper support is currently focused on LinkedIn in the main loader flow.
+- CLI-first workflows are currently the main way to use the project.
+- `cmd/api` exists, but it is still a placeholder entrypoint.
+- Core matching logic lives in service packages and is covered by tests.
 
 ## What it does
 
-- Parses and stores CV content as embeddings (full CV + section-level vectors).
-- Scrapes jobs, fetches details, and stores job embeddings.
-- Uses vector similarity in Postgres (`pgvector`) to find best CV sections for a job.
-- Uses DeepSeek to generate structured match output from retrieved context.
+- Processes CV content into full and section-level embeddings.
+- Scrapes and stores job listings/details with embeddings.
+- Computes match relevance with vector similarity and weighted scoring.
+- Generates final match output using DeepSeek.
 
-## Architecture at a glance
+## Architecture
 
-- `internal/services/users`: user auth/profile and CV processing pipeline.
-- `internal/services/jobs`: job ingestion, dedupe checks, and embedding persistence.
-- `internal/services/matcher`: retrieval, weighted scoring, and LLM match generation.
-- `internal/scraper/linkedin`: listing + details scraping.
-- `internal/llm/ollama`: embedding/cleanup model integration.
-- `internal/llm/deepseek`: final job-match generation.
-- `internal/migrator`: schema migration + `vector` extension setup.
+- `internal/services/users`: user creation/auth and CV processing.
+- `internal/services/jobs`: job ingest, dedupe checks, embedding generation.
+- `internal/services/matcher`: retrieval, scoring, and LLM response composition.
+- `internal/scraper/linkedin`: LinkedIn search/detail scraping.
+- `internal/llm/ollama`: embedding and cleanup model integration.
+- `internal/llm/deepseek`: final job-match completion.
+- `internal/migrator`: `vector` extension and model migrations.
 
 ## Prerequisites
 
 - Go `1.25+`
-- Docker (for local Postgres/pgvector)
-- Ollama running locally (or reachable via `OLLAMA_BASE_URL`)
+- Docker
+- Ollama (reachable via `OLLAMA_BASE_URL`)
 - DeepSeek API key
-- Optional:
-  - `golangci-lint` for `make lint`
-  - `sift` for `make fancy-test`
+- Optional tools:
+  - `golangci-lint` (for `make lint`)
+  - `sift` (for `make fancy-test`)
 
 ## Configuration
 
-Copy the template and update values:
+Copy `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-Current `.env.example` keys:
+Current env keys:
 
 ```dotenv
 DEEPSEEK_API_KEY=your-deepseek-api-key
@@ -56,59 +56,66 @@ DB_PASSWORD=postgres
 JWT_SECRET=change-me-with-a-long-random-value
 ```
 
-> Note: the CLI entrypoints call `godotenv.Load()` and fail if `.env` is missing.
-> Use a unique local/dev password and a long random `JWT_SECRET`; never commit real secrets.
+Important notes:
 
-## Quick start
+- CLI entrypoints load `.env` with `godotenv.Load()` and fail if missing.
+- If `JWT_SECRET` is empty, the users service generates a random in-memory secret.
 
-1. Start local Postgres with pgvector:
+## Quick start (recommended flow)
+
+1. Start local Postgres/pgvector:
 
 ```bash
 docker compose up -d
 ```
 
-2. Ensure Ollama is running and required models are available.
+2. Pull required Ollama models:
 
 ```bash
 ollama pull nomic-embed-text
 ollama pull qwen3:8b
 ```
 
-3. Create and update `.env`:
+3. Create `.env` and fill real values:
 
 ```bash
 cp .env.example .env
 ```
 
-4. Run tests:
+4. Seed a user and process a CV (recommended first run):
 
 ```bash
-make test
+make seed-cv ARGS='-cv ./data/alugbin-abiodun-resume.pdf -email you@example.com -first-name Your -last-name Name -phone +1234567890 -password strongpassword'
 ```
 
-## Run commands
-
-Run job loader (scrape + persist jobs for `userID=1`):
+5. Load jobs:
 
 ```bash
 go run ./cmd/loader
 ```
 
-Match against an already stored job ID:
+6. Match against a stored job ID:
 
 ```bash
-go run ./cmd/byjobs -user-id=1 -job-id=<linkedin_job_id>
+go run ./cmd/byjobs -user-id=<USER_ULID> -job-id=<JOB_ID>
 ```
 
-Equivalent Make target:
+## Common commands
 
 ```bash
-make by-job jobId=<linkedin_job_id> userId=1
-```
+# API placeholder
+make start
 
-Run local matching against text in `data/senior-software-engineer.txt`:
+# Seed CV directly
+go run ./cmd/seed -cv ./data/alugbin-abiodun-resume.pdf -email you@example.com
 
-```bash
+# Load jobs
+go run ./cmd/loader
+
+# Match by stored job
+make by-job jobId=<JOB_ID> userId=<USER_ULID>
+
+# Match local text file (data/senior-software-engineer.txt)
 go run ./cmd/local
 ```
 
@@ -123,14 +130,13 @@ make lint
 make clean
 ```
 
-## Important behavior notes
+## API and server notes
 
-- `cmd/loader` runs migrations automatically.
-- `cmd/byjobs` and `cmd/local` assume required DB data already exists (for example `userID=1` and a processed CV).
-- `cmd/local` reads `data/senior-software-engineer.txt` by default.
-- `make start` runs `go run ./cmd/api/`, which currently prints a placeholder message.
+- `cmd/api` currently prints `Hello world!` and does not wire the Gin server yet.
+- Server handlers exist under `internal/servers/cv` and `internal/servers/match`.
+- Some handler endpoints are intentionally not implemented yet (for example CV update and match-by-link endpoint).
 
 ## Limitations
 
-- LinkedIn scraping depends on page structure and may break when markup changes.
-- HTTP server handlers under `internal/servers/*` are scaffold-level and not fully implemented.
+- LinkedIn scraping depends on page structure and may break over time.
+- Some CLI flows assume existing seeded user/CV data (for example hardcoded IDs in `loader`/`local`).
