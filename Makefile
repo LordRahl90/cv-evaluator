@@ -22,3 +22,6 @@ clean:
 
 by-job:
 	@go run ./cmd/byjobs -job-id=$(jobId) -user-id=$(userId)
+
+seed-cv:
+	@go run ./cmd/seed $(ARGS)

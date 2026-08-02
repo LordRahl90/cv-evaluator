@@ -20,7 +20,7 @@ import (
 func TestUploadCV_Success(t *testing.T) {
 	svc := new(MockCVService)
 	userID := ulid.Make()
-	svc.On("ProcessCV", mock.Anything, userID, mock.AnythingOfType("*os.File")).
+	svc.On("UploadCV", mock.Anything, userID, mock.AnythingOfType("*multipart.FileHeader")).
 		Return(nil).Once()
 
 	w := doMultipartUpload(newTestRouter(svc), authHeader(t, userID), "my cv content")
@@ -36,7 +36,7 @@ func TestUploadCV_NoFile(t *testing.T) {
 	w := doRequest(newTestRouter(svc), http.MethodPost, "/cv/", authHeader(t, userID), "")
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	svc.AssertNotCalled(t, "ProcessCV")
+	svc.AssertNotCalled(t, "UploadCV")
 }
 
 func TestUploadCV_Unauthorized(t *testing.T) {
@@ -45,13 +45,13 @@ func TestUploadCV_Unauthorized(t *testing.T) {
 	w := doMultipartUpload(newTestRouter(svc), "", "my cv content")
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
-	svc.AssertNotCalled(t, "ProcessCV")
+	svc.AssertNotCalled(t, "UploadCV")
 }
 
 func TestUploadCV_ServiceError(t *testing.T) {
 	svc := new(MockCVService)
 	userID := ulid.Make()
-	svc.On("ProcessCV", mock.Anything, userID, mock.AnythingOfType("*os.File")).
+	svc.On("UploadCV", mock.Anything, userID, mock.AnythingOfType("*multipart.FileHeader")).
 		Return(errors.New("extraction failed")).Once()
 
 	w := doMultipartUpload(newTestRouter(svc), authHeader(t, userID), "bad content")

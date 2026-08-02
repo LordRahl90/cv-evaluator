@@ -2,7 +2,7 @@ package cv
 
 import (
 	"context"
-	"os"
+	"mime/multipart"
 
 	"cv-evaluator/internal/models"
 
@@ -14,8 +14,8 @@ type MockCVService struct {
 	mock.Mock
 }
 
-func (m *MockCVService) ProcessCV(ctx context.Context, userID ulid.ULID, file *os.File) error {
-	args := m.Called(ctx, userID, file)
+func (m *MockCVService) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) error {
+	args := m.Called(ctx, userID, cv)
 	return args.Error(0)
 }
 
