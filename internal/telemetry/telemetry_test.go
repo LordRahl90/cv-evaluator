@@ -115,6 +115,46 @@ func TestStartRun_Error(t *testing.T) {
 	assert.Equal(t, "boom", spans[0].Status().Description)
 }
 
+// pipelineObserver mirrors internal/pipeline.RunObserver, so this test fails
+// to compile if RunObserver stops satisfying it.
+type pipelineObserver interface {
+	RunStarted(ctx context.Context, kind string) context.Context
+	RunFinished(ctx context.Context, kind string, d time.Duration, err error)
+}
+
+var _ pipelineObserver = RunObserver{}
+
+func TestRunObserver_RunStartedAndFinished(t *testing.T) {
+	p := telemetrytest.Install(t)
+
+	var obs pipelineObserver = RunObserver{}
+	ctx := obs.RunStarted(context.Background(), "run_search")
+	_, child := otel.Tracer("test").Start(ctx, "fetch")
+	child.End()
+	obs.RunFinished(ctx, "run_search", 1500*time.Millisecond, errors.New("provider down"))
+
+	points := p.Histogram(t, MetricBackgroundRunDuration)
+	require.Len(t, points, 1)
+	assert.InDelta(t, 1.5, points[0].Sum, 0.001)
+	assert.Equal(t, map[string]string{"run.kind": "run_search", "run.outcome": "error"}, telemetrytest.Attrs(points[0].Attributes))
+
+	spans := p.Spans()
+	require.Len(t, spans, 2)
+	run := spans[1]
+	assert.Equal(t, "background_run run_search", run.Name())
+	assert.Equal(t, codes.Error, run.Status().Code)
+	assert.Equal(t, run.SpanContext().SpanID(), spans[0].Parent().SpanID(), "work in the run must nest under the run span")
+}
+
+func TestRunObserver_RunFinishedWithoutStart(t *testing.T) {
+	p := telemetrytest.Install(t)
+
+	RunObserver{}.RunFinished(context.Background(), "schedule_tick", time.Second, nil)
+
+	require.Len(t, p.Histogram(t, MetricBackgroundRunDuration), 1)
+	require.Len(t, p.Spans(), 1)
+}
+
 func TestRunObserver_RecordsBackdatedRun(t *testing.T) {
 	p := telemetrytest.Install(t)
 
@@ -207,6 +247,72 @@ func TestNewTransport(t *testing.T) {
 	assert.Equal(t, "embedding", telemetrytest.KeyValues(spans[0].Attributes())["operation"])
 	assert.Equal(t, "ollama", telemetrytest.KeyValues(spans[0].Attributes())["peer.service"])
 }
+
+func TestNewJobBoardTransport(t *testing.T) {
+	p := telemetrytest.Install(t)
+
+	var gotHost string
+	rt := NewJobBoardTransport(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotHost = r.URL.Host
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: r}, nil
+	}))
+	client := &http.Client{Transport: rt}
+
+	for _, u := range []string{
+		"https://www.linkedin.com/jobs/search?keywords=go",
+		"https://www.linkedin.com/jobs/view/senior-engineer-1001",
+		"https://www.jobindex.dk/jobsoegning?q=go",
+		"https://www.jobindex.dk/jobannonce/2001",
+		"https://jobs.example.com/search",
+	} {
+		res, err := client.Get(u)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+	}
+	assert.Equal(t, "jobs.example.com", gotHost)
+
+	got := map[string]bool{}
+	for _, dp := range p.Histogram(t, MetricExternalRequestDuration) {
+		attrs := telemetrytest.Attrs(dp.Attributes)
+		got[attrs["peer.service"]+" "+attrs["operation"]] = true
+	}
+	assert.Equal(t, map[string]bool{
+		"linkedin search":  true,
+		"linkedin details": true,
+		"jobindex search":  true,
+		"jobindex details": true,
+		"job_board search": true,
+	}, got)
+
+	names := map[string]bool{}
+	for _, s := range p.Spans() {
+		names[s.Name()] = true
+	}
+	assert.True(t, names["linkedin details"])
+	assert.True(t, names["jobindex search"])
+}
+
+func TestNewTransport_ContextOperationWinsOverFunc(t *testing.T) {
+	p := telemetrytest.Install(t)
+
+	rt := NewTransport(PeerLinkedIn, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: r}, nil
+	}), WithOperationFunc(func(*http.Request) string { return OpSearch }))
+
+	req, err := http.NewRequestWithContext(WithOperation(context.Background(), OpDetails), http.MethodGet, "https://www.linkedin.com/x", nil)
+	require.NoError(t, err)
+	res, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	_ = res.Body.Close()
+
+	points := p.Histogram(t, MetricExternalRequestDuration)
+	require.Len(t, points, 1)
+	assert.Equal(t, "details", telemetrytest.Attrs(points[0].Attributes)["operation"])
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestNewHTTPClient_KeepsClientSettings(t *testing.T) {
 	orig := &http.Client{Timeout: time.Minute}
