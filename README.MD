@@ -258,7 +258,7 @@ Portals are implemented in `internal/providers` on top of the scrapers in `inter
 
 ## Observability
 
-`cmd/api` and `cmd/seed` set up OpenTelemetry at startup (`internal/telemetry`). Traces and metrics are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no-op providers are used, so local runs and tests need no collector.
+`cmd/api` and `cmd/seed` set up OpenTelemetry at startup (`internal/telemetry`). Traces and metrics are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no-op providers are used, so local runs and tests need nothing running.
 
 | Setting | Default | Notes |
 |---|---|---|
@@ -277,22 +277,15 @@ What is recorded:
 
 ### Viewing locally
 
+`docker compose up -d` starts `otel-lgtm`, a single Grafana container that receives traces and metrics. Point the app at it:
+
 ```bash
-docker compose --profile observability up -d   # collector, Jaeger, Prometheus
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 make start
 ```
 
-- Traces: Jaeger at <http://localhost:16686>, service `cv-evaluator`.
-- Metrics: Prometheus at <http://localhost:9090>. The collector exposes the histograms with Prometheus names, for example:
+Open Grafana at <http://localhost:3000>: traces are under Explore → Tempo (service `cv-evaluator`), and the histograms under Explore → Prometheus as `cv_evaluator_background_run_duration_seconds` and `cv_evaluator_external_request_duration_seconds`.
 
-  ```promql
-  # p95 background run latency by kind
-  histogram_quantile(0.95, sum by (le, run_kind) (rate(cv_evaluator_background_run_duration_seconds_bucket[5m])))
-  # p95 external request latency by service and operation
-  histogram_quantile(0.95, sum by (le, peer_service, operation) (rate(cv_evaluator_external_request_duration_seconds_bucket[5m])))
-  # external request error rate
-  sum by (peer_service) (rate(cv_evaluator_external_request_duration_seconds_count{outcome="error"}[5m]))
-  ```
+In a deployed environment, set `OTEL_EXPORTER_OTLP_ENDPOINT` (and `OTEL_EXPORTER_OTLP_HEADERS` for the API key) to your hosted OpenTelemetry provider instead; nothing else changes.
 
 Metrics are pushed every 60 seconds by default; set `OTEL_METRIC_EXPORT_INTERVAL=5000` (milliseconds) to see them sooner.
 
