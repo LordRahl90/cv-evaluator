@@ -11,7 +11,7 @@ CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF
 ## How it works
 
 1. **CV processing** (`users.Service.ProcessCV`): extracts text from the PDF, embeds the full CV, asks a chat LLM to split it into sections (`summary`, `experience`, `skills`, `education`, `title`), and stores an embedding per section.
-2. **Job ingest** (`jobs.Service.ProcessJob`): scrapes LinkedIn search results and job details, skips jobs already stored for the user, embeds the job description and stores it.
+2. **Job ingest** (`jobs.Service.ProcessJob`): scrapes LinkedIn search results and job details, stores each posting once globally (unique on provider and job ID), and embeds its description once.
 3. **Matching** (`matcher.Service`): embeds the job description, fetches the user's 10 closest CV sections by cosine distance, computes weighted section scores, builds a CV context and sends it to DeepSeek with the `jobmatch.tpl` prompt.
 
 Section weights used for scoring:
@@ -51,6 +51,7 @@ The LLM response is decoded into:
 ```
 cmd/
   api/        HTTP API server
+  worker/     background scheduler and task workers
   seed/       create (or reuse) a user and process a CV
   loader/     scrape LinkedIn jobs and store them with embeddings
   byjobs/     match a user's CV against a stored job
@@ -69,7 +70,9 @@ internal/
   scraper/linkedin/       LinkedIn search and job detail scraping
   scraper/jobindex/       Jobindex.dk scraper (not yet used by any command)
   services/users/         signup/signin/profile (JWT + bcrypt) and CV upload/list/get/delete/process
-  services/jobs/          job ingest and dedupe per user
+  services/jobs/          job ingest; each posting is stored and embedded once
+  queue/                  Postgres task queue (SKIP LOCKED, leases, retries)
+  pipeline/               background search, embed and evaluate handlers and scheduler
   services/matcher/       retrieval, scoring and LLM match composition
   services/cleanup/       extract-then-cleanup helper (not yet used by any command)
   storage/jobs/           job repository helpers
@@ -225,6 +228,33 @@ Match routes (`internal/servers/match`), also behind the Bearer JWT middleware:
 | POST   | `/match/job-link`         | Not implemented (501)                        |
 
 There are no HTTP routes yet for signup, signin or profile, although the users service implements them.
+
+## Background worker
+
+`cmd/worker` (`make worker`) runs saved job searches on a schedule with no manual steps. It reads the same settings as the API through `internal/config`, opens the database, runs the migrations, then starts a scheduler and a pool of workers. `SIGINT`/`SIGTERM` stops claiming new tasks and gives in-flight ones `WORKER_SHUTDOWN_GRACE` to finish; anything cut short is retried later.
+
+Work goes through a Postgres queue (`internal/queue`, table `queue_tasks`). Workers claim tasks with `SELECT ... FOR UPDATE SKIP LOCKED` and hold a renewable lease, so a crashed worker's task is picked up again once its lease expires. Failed tasks retry with exponential backoff and are marked `dead` after their last attempt.
+
+The flow (`internal/pipeline`):
+
+1. The scheduler finds due searches and queues one `run_search` task per search and portal, then sets the search's next run from its frequency (hourly, daily or weekly).
+2. `run_search` fetches postings from that portal. Each posting is stored once, globally, on (provider, job id), and linked to the search as a search result.
+3. `embed_job` fetches a job's description if it is missing and embeds it, once per job.
+4. `evaluate_job` evaluates the job against the user's most recent CV and stores the scores, strengths, missing skills, summary and raw LLM output. Users without a CV are skipped.
+
+Re-running any task never duplicates jobs, results or evaluations. Portal calls are rate limited per portal and back off after failures, and LLM evaluations are capped per process.
+
+Settings (all optional):
+
+| Variable                 | Default | Meaning                                  |
+|--------------------------|---------|------------------------------------------|
+| `WORKER_CONCURRENCY`     | `4`     | Tasks processed at once                  |
+| `WORKER_MAX_EVALUATIONS` | `2`     | LLM evaluations running at once          |
+| `WORKER_POLL_INTERVAL`   | `1s`    | Idle wait between queue polls            |
+| `SCHEDULER_INTERVAL`     | `1m`    | How often due searches are looked for    |
+| `WORKER_SHUTDOWN_GRACE`  | `30s`   | Time in-flight tasks get on shutdown     |
+
+The worker does not run any searches yet: saved searches and the portal providers are not wired in, so the scheduler finds nothing to run.
 
 ## Limitations
 
