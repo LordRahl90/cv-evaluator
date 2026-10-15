@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"cv-evaluator/internal/models"
@@ -27,19 +26,20 @@ func NewLatestCVSelector(db *gorm.DB) *LatestCVSelector {
 
 // SelectCV returns the user's newest CV, or nil when they have none.
 func (s *LatestCVSelector) SelectCV(ctx context.Context, userID ulid.ULID) (*models.CV, error) {
-	var cv models.CV
+	var cvs []models.CV
 	err := s.db.WithContext(ctx).
 		Select("id", "created_at", "user_id").
 		Where("user_id = ?", userID).
 		Order("created_at DESC, id DESC").
-		Take(&cv).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
+		Limit(1).
+		Find(&cvs).Error
 	if err != nil {
 		return nil, fmt.Errorf("select CV for user %s: %w", userID, err)
 	}
-	return &cv, nil
+	if len(cvs) == 0 {
+		return nil, nil
+	}
+	return &cvs[0], nil
 }
 
 // store holds the pipeline's own persistence: search results and
@@ -101,17 +101,18 @@ func (s *store) unevaluatedResults(ctx context.Context, jobID ulid.ULID) ([]mode
 }
 
 func (s *store) evaluation(ctx context.Context, resultID, cvID ulid.ULID) (*models.Evaluation, error) {
-	var e models.Evaluation
+	var evals []models.Evaluation
 	err := s.db.WithContext(ctx).
 		Where("search_result_id = ? AND cv_id = ?", resultID, cvID).
-		Take(&e).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
+		Limit(1).
+		Find(&evals).Error
 	if err != nil {
 		return nil, err
 	}
-	return &e, nil
+	if len(evals) == 0 {
+		return nil, nil
+	}
+	return &evals[0], nil
 }
 
 // saveEvaluation inserts e, or overwrites the evaluation already stored for

@@ -85,7 +85,7 @@ func (f *fakeSearches) DueSearches(_ context.Context, now time.Time, limit int) 
 	defer f.mu.Unlock()
 	var due []Search
 	for _, s := range f.searches {
-		if s.Enabled && (s.NextRunAt == nil || !s.NextRunAt.After(now)) {
+		if s.Enabled && s.NextRunAt != nil && !s.NextRunAt.After(now) {
 			due = append(due, *s)
 		}
 	}
@@ -353,8 +353,12 @@ func (h *harness) tick() int {
 	return n
 }
 
+// newSearch returns an enabled search that is due (NextRunAt in the past),
+// as a newly created search is.
 func newSearch(userID ulid.ULID, query string) *Search {
+	due := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	return &Search{
+		NextRunAt: &due,
 		ID:        ulid.Make(),
 		UserID:    userID,
 		Name:      query,

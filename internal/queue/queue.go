@@ -232,14 +232,16 @@ func (q *Queue) Claim(ctx context.Context, workerID string, kinds ...Kind) (*Tas
 				query = query.Where("kind IN ?", names)
 			}
 
-			var task Task
-			err := query.Order("run_at ASC, id ASC").Limit(1).Take(&task).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			if err != nil {
+			// Find, not Take: an empty queue is normal and must not be
+			// logged as "record not found" on every poll.
+			var found []Task
+			if err := query.Order("run_at ASC, id ASC").Limit(1).Find(&found).Error; err != nil {
 				return err
 			}
+			if len(found) == 0 {
+				return nil
+			}
+			task := found[0]
 
 			if task.State == models.TaskRunning && task.Attempts >= task.MaxAttempts {
 				if err := tx.Model(&Task{}).Where("id = ?", task.ID).Updates(map[string]any{

@@ -20,8 +20,10 @@ func TestScheduler_FansOutPerProvider(t *testing.T) {
 	future := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	notDue := newSearch(ulid.Make(), "later")
 	notDue.NextRunAt = &future
+	unscheduled := newSearch(ulid.Make(), "unscheduled")
+	unscheduled.NextRunAt = nil
 
-	h := newHarness(t, newFakeSearches(due, disabled, notDue), newFakeFetcher("linkedin", "jobindex"))
+	h := newHarness(t, newFakeSearches(due, disabled, notDue, unscheduled), newFakeFetcher("linkedin", "jobindex"))
 
 	assert.Equal(t, 2, h.tick())
 
@@ -38,6 +40,7 @@ func TestScheduler_FansOutPerProvider(t *testing.T) {
 	assert.Equal(t, 1, h.searches.marks[due.ID])
 	assert.Zero(t, h.searches.marks[disabled.ID])
 	assert.Zero(t, h.searches.marks[notDue.ID])
+	assert.Zero(t, h.searches.marks[unscheduled.ID])
 }
 
 func TestScheduler_DedupesWhileQueued(t *testing.T) {

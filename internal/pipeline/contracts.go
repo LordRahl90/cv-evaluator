@@ -60,8 +60,9 @@ type Criteria struct {
 
 // SearchStore reads saved searches and records when they ran.
 type SearchStore interface {
-	// DueSearches returns up to limit enabled searches whose NextRunAt is
-	// nil or not after now.
+	// DueSearches returns up to limit searches that are enabled and have a
+	// NextRunAt that is not after now (enabled AND next_run_at <= now). A
+	// nil NextRunAt means the search is not scheduled.
 	DueSearches(ctx context.Context, now time.Time, limit int) ([]Search, error)
 	// GetSearch returns the search, or nil and no error if it no longer
 	// exists.

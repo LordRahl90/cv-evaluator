@@ -351,7 +351,7 @@ func TestObserver_WrapsHandlersAndTicks(t *testing.T) {
 	searches := newFakeSearches(search)
 	p, err := New(Config{
 		DB: testDB, Queue: q, Searches: searches, Fetcher: fetcher,
-		Embedder: embedderFunc(func(context.Context, *models.Job) error { return errors.New("embed down") }),
+		Embedder:  embedderFunc(func(context.Context, *models.Job) error { return errors.New("embed down") }),
 		Evaluator: &fakeEvaluator{}, Observer: obs,
 		RateLimit: RateLimitOptions{Interval: time.Microsecond},
 	})
