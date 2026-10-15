@@ -125,7 +125,7 @@ SERVICE_VERSION=dev
 Notes:
 
 - `cmd/api` and `cmd/seed` read settings through `internal/config`, which fails at startup if a required value is missing. The other CLI entrypoints load `.env` with `godotenv.Load()` and exit if it is missing; `cmd/api` treats `.env` as optional.
-- `ENVIRONMENT` defaults to `production`. Outside `development`, `JWT_SECRET` is required; in `development` a random secret is generated when it is empty, and tokens will not survive a restart.
+- `ENVIRONMENT` defaults to `production`. Outside `development`, `JWT_SECRET` is required; in `development` a random secret is generated when it is empty, and tokens will not survive a restart. The worker (`cmd/worker`) never issues or checks tokens, so it doesn't need `JWT_SECRET`.
 - `CV_CLEANUP_PROVIDER` is `deepseek` (default) or `ollama`.
 - `PORT` defaults to `8080`.
 - The `.env.example` DB values match `docker-compose.yml`.

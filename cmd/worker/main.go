@@ -28,6 +28,7 @@ import (
 	"cv-evaluator/internal/queue"
 	"cv-evaluator/internal/services/jobs"
 	"cv-evaluator/internal/services/matcher"
+	"cv-evaluator/internal/telemetry"
 
 	deepseekLib "github.com/cohesion-org/deepseek-go"
 	"github.com/joho/godotenv"
@@ -35,16 +36,16 @@ import (
 )
 
 func main() {
-	if err := run(options{}); err != nil {
+	if err := run(options{Observer: telemetry.RunObserver{}}); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // options are the worker's injectable dependencies.
 type options struct {
-	// Transport is used for every outbound HTTP call the worker makes (LLM
-	// and embedding APIs, and the portal fetcher once wired). nil means
-	// http.DefaultTransport. Wrap it to add tracing.
+	// Transport is the base for every outbound HTTP call the worker makes.
+	// nil means http.DefaultTransport. The worker adds telemetry itself, so
+	// don't pass an instrumented transport or requests are recorded twice.
 	Transport http.RoundTripper
 	// Observer is told about every task run and scheduler tick. nil means
 	// no-op.
@@ -67,6 +68,12 @@ func run(opts options) error {
 	if err != nil {
 		return err
 	}
+
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), cfg)
+	if err != nil {
+		return err
+	}
+	defer telemetry.Flush(shutdownTelemetry)
 	settings, err := loadSettings()
 	if err != nil {
 		return err
@@ -90,11 +97,13 @@ func run(opts options) error {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
+	// ollama.New instruments its own client; DeepSeek and the portal
+	// fetcher are wrapped here, so no request is recorded twice.
 	llmClient := &http.Client{Timeout: 30 * time.Minute, Transport: transport}
-	fetchClient := &http.Client{Timeout: time.Minute, Transport: transport}
+	fetchClient := &http.Client{Timeout: time.Minute, Transport: telemetry.NewJobBoardTransport(transport)}
 
 	ollamaLLM := ollama.New(llmClient, cfg.OllamaBaseURL)
-	deepseekClient, err := deepseekLib.NewClientWithOptions(cfg.DeepSeekAPIKey, deepseekLib.WithHTTPClient(llmClient))
+	deepseekClient, err := deepseekLib.NewClientWithOptions(cfg.DeepSeekAPIKey, deepseekLib.WithHTTPClient(telemetry.NewHTTPClient(telemetry.PeerDeepSeek, llmClient)))
 	if err != nil {
 		return fmt.Errorf("deepseek client: %w", err)
 	}
