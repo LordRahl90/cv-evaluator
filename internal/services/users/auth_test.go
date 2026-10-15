@@ -8,6 +8,7 @@ import (
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/testutil/postgres"
 
+	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -119,4 +120,23 @@ func TestService_Signup_DuplicatePhone(t *testing.T) {
 		Password:  "password123",
 	})
 	require.ErrorIs(t, err, ErrPhoneAlreadyUsed)
+}
+
+func TestService_GetProfile(t *testing.T) {
+	svc, _ := newAuthTestService(t)
+
+	signupResp, err := svc.Signup(context.Background(), SignupRequest{
+		FirstName: "Grace",
+		Email:     "grace@example.com",
+		Password:  "password123",
+	})
+	require.NoError(t, err)
+
+	profile, err := svc.GetProfile(context.Background(), signupResp.User.ID)
+	require.NoError(t, err)
+	require.Equal(t, "grace@example.com", profile.Email)
+	require.Equal(t, "Grace", profile.FirstName)
+
+	_, err = svc.GetProfile(context.Background(), ulid.Make())
+	require.ErrorIs(t, err, ErrUserNotFound)
 }
