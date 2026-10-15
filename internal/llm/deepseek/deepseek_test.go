@@ -35,7 +35,7 @@ func TestService_CallLLM(t *testing.T) {
 		},
 	})
 
-	res, err := svc.callLLM(t.Context(), "why is the sky blue? list the response in json format")
+	res, err := svc.callLLM(t.Context(), taskJobMatch, "why is the sky blue? list the response in json format")
 	require.NoError(t, err)
 	require.NotEmpty(t, res)
 

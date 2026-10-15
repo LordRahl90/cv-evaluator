@@ -9,9 +9,17 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/otel/trace"
 )
 
-const defaultShutdownTimeout = 10 * time.Second
+const (
+	defaultShutdownTimeout = 10 * time.Second
+
+	// serviceName is the server name otelgin reports on request spans.
+	serviceName = "cv-evaluator"
+	healthPath  = "/healthz"
+)
 
 // HealthCheck reports whether a dependency the server needs is reachable.
 type HealthCheck func(ctx context.Context) error
@@ -27,7 +35,9 @@ type Server struct {
 	router *gin.Engine
 }
 
-// New creates a server with recovery, request logging and a /healthz route.
+// New creates a server with tracing, recovery, request logging and a
+// /healthz route. Tracing runs outermost so that a recovered panic is
+// recorded as a 500 on the request span; /healthz is not traced.
 // Feature handlers register their routes on Router().
 func New(config *Config) *Server {
 	if config.ShutdownTimeout <= 0 {
@@ -35,13 +45,19 @@ func New(config *Config) *Server {
 	}
 
 	router := gin.New()
-	router.Use(gin.Recovery(), requestLogger())
+	router.Use(
+		otelgin.Middleware(serviceName, otelgin.WithFilter(func(r *http.Request) bool {
+			return r.URL.Path != healthPath
+		})),
+		gin.Recovery(),
+		requestLogger(),
+	)
 
 	s := &Server{
 		config: config,
 		router: router,
 	}
-	router.GET("/healthz", s.healthz)
+	router.GET(healthPath, s.healthz)
 
 	return s
 }
@@ -109,11 +125,15 @@ func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		slog.InfoContext(c.Request.Context(), "request",
+		attrs := []any{
 			"method", c.Request.Method,
 			"path", c.FullPath(),
 			"status", c.Writer.Status(),
 			"duration", time.Since(start),
-		)
+		}
+		if sc := trace.SpanContextFromContext(c.Request.Context()); sc.IsValid() {
+			attrs = append(attrs, "trace_id", sc.TraceID().String())
+		}
+		slog.InfoContext(c.Request.Context(), "request", attrs...)
 	}
 }
