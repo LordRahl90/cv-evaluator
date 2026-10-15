@@ -76,10 +76,12 @@ internal/
   services/matcher/       retrieval, scoring and LLM match composition
   services/cleanup/       extract-then-cleanup helper (not yet used by any command)
   storage/jobs/           job repository helpers
-  servers/                Gin server: recovery, request logging, /healthz, graceful shutdown
+  servers/                Gin server: tracing, recovery, request logging, /healthz, graceful shutdown
   servers/cv/             CV HTTP handlers
   servers/match/          match HTTP handlers
   servers/middleware/     Bearer JWT auth middleware
+  telemetry/              OpenTelemetry setup, run and external request metrics
+  telemetry/telemetrytest/ in-memory providers for asserting spans and metrics in tests
   testutil/postgres/      pgvector testcontainer helper
 ```
 
@@ -115,6 +117,9 @@ DB_NAME=cv_evaluator
 DB_USER=postgres
 DB_PASSWORD=postgres
 JWT_SECRET=change-me-with-a-long-random-value
+OTEL_EXPORTER_OTLP_ENDPOINT=
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+SERVICE_VERSION=dev
 ```
 
 Notes:
@@ -124,6 +129,7 @@ Notes:
 - `CV_CLEANUP_PROVIDER` is `deepseek` (default) or `ollama`.
 - `PORT` defaults to `8080`.
 - The `.env.example` DB values match `docker-compose.yml`.
+- Telemetry is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set (see [Observability](#observability)).
 
 ## Quick start
 
@@ -279,6 +285,46 @@ Settings (all optional):
 | `WORKER_SHUTDOWN_GRACE`  | `30s`   | Time in-flight tasks get on shutdown     |
 
 The worker does not run any searches yet: saved searches and the portal providers are not wired in, so the scheduler finds nothing to run.
+
+## Observability
+
+`cmd/api` and `cmd/seed` set up OpenTelemetry at startup (`internal/telemetry`). Traces and metrics are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no-op providers are used, so local runs and tests need no collector.
+
+| Setting | Default | Notes |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty (export off) | Base URL, e.g. `http://localhost:4318`. Must be `http(s)://host[:port]`. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | Only `http/protobuf` is supported. |
+| `SERVICE_VERSION` | `dev` | Reported as `service.version`. |
+| `OTEL_SDK_DISABLED` | `false` | `true` turns export off even with an endpoint set. |
+
+The exporters also honour the other standard variables, such as `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, `OTEL_METRIC_EXPORT_INTERVAL` and `OTEL_RESOURCE_ATTRIBUTES`. The resource carries `service.name=cv-evaluator`, `service.version` and `deployment.environment(.name)` from `ENVIRONMENT`.
+
+What is recorded:
+
+- **HTTP requests**: a server span per request from `otelgin` (`/healthz` is skipped), plus otelgin's standard HTTP server metrics. Request logs include `trace_id`.
+- **`cv_evaluator.background_run.duration`** (histogram, seconds), attributes `run.kind` and `run.outcome` (`success`|`error`), with a span `background_run <kind>`. Use `telemetry.StartRun(ctx, kind)`, or `telemetry.RunObserver{}` where an observer hook (`RunStarted`/`RunFinished`) is expected. `cmd/seed` records `seed.process_cv`.
+- **`cv_evaluator.external_request.duration`** (histogram, seconds), attributes `peer.service`, `operation`, `outcome` (and `llm.task` for DeepSeek), with a client span `<peer.service> <operation>`. Ollama (`embedding`, `cv_cleanup`) and DeepSeek (`chat_completion`, `llm.task=cv_cleanup|job_match`) are instrumented. HTTP clients use `telemetry.NewHTTPClient(peer, client)` with `telemetry.WithOperation(ctx, op)`; other SDK calls use `telemetry.TrackExternal(ctx, peer, op)`. `telemetry.NewJobBoardTransport(nil)` is one transport for the scrapers that labels `peer.service` (`linkedin`, `jobindex`) from the host and `operation` (`search`, `details`) from the path.
+
+### Viewing locally
+
+```bash
+docker compose --profile observability up -d   # collector, Jaeger, Prometheus
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 make start
+```
+
+- Traces: Jaeger at <http://localhost:16686>, service `cv-evaluator`.
+- Metrics: Prometheus at <http://localhost:9090>. The collector exposes the histograms with Prometheus names, for example:
+
+  ```promql
+  # p95 background run latency by kind
+  histogram_quantile(0.95, sum by (le, run_kind) (rate(cv_evaluator_background_run_duration_seconds_bucket[5m])))
+  # p95 external request latency by service and operation
+  histogram_quantile(0.95, sum by (le, peer_service, operation) (rate(cv_evaluator_external_request_duration_seconds_bucket[5m])))
+  # external request error rate
+  sum by (peer_service) (rate(cv_evaluator_external_request_duration_seconds_count{outcome="error"}[5m]))
+  ```
+
+Metrics are pushed every 60 seconds by default; set `OTEL_METRIC_EXPORT_INTERVAL=5000` (milliseconds) to see them sooner.
 
 ## Limitations
 

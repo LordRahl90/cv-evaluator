@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -18,6 +19,11 @@ const (
 	CleanupProviderOllama   = "ollama"
 
 	defaultPort = "8080"
+
+	// OTLPProtocolHTTP is the only OTLP transport the exporters support.
+	OTLPProtocolHTTP = "http/protobuf"
+
+	defaultServiceVersion = "dev"
 )
 
 // Database holds the Postgres connection settings.
@@ -35,6 +41,27 @@ func (d Database) DSN() string {
 		d.Host, d.Port, d.User, d.Password, d.Name)
 }
 
+// Telemetry holds the OpenTelemetry export settings. The exporters also read
+// the other standard OTEL_EXPORTER_OTLP_* variables (headers, timeout,
+// per-signal endpoints) and OTEL_METRIC_EXPORT_INTERVAL directly.
+type Telemetry struct {
+	// OTLPEndpoint is OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://localhost:4318.
+	// When empty, telemetry is not exported and no-op providers are used.
+	OTLPEndpoint string
+	// OTLPProtocol is OTEL_EXPORTER_OTLP_PROTOCOL; only http/protobuf is supported.
+	OTLPProtocol string
+	// ServiceVersion is SERVICE_VERSION, reported as service.version.
+	ServiceVersion string
+	// Disabled is OTEL_SDK_DISABLED=true, which turns export off even when
+	// an endpoint is set.
+	Disabled bool
+}
+
+// Enabled reports whether telemetry should be exported.
+func (t Telemetry) Enabled() bool {
+	return !t.Disabled && t.OTLPEndpoint != ""
+}
+
 // Config is the application configuration, read once at startup.
 type Config struct {
 	Environment     string
@@ -44,6 +71,7 @@ type Config struct {
 	DeepSeekAPIKey  string
 	CleanupProvider string
 	JWTSecret       string
+	Telemetry       Telemetry
 
 	// jwtSecretOptional is set by WithoutJWTSecret for processes that never
 	// issue or verify tokens.
@@ -83,6 +111,12 @@ func Load(opts ...Option) (*Config, error) {
 		DeepSeekAPIKey:  env("DEEPSEEK_API_KEY"),
 		CleanupProvider: strings.ToLower(envOr("CV_CLEANUP_PROVIDER", CleanupProviderDeepSeek)),
 		JWTSecret:       env("JWT_SECRET"),
+		Telemetry: Telemetry{
+			OTLPEndpoint:   env("OTEL_EXPORTER_OTLP_ENDPOINT"),
+			OTLPProtocol:   strings.ToLower(envOr("OTEL_EXPORTER_OTLP_PROTOCOL", OTLPProtocolHTTP)),
+			ServiceVersion: envOr("SERVICE_VERSION", defaultServiceVersion),
+			Disabled:       strings.EqualFold(env("OTEL_SDK_DISABLED"), "true"),
+		},
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -133,6 +167,22 @@ func (c *Config) Validate() error {
 			CleanupProviderDeepSeek, CleanupProviderOllama, c.CleanupProvider))
 	}
 
+	errs = append(errs, c.Telemetry.validate())
+
+	return errors.Join(errs...)
+}
+
+func (t Telemetry) validate() error {
+	var errs []error
+	if t.OTLPEndpoint != "" {
+		u, err := url.Parse(t.OTLPEndpoint)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT must be an http(s) URL such as http://localhost:4318, got %q", t.OTLPEndpoint))
+		}
+	}
+	if t.OTLPProtocol != "" && t.OTLPProtocol != OTLPProtocolHTTP {
+		errs = append(errs, fmt.Errorf("OTEL_EXPORTER_OTLP_PROTOCOL must be %q, got %q", OTLPProtocolHTTP, t.OTLPProtocol))
+	}
 	return errors.Join(errs...)
 }
 

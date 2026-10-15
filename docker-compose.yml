@@ -19,5 +19,41 @@ services:
       retries: 5
       start_period: 10s
 
+  # Local observability stack: `docker compose --profile observability up -d`
+  # and set OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: cv_evaluator_otel_collector
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./docker/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "8889:8889" # Prometheus metrics
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: cv_evaluator_jaeger
+    profiles: ["observability"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # Jaeger UI
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: cv_evaluator_prometheus
+    profiles: ["observability"]
+    volumes:
+      - ./docker/observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090" # Prometheus UI
+    depends_on:
+      - otel-collector
+
 volumes:
   postgres_data:

@@ -9,8 +9,16 @@ import (
 
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/llm/prompts"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/cohesion-org/deepseek-go"
+	"go.opentelemetry.io/otel/attribute"
+)
+
+// Values of the llm.task attribute on DeepSeek requests.
+const (
+	taskCVCleanup = "cv_cleanup"
+	taskJobMatch  = "job_match"
 )
 
 type Client interface {
@@ -19,6 +27,17 @@ type Client interface {
 
 type Service struct {
 	client Client
+}
+
+// NewClient returns a DeepSeek API client whose HTTP requests are traced and
+// recorded as external requests (peer.service=deepseek). It returns nil when
+// apiKey is empty and DEEPSEEK_API_KEY is unset, like deepseek.NewClient.
+func NewClient(apiKey string) *deepseek.Client {
+	c := deepseek.NewClient(apiKey)
+	if c != nil {
+		c.HTTPClient = telemetry.NewHTTPClient(telemetry.PeerDeepSeek, nil)
+	}
+	return c
 }
 
 func New(client Client) *Service {
@@ -35,7 +54,7 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 	}
 
 	prompt := fmt.Sprintf("%s\n\n%s", string(promptContent), content)
-	return s.callLLM(ctx, prompt)
+	return s.callLLM(ctx, taskCVCleanup, prompt)
 }
 
 func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput) (string, error) {
@@ -46,10 +65,14 @@ func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput)
 		return "", err
 	}
 
-	return s.callLLM(ctx, prompt)
+	return s.callLLM(ctx, taskJobMatch, prompt)
 }
 
-func (s *Service) callLLM(ctx context.Context, content string) (string, error) {
+// callLLM sends one chat completion. task labels the request (llm.task) in
+// the telemetry recorded by the client built with NewClient.
+func (s *Service) callLLM(ctx context.Context, task, content string) (string, error) {
+	ctx = telemetry.WithOperation(ctx, telemetry.OpChatCompletion, attribute.String(telemetry.AttrLLMTask, task))
+
 	req := &deepseek.ChatCompletionRequest{
 		Model: deepseek.DeepSeekChat,
 		ResponseFormat: &deepseek.ResponseFormat{
