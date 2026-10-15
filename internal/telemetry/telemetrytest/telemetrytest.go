@@ -80,7 +80,7 @@ func Attrs(set attribute.Set) map[string]string {
 func KeyValues(kvs []attribute.KeyValue) map[string]string {
 	out := make(map[string]string, len(kvs))
 	for _, kv := range kvs {
-		out[string(kv.Key)] = kv.Value.Emit()
+		out[string(kv.Key)] = kv.Value.String()
 	}
 	return out
 }
