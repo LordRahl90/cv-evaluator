@@ -1,0 +1,3 @@
+# Keep scraped HTML fixtures and sample data out of GitHub language stats
+**/testdata/** linguist-vendored
+data/** linguist-vendored
