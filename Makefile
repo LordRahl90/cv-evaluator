@@ -17,6 +17,9 @@ lint:
 start:
 	ENVIRONMENT=development go run ./cmd/api/
 
+worker:
+	ENVIRONMENT=development go run ./cmd/worker/
+
 clean:
 	go clean --testcache
 
