@@ -15,6 +15,8 @@ var appModels = []interface{}{
 	&models.Job{},
 	&models.SectionEmbedding{},
 	&models.APIKey{},
+	&models.JobSearch{},
+	&models.PortalSuggestion{},
 	&models.SearchResult{},
 	&models.Evaluation{},
 	&models.QueueTask{},
