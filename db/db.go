@@ -1,26 +1,26 @@
 package db
 
 import (
-	"fmt"
 	"os"
+
+	"cv-evaluator/internal/config"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
+// Open connects to Postgres with the given settings.
+func Open(cfg config.Database) (*gorm.DB, error) {
+	return gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{})
+}
+
+// SetupDatabase connects to Postgres using the DB_* environment variables.
 func SetupDatabase() (*gorm.DB, error) {
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbParams := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
-
-	db, err := gorm.Open(postgres.Open(dbParams), &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
-
-	return db, nil
+	return Open(config.Database{
+		Host:     os.Getenv("DB_HOST"),
+		Port:     os.Getenv("DB_PORT"),
+		Name:     os.Getenv("DB_NAME"),
+		User:     os.Getenv("DB_USER"),
+		Password: os.Getenv("DB_PASSWORD"),
+	})
 }
