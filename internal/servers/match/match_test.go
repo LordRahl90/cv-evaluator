@@ -135,3 +135,13 @@ func TestMatchByJobLink_NotImplemented(t *testing.T) {
 	svc.AssertNotCalled(t, "MatchByJobID")
 	svc.AssertNotCalled(t, "MatchByJobDescription")
 }
+
+func TestMatchRoutes_InvalidToken(t *testing.T) {
+	svc := new(MockJobMatcher)
+
+	w := performRequestWithAuth(noAuthRouter(svc), http.MethodPost, "/match/job-description",
+		`{"job_description":"We are looking for a Go engineer"}`, "Bearer not-a-jwt")
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	svc.AssertNotCalled(t, "MatchByJobDescription")
+}
