@@ -35,16 +35,18 @@ type Handler struct {
 	svc Service
 }
 
-// New registers all CV routes on the provided router, protected by the auth middleware.
-func New(router *gin.Engine, svc Service, jwtSecret []byte) *Handler {
+// New registers all CV routes on the provided router, protected by the auth
+// middleware. opts are passed to middleware.Authenticate, for example
+// middleware.WithAPIKeyVerifier to accept API keys as well as JWTs.
+func New(router *gin.Engine, svc Service, jwtSecret []byte, opts ...middleware.Option) *Handler {
 	h := &Handler{svc: svc}
-	h.registerRoutes(router, jwtSecret)
+	h.registerRoutes(router, jwtSecret, opts)
 	return h
 }
 
-func (h *Handler) registerRoutes(router *gin.Engine, jwtSecret []byte) {
+func (h *Handler) registerRoutes(router *gin.Engine, jwtSecret []byte, opts []middleware.Option) {
 	cvGroup := router.Group("cv")
-	cvGroup.Use(middleware.Authenticate(jwtSecret))
+	cvGroup.Use(middleware.Authenticate(jwtSecret, opts...))
 	{
 		cvGroup.POST("/", h.uploadCV)
 		cvGroup.GET("/", h.listCVs)

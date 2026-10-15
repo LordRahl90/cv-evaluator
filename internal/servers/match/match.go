@@ -30,19 +30,20 @@ type Handler struct {
 }
 
 // New creates a new Handler and registers its routes on the provided router,
-// protected by the auth middleware.
-func New(router *gin.Engine, matcher JobMatcher, jwtSecret []byte) *Handler {
+// protected by the auth middleware. opts are passed to middleware.Authenticate,
+// for example middleware.WithAPIKeyVerifier to accept API keys as well as JWTs.
+func New(router *gin.Engine, matcher JobMatcher, jwtSecret []byte, opts ...middleware.Option) *Handler {
 	h := &Handler{
 		router:  router,
 		matcher: matcher,
 	}
-	h.registerRoutes(router, jwtSecret)
+	h.registerRoutes(router, jwtSecret, opts)
 	return h
 }
 
-func (h *Handler) registerRoutes(router *gin.Engine, jwtSecret []byte) {
+func (h *Handler) registerRoutes(router *gin.Engine, jwtSecret []byte, opts []middleware.Option) {
 	match := router.Group("match")
-	match.Use(middleware.Authenticate(jwtSecret))
+	match.Use(middleware.Authenticate(jwtSecret, opts...))
 	{
 		match.POST("job-description", h.matchByJobDescription)
 		match.POST("job/:id", h.matchByJobId)

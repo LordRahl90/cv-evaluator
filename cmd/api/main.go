@@ -19,8 +19,12 @@ import (
 	"cv-evaluator/internal/llm/ollama"
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/servers"
+	apikeyhttp "cv-evaluator/internal/servers/apikeys"
+	authhttp "cv-evaluator/internal/servers/auth"
 	"cv-evaluator/internal/servers/cv"
 	"cv-evaluator/internal/servers/match"
+	"cv-evaluator/internal/servers/middleware"
+	apikeysvc "cv-evaluator/internal/services/apikeys"
 	"cv-evaluator/internal/services/matcher"
 	"cv-evaluator/internal/services/users"
 
@@ -75,14 +79,20 @@ func run() error {
 
 	usersService := users.NewWithAuth(dbase, cleaner, ollamaLLM, cfg.JWTSecret, 0)
 	matchService := matcher.New(dbase, ollamaLLM, deepseekLLM)
+	apiKeyService := apikeysvc.New(dbase)
+	apiKeyVerifier := apikeyhttp.NewVerifier(apiKeyService)
 
 	server := servers.New(&servers.Config{
 		Port:        cfg.Port,
 		HealthCheck: sqlDB.PingContext,
 	})
+	router := server.Router()
 	jwtSecret := []byte(cfg.JWTSecret)
-	cv.New(server.Router(), usersService, jwtSecret)
-	match.New(server.Router(), matchService, jwtSecret)
+	acceptAPIKeys := middleware.WithAPIKeyVerifier(apiKeyVerifier)
+	authhttp.New(router, usersService, jwtSecret, apiKeyVerifier)
+	apikeyhttp.New(router, apiKeyService, jwtSecret, apiKeyVerifier)
+	cv.New(router, usersService, jwtSecret, acceptAPIKeys)
+	match.New(router, matchService, jwtSecret, acceptAPIKeys)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
