@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -17,7 +18,15 @@ const (
 	baseDomain = "www.linkedin.com"
 	provider   = "linkedin"
 
+	// DefaultSearchURL is the public LinkedIn job search page.
+	DefaultSearchURL = "https://www.linkedin.com/jobs/search"
+
 	defaultMaxPages = 3
+)
+
+var (
+	// ErrSearchURLRequired is returned when a search is started without a URL.
+	ErrSearchURLRequired = errors.New("linkedin: search URL is required")
 )
 
 var linkedInJobIDPattern = regexp.MustCompile(`/jobs/view/(?:[^/?]*-)?(\d+)(?:[/?]|$)`)
@@ -26,19 +35,54 @@ var linkedInNumericIDPattern = regexp.MustCompile(`^\d+$`)
 type Service struct {
 	SearchLinkPage string
 	MaxPages       int
+	// Transport performs the HTTP requests. Nil means http.DefaultTransport.
+	// Set it to inject an instrumented transport (metrics, tracing).
+	Transport http.RoundTripper
+}
+
+func (s *Service) transport() http.RoundTripper {
+	if s != nil && s.Transport != nil {
+		return s.Transport
+	}
+	return http.DefaultTransport
 }
 
 func New() *Service {
-	return &Service{
-		//SearchLinkPage: searchLink,
-		//MaxPages:       defaultMaxPages,
-	}
+	return &Service{}
 }
 
+// SearchURL builds a LinkedIn job search URL for query and location on top of
+// base. An empty base means DefaultSearchURL. Existing query parameters on
+// base are kept; keywords and location are only set when non-empty.
+func SearchURL(base, query, location string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = DefaultSearchURL
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+
+	values := u.Query()
+	if q := strings.TrimSpace(query); q != "" {
+		values.Set("keywords", q)
+	}
+	if l := strings.TrimSpace(location); l != "" {
+		values.Set("location", l)
+	}
+	u.RawQuery = values.Encode()
+	return u.String(), nil
+}
+
+// SearchJobs scrapes up to maxPages result pages starting at searchLink.
 func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages int) ([]entities.JobPost, error) {
 	startURL := strings.TrimSpace(searchLink)
 	if startURL == "" {
-		startURL = searchLink
+		startURL = strings.TrimSpace(s.SearchLinkPage)
+	}
+	if startURL == "" {
+		return nil, ErrSearchURLRequired
 	}
 
 	parsedURL, err := url.Parse(startURL)
@@ -64,6 +108,7 @@ func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages in
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
+	c.WithTransport(s.transport())
 
 	var jobPosts []entities.JobPost
 	seenPages := make(map[string]struct{})
@@ -181,6 +226,7 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
+	c.WithTransport(s.transport())
 
 	details := &entities.JobDetails{
 		ID:       job.ID,
