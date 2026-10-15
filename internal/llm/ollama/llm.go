@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"cv-evaluator/internal/llm/prompts"
+	"cv-evaluator/internal/telemetry"
 )
 
 type Service struct {
@@ -17,9 +18,11 @@ type Service struct {
 	client  *http.Client
 }
 
+// New returns an Ollama service. Requests go through a copy of client whose
+// transport is instrumented with OpenTelemetry (peer.service=ollama).
 func New(client *http.Client, baseURL string) *Service {
 	return &Service{
-		client:  client,
+		client:  telemetry.NewHTTPClient(telemetry.PeerOllama, client),
 		baseURl: baseURL,
 	}
 }
@@ -39,7 +42,7 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 		Stream: false,
 	}
 
-	res, err := s.callLLM(ctx, "/api/generate", req)
+	res, err := s.callLLM(telemetry.WithOperation(ctx, telemetry.OpCVCleanup), "/api/generate", req)
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +62,7 @@ func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float3
 		Prompt: content,
 	}
 
-	res, err := s.callLLM(ctx, "/api/embeddings", req)
+	res, err := s.callLLM(telemetry.WithOperation(ctx, telemetry.OpEmbedding), "/api/embeddings", req)
 	if err != nil {
 		return nil, err
 	}
