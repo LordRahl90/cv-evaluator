@@ -7,17 +7,68 @@ services:
       POSTGRES_DB: cv_evaluator
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    networks:
+      - cv-solution
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui
+    container_name: open-webui
+    ports:
+      - "3080:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      - ollama
+    volumes:
+      - ./open-webui:/app/backend/data
+    networks:
+      - cv-solution
+
+  ollama:
+    image: ollama/ollama:0.10.0
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama:/root/.ollama
+    networks:
+      - cv-solution
+    healthcheck:
+      test: [ "CMD", "ollama", "list" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Pulls the embedding model once ollama is up, then exits.
+  # Already-downloaded models are skipped, so restarts are quick.
+  ollama-models:
+    image: ollama/ollama:0.10.0
+    container_name: ollama-models
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: [ "ollama", "pull", "nomic-embed-text" ]
+    networks:
+      - cv-solution
+
+networks:
+  cv-solution:
+    driver: bridge
 
 volumes:
   postgres_data:
