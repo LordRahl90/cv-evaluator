@@ -217,3 +217,14 @@ func TestNewHTTPClient_KeepsClientSettings(t *testing.T) {
 	assert.Nil(t, orig.Transport, "the original client must not be modified")
 	assert.NotNil(t, c.Transport)
 }
+
+func TestFlush_CallsShutdownWithDeadline(t *testing.T) {
+	called := false
+	Flush(func(ctx context.Context) error {
+		called = true
+		_, ok := ctx.Deadline()
+		assert.True(t, ok, "shutdown must get a bounded context")
+		return errors.New("exporter unreachable")
+	})
+	assert.True(t, called)
+}

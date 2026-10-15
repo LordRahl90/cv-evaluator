@@ -12,6 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"cv-evaluator/internal/config"
 
@@ -101,4 +103,23 @@ func newResource(ctx context.Context, cfg *config.Config) (*resource.Resource, e
 		return nil, fmt.Errorf("build telemetry resource: %w", err)
 	}
 	return res, nil
+}
+
+// flushTimeout bounds how long Flush waits for pending telemetry to export.
+const flushTimeout = 5 * time.Second
+
+// Flush calls shutdown with a short timeout and logs any error. It is meant
+// to be deferred right after Setup:
+//
+//	shutdown, err := telemetry.Setup(ctx, cfg)
+//	if err != nil {
+//		return err
+//	}
+//	defer telemetry.Flush(shutdown)
+func Flush(shutdown func(context.Context) error) {
+	ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+	defer cancel()
+	if err := shutdown(ctx); err != nil {
+		slog.Warn("flush telemetry", "error", err)
+	}
 }
