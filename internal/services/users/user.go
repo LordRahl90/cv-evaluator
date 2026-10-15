@@ -34,6 +34,7 @@ var (
 	ErrPhoneAlreadyUsed   = errors.New("phone already used")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrCVNotFound         = errors.New("cv not found")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 type EmbeddingLLMService interface {
@@ -136,10 +137,20 @@ func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, er
 		return nil, err
 	}
 
-	var existing models.User
-	err = s.db.WithContext(ctx).Where("id = ?", userID).First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	profile, err := s.GetProfile(ctx, userID)
+	if errors.Is(err, ErrUserNotFound) {
 		return nil, ErrInvalidToken
+	}
+	return profile, err
+}
+
+// GetProfile returns the profile of an already-authenticated user, e.g. one
+// resolved by the auth middleware from a JWT or an API key.
+func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (*Profile, error) {
+	var existing models.User
+	err := s.db.WithContext(ctx).Where("id = ?", userID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
 	}
 	if err != nil {
 		return nil, err
