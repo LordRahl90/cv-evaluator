@@ -218,6 +218,16 @@ func TestNewHTTPClient_KeepsClientSettings(t *testing.T) {
 	assert.NotNil(t, c.Transport)
 }
 
+func TestSignalURL(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+	assert.Equal(t, "http://collector:4318/v1/traces",
+		signalURL("http://collector:4318/", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "/v1/traces"))
+
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://other:4318/v1/traces")
+	assert.Empty(t, signalURL("http://collector:4318", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "/v1/traces"),
+		"the per-signal variable must keep precedence")
+}
+
 func TestFlush_CallsShutdownWithDeadline(t *testing.T) {
 	called := false
 	Flush(func(ctx context.Context) error {

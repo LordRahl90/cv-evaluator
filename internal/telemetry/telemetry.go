@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"cv-evaluator/internal/config"
@@ -59,11 +61,11 @@ func Setup(ctx context.Context, cfg *config.Config) (shutdown func(context.Conte
 		return nil, err
 	}
 
-	traceExporter, err := otlptracehttp.New(ctx)
+	traceExporter, err := otlptracehttp.New(ctx, traceOptions(cfg.Telemetry.OTLPEndpoint)...)
 	if err != nil {
 		return nil, fmt.Errorf("create OTLP trace exporter: %w", err)
 	}
-	metricExporter, err := otlpmetrichttp.New(ctx)
+	metricExporter, err := otlpmetrichttp.New(ctx, metricOptions(cfg.Telemetry.OTLPEndpoint)...)
 	if err != nil {
 		_ = traceExporter.Shutdown(ctx)
 		return nil, fmt.Errorf("create OTLP metric exporter: %w", err)
@@ -83,6 +85,30 @@ func Setup(ctx context.Context, cfg *config.Config) (shutdown func(context.Conte
 	return func(ctx context.Context) error {
 		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
 	}, nil
+}
+
+// signalURL builds a per-signal URL from the OTEL_EXPORTER_OTLP_ENDPOINT base,
+// as the OTLP spec describes. It returns "" when the per-signal environment
+// variable is set, so that variable keeps precedence.
+func signalURL(base, signalEnv, path string) string {
+	if os.Getenv(signalEnv) != "" {
+		return ""
+	}
+	return strings.TrimRight(base, "/") + path
+}
+
+func traceOptions(base string) []otlptracehttp.Option {
+	if u := signalURL(base, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "/v1/traces"); u != "" {
+		return []otlptracehttp.Option{otlptracehttp.WithEndpointURL(u)}
+	}
+	return nil
+}
+
+func metricOptions(base string) []otlpmetrichttp.Option {
+	if u := signalURL(base, "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "/v1/metrics"); u != "" {
+		return []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(u)}
+	}
+	return nil
 }
 
 func newResource(ctx context.Context, cfg *config.Config) (*resource.Resource, error) {
