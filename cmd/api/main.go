@@ -32,8 +32,8 @@ import (
 	"cv-evaluator/internal/services/matcher"
 	portalsvc "cv-evaluator/internal/services/portalsuggestions"
 	"cv-evaluator/internal/services/users"
+	"cv-evaluator/internal/telemetry"
 
-	deepseekLib "github.com/cohesion-org/deepseek-go"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -54,6 +54,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), cfg)
+	if err != nil {
+		return err
+	}
+	defer telemetry.Flush(shutdownTelemetry)
 
 	if !cfg.IsDevelopment() {
 		gin.SetMode(gin.ReleaseMode)
@@ -76,7 +82,7 @@ func run() error {
 	}
 
 	ollamaLLM := ollama.New(&http.Client{Timeout: 30 * time.Minute}, cfg.OllamaBaseURL)
-	deepseekLLM := deepseek.New(deepseekLib.NewClient(cfg.DeepSeekAPIKey))
+	deepseekLLM := deepseek.New(deepseek.NewClient(cfg.DeepSeekAPIKey))
 	cleaner, err := llm.NewCVCleaner(cfg.CleanupProvider, deepseekLLM, ollamaLLM)
 	if err != nil {
 		return err
@@ -101,7 +107,7 @@ func run() error {
 
 	// Job searches run against every supported portal; users can suggest more.
 	// Pass providers.WithTransport(rt) to Default to instrument scraper requests.
-	portals := providers.Default()
+	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
 	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, apiKeyVerifier)
 	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, apiKeyVerifier)
 

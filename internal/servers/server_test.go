@@ -12,6 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func init() {
@@ -67,4 +70,33 @@ func TestServe_ShutsDownWhenContextCancelled(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not shut down")
 	}
+}
+
+func TestNew_TracesRequestsButNotHealthz(t *testing.T) {
+	prev := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	spans := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)))
+
+	s := New(&Config{})
+	s.Router().GET("/things/:id", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	s.Router().GET("/panic", func(*gin.Context) { panic("boom") })
+
+	for _, path := range []string{"/healthz", "/things/42", "/panic"} {
+		w := httptest.NewRecorder()
+		s.Router().ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	ended := spans.Ended()
+	require.Len(t, ended, 2, "/healthz must not be traced")
+	assert.Equal(t, "GET /things/:id", ended[0].Name())
+	assert.Equal(t, "GET /panic", ended[1].Name())
+
+	var status int64
+	for _, kv := range ended[1].Attributes() {
+		if kv.Key == "http.response.status_code" {
+			status = kv.Value.AsInt64()
+		}
+	}
+	assert.Equal(t, int64(http.StatusInternalServerError), status, "recovered panic must be recorded as 500")
 }
