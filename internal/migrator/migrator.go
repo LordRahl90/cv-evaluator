@@ -15,6 +15,9 @@ var appModels = []interface{}{
 	&models.Job{},
 	&models.SectionEmbedding{},
 	&models.APIKey{},
+	&models.SearchResult{},
+	&models.Evaluation{},
+	&models.QueueTask{},
 }
 
 func Migrate(db *gorm.DB) error {
