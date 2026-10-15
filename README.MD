@@ -5,8 +5,7 @@ CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF
 ## Current status
 
 - CLI entrypoints under `cmd/` are the main way to use the project.
-- `cmd/api` is still a placeholder: it prints `Hello, World!` and does not start the Gin server.
-- HTTP handlers for CVs and matching exist under `internal/servers`, but nothing wires them into a running server yet.
+- `cmd/api` serves the CV and match routes over HTTP, behind JWT auth. There are no HTTP routes yet to sign up or sign in, so tokens have to be minted outside the API for now.
 - Core logic lives in service packages and is covered by unit and integration tests.
 
 ## How it works
@@ -45,23 +44,25 @@ The LLM response is decoded into:
 
 - **Embeddings**: Ollama `nomic-embed-text` (768 dimensions, matching the `vector(768)` columns).
 - **Job matching**: DeepSeek `deepseek-chat` with JSON response format.
-- **CV cleanup / sectioning**: implemented for both Ollama (`qwen3:8b`) and DeepSeek. Note that `cmd/seed` currently uses a local stub instead of either (see [Limitations](#limitations)).
+- **CV cleanup / sectioning**: DeepSeek by default, or Ollama `qwen3:8b` with `CV_CLEANUP_PROVIDER=ollama`.
 
 ## Project layout
 
 ```
 cmd/
-  api/        placeholder API entrypoint
+  api/        HTTP API server
   seed/       create (or reuse) a user and process a CV
   loader/     scrape LinkedIn jobs and store them with embeddings
   byjobs/     match a user's CV against a stored job
   local/      match a user's CV against data/senior-software-engineer.txt
 db/           Postgres/GORM connection from env vars
 internal/
+  config/                 environment-based configuration and validation
   entities/               DTOs shared between scrapers, services and LLMs
   models/                 GORM models: User, CV, SectionEmbedding, Job
   migrator/               enables the vector extension and auto-migrates models
   integrations/extractor/ PDF text extraction
+  llm/                    CV cleanup provider selection
   llm/ollama/             embeddings and CV cleanup via Ollama
   llm/deepseek/           CV cleanup and job matching via DeepSeek
   llm/prompts/            embedded prompt files
@@ -72,7 +73,7 @@ internal/
   services/matcher/       retrieval, scoring and LLM match composition
   services/cleanup/       extract-then-cleanup helper (not yet used by any command)
   storage/jobs/           job repository helpers
-  servers/                Gin server skeleton
+  servers/                Gin server: recovery, request logging, /healthz, graceful shutdown
   servers/cv/             CV HTTP handlers
   servers/match/          match HTTP handlers
   servers/middleware/     Bearer JWT auth middleware
@@ -100,8 +101,11 @@ cp .env.example .env
 Env keys:
 
 ```dotenv
+ENVIRONMENT=development
+PORT=8080
 DEEPSEEK_API_KEY=your-deepseek-api-key
 OLLAMA_BASE_URL=http://localhost:11434
+CV_CLEANUP_PROVIDER=deepseek
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=cv_evaluator
@@ -112,9 +116,11 @@ JWT_SECRET=change-me-with-a-long-random-value
 
 Notes:
 
-- Every CLI entrypoint (except `cmd/api`) loads `.env` with `godotenv.Load()` and exits if it is missing.
+- `cmd/api` and `cmd/seed` read settings through `internal/config`, which fails at startup if a required value is missing. The other CLI entrypoints load `.env` with `godotenv.Load()` and exit if it is missing; `cmd/api` treats `.env` as optional.
+- `ENVIRONMENT` defaults to `production`. Outside `development`, `JWT_SECRET` is required; in `development` a random secret is generated when it is empty, and tokens will not survive a restart.
+- `CV_CLEANUP_PROVIDER` is `deepseek` (default) or `ollama`.
+- `PORT` defaults to `8080`.
 - The `.env.example` DB values match `docker-compose.yml`.
-- `users.New` reads `JWT_SECRET`; if it is empty, a random in-memory secret is generated and tokens will not survive a restart. `cmd/seed` uses its own fixed secret and does not read `JWT_SECRET`.
 
 ## Quick start
 
@@ -128,7 +134,7 @@ Notes:
 
    ```bash
    ollama pull nomic-embed-text
-   # optional, only needed if you wire in the Ollama CV cleanup
+   # optional, only needed with CV_CLEANUP_PROVIDER=ollama
    ollama pull qwen3:8b
    ```
 
@@ -163,8 +169,9 @@ Notes:
 ## Common commands
 
 ```bash
-# Placeholder API (prints Hello, World!)
+# HTTP API on :8080 (ENVIRONMENT=development)
 make start
+curl localhost:8080/healthz
 
 # Seed a user and process a CV
 go run ./cmd/seed -cv ./data/dummy-resume.pdf -email you@example.com
@@ -195,7 +202,9 @@ make                  # clean + lint + test
 
 CI (`.github/workflows`) runs lint and tests on pushes to `main`, `staging`, `testing` and `develop`, and on pull requests to `main`, `develop` and `testing`.
 
-## HTTP handlers (not yet served)
+## HTTP API
+
+`make start` runs the server. `GET /healthz` returns `{"status":"ok"}` when the database is reachable, and `503` otherwise. On `SIGINT`/`SIGTERM` the server stops accepting requests and lets in-flight ones finish for up to 10 seconds.
 
 CV routes (`internal/servers/cv`), all behind the Bearer JWT middleware:
 
@@ -207,7 +216,7 @@ CV routes (`internal/servers/cv`), all behind the Bearer JWT middleware:
 | PATCH  | `/cv/`             | Not implemented (501)                          |
 | DELETE | `/cv/:id`          | Delete a CV, returns 204                       |
 
-Match routes (`internal/servers/match`):
+Match routes (`internal/servers/match`), also behind the Bearer JWT middleware:
 
 | Method | Path                      | Description                                  |
 |--------|---------------------------|----------------------------------------------|
@@ -219,8 +228,7 @@ There are no HTTP routes yet for signup, signin or profile, although the users s
 
 ## Limitations
 
-- `cmd/api` does not start a server, so none of the HTTP handlers are reachable yet.
-- The match routes do not apply the auth middleware, so they will return 401 until it is added.
-- `cmd/seed` uses a stub cleanup that puts the whole CV text into `summary` and `experience` instead of calling an LLM, so section embeddings are coarse.
+- There are no HTTP routes for signup or signin yet, so the API can't issue tokens.
+- CV processing runs inside the upload request and can take minutes.
 - `cmd/loader` and `cmd/local` use hardcoded user IDs, and `cmd/loader` uses a hardcoded LinkedIn search (Senior Software Engineer, Copenhagen, 1 page). `cmd/loader` does not run migrations.
 - LinkedIn scraping depends on page structure and may break over time.
