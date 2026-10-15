@@ -6,6 +6,7 @@ import (
 	"errors"
 	"html"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -18,9 +19,40 @@ import (
 const (
 	baseDomain      = "jobindex.dk"
 	provider        = "jobindex"
-	searchLink      = "https://www.jobindex.dk/jobsoegning?address=Else+Alfelts+Vej+89%2C+2tv%2C+2300+K%C3%B8benhavn+S&employment_type=1&radius=50&jobage=7&q=senior+software+engineer"
 	defaultMaxPages = 4
+
+	// DefaultSearchURL is the public Jobindex job search page.
+	DefaultSearchURL = "https://www.jobindex.dk/jobsoegning"
 )
+
+var (
+	// ErrSearchURLRequired is returned when a search is started without a URL.
+	ErrSearchURLRequired = errors.New("jobindex: search URL is required")
+)
+
+// SearchURL builds a Jobindex job search URL for query and location on top of
+// base. An empty base means DefaultSearchURL. Existing query parameters on
+// base are kept; q and address are only set when non-empty.
+func SearchURL(base, query, location string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = DefaultSearchURL
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+
+	values := u.Query()
+	if q := strings.TrimSpace(query); q != "" {
+		values.Set("q", q)
+	}
+	if l := strings.TrimSpace(location); l != "" {
+		values.Set("address", l)
+	}
+	u.RawQuery = values.Encode()
+	return u.String(), nil
+}
 
 var jobIndexJobIDPattern = regexp.MustCompile(`/(?:jobannonce|job)/([A-Za-z0-9]+)`)
 var jobIndexStashPattern = regexp.MustCompile(`(?s)var\s+Stash\s*=\s*(\{.*?\});`)
@@ -71,12 +103,23 @@ func extractJobIndexJobID(detailsURL string) string {
 type Service struct {
 	SearchLinkPage string
 	MaxPages       int
+	// Transport performs the HTTP requests. Nil means http.DefaultTransport.
+	// Set it to inject an instrumented transport (metrics, tracing).
+	Transport http.RoundTripper
 }
 
+func (s *Service) transport() http.RoundTripper {
+	if s != nil && s.Transport != nil {
+		return s.Transport
+	}
+	return http.DefaultTransport
+}
+
+// SearchJobs scrapes up to MaxPages result pages starting at SearchLinkPage.
 func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
 	startURL := strings.TrimSpace(s.SearchLinkPage)
 	if startURL == "" {
-		startURL = searchLink
+		return nil, ErrSearchURLRequired
 	}
 
 	parsedURL, err := url.Parse(startURL)
@@ -101,6 +144,7 @@ func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
+	c.WithTransport(s.transport())
 
 	seenPages := map[string]struct{}{}
 	seenJobs := map[string]struct{}{}
@@ -295,6 +339,7 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
+	c.WithTransport(s.transport())
 
 	details := &entities.JobDetails{
 		ID:       strings.TrimSpace(job.ID),

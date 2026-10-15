@@ -79,6 +79,14 @@ tags:
       key is created; afterwards only its `prefix` is shown, so store the
       secret somewhere safe straight away. Revoking a key takes effect
       immediately.
+  - name: Job searches
+    description: |
+      Saved searches that run on a schedule. Every search runs against all
+      supported job portals; you only say what to look for, where and how
+      often. Runs happen in the background.
+  - name: Job portals
+    description: |
+      The job portals the platform searches, and suggestions for new ones.
 
 security:
   - sessionToken: []
@@ -329,6 +337,362 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /job-searches:
+    post:
+      operationId: createJobSearch
+      tags: [Job searches]
+      summary: Create a job search
+      description: |
+        Saves a search that runs on a schedule against every supported job
+        portal (see `GET /providers`). An enabled search is due straight
+        away, so its first run starts on the scheduler's next tick; after
+        that it runs once per `frequency`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobSearchRequest'
+            example:
+              name: Go jobs in Copenhagen
+              query: senior go engineer
+              location: Copenhagen
+              frequency: daily
+      responses:
+        '201':
+          description: The search was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSearch'
+              examples:
+                jobSearch:
+                  $ref: '#/components/examples/JobSearch'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listJobSearches
+      tags: [Job searches]
+      summary: List job searches
+      description: Returns the current user's job searches, newest first.
+      responses:
+        '200':
+          description: The caller's job searches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSearchList'
+              example:
+                object: list
+                data:
+                  - object: job_search
+                    id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+                    name: Go jobs in Copenhagen
+                    query: senior go engineer
+                    location: Copenhagen
+                    frequency: daily
+                    enabled: true
+                    last_run_at: '2026-10-16T09:00:04Z'
+                    next_run_at: '2026-10-17T09:00:04Z'
+                    created_at: '2026-10-15T09:00:00Z'
+                    updated_at: '2026-10-16T09:00:04Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /job-searches/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The id of the job search.
+        schema:
+          $ref: '#/components/schemas/Ulid'
+    get:
+      operationId: getJobSearch
+      tags: [Job searches]
+      summary: Retrieve a job search
+      description: Returns one of the current user's job searches.
+      responses:
+        '200':
+          description: The job search.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSearch'
+              examples:
+                jobSearch:
+                  $ref: '#/components/examples/JobSearch'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/JobSearchNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateJobSearch
+      tags: [Job searches]
+      summary: Update a job search
+      description: |
+        Updates the fields present in the body; omitted fields keep their
+        value.
+
+        - Setting `enabled` to `false` pauses the search and clears
+          `next_run_at`.
+        - Setting it back to `true` makes the search due straight away.
+        - Changing `frequency` on a search that has already run reschedules
+          it from `last_run_at`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateJobSearchRequest'
+            examples:
+              pause:
+                summary: Pause a search
+                value:
+                  enabled: false
+              weekly:
+                summary: Run weekly in Aarhus
+                value:
+                  location: Aarhus
+                  frequency: weekly
+      responses:
+        '200':
+          description: The updated job search.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSearch'
+              example:
+                object: job_search
+                id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+                name: Go jobs in Copenhagen
+                query: senior go engineer
+                location: Copenhagen
+                frequency: daily
+                enabled: false
+                last_run_at: '2026-10-16T09:00:04Z'
+                next_run_at: null
+                created_at: '2026-10-15T09:00:00Z'
+                updated_at: '2026-10-16T12:30:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/JobSearchNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: deleteJobSearch
+      tags: [Job searches]
+      summary: Delete a job search
+      description: Deletes one of the current user's job searches. It stops running immediately.
+      responses:
+        '200':
+          description: The job search was deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedJobSearch'
+              example:
+                object: job_search
+                id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+                deleted: true
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/JobSearchNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /job-searches/{id}/run:
+    post:
+      operationId: runJobSearch
+      tags: [Job searches]
+      summary: Run a job search now
+      description: |
+        Queues an enabled search to run on the scheduler's next tick, instead
+        of waiting for `next_run_at`. The run happens in the background, so
+        the response is `202 Accepted` with `next_run_at` set to now. A
+        disabled search cannot be run; enable it first.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the job search.
+          schema:
+            $ref: '#/components/schemas/Ulid'
+      responses:
+        '202':
+          description: The run was queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSearch'
+              examples:
+                jobSearch:
+                  $ref: '#/components/examples/JobSearch'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/JobSearchNotFound'
+        '409':
+          description: The job search is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: invalid_request_error
+                  code: job_search_disabled
+                  message: The job search is disabled. Enable it before running it.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /providers:
+    get:
+      operationId: listProviders
+      tags: [Job portals]
+      summary: List supported job portals
+      description: |
+        Returns the job portals the platform searches. This list is
+        informational: every job search runs against all of them, and there
+        is nothing to choose. To ask for another portal, use
+        `POST /portal-suggestions`.
+      responses:
+        '200':
+          description: The supported portals, sorted by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderList'
+              example:
+                object: list
+                data:
+                  - object: provider
+                    name: jobindex
+                    display_name: Jobindex
+                    website: https://www.jobindex.dk
+                    coverage: Denmark
+                  - object: provider
+                    name: linkedin
+                    display_name: LinkedIn
+                    website: https://www.linkedin.com/jobs
+                    coverage: Worldwide
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /portal-suggestions:
+    post:
+      operationId: createPortalSuggestion
+      tags: [Job portals]
+      summary: Suggest a job portal
+      description: |
+        Suggests a job portal the platform should also search. The team
+        reviews suggestions and builds support for the ones it accepts; the
+        suggestion's `status` shows how far it got.
+
+        URLs are normalized before they are stored (`https`, lowercase host
+        without `www.`, no trailing slash or fragment), and a scheme is
+        optional: `stepstone.de` and `https://www.StepStone.de/` are the same
+        suggestion. Suggesting the same portal twice returns `409` with code
+        `portal_already_suggested`; suggesting a portal that is already
+        supported returns `409` with code `portal_already_supported`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePortalSuggestionRequest'
+            example:
+              name: StepStone
+              url: https://www.stepstone.de
+              note: Most of the Go roles in Germany are posted here.
+      responses:
+        '201':
+          description: The suggestion was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalSuggestion'
+              examples:
+                suggestion:
+                  $ref: '#/components/examples/PortalSuggestion'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '409':
+          description: |
+            You already suggested this portal (`portal_already_suggested`;
+            the message includes the existing suggestion's id), or the portal
+            is already searched (`portal_already_supported`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                suggested:
+                  summary: Already suggested
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: portal_already_suggested
+                      message: You have already suggested this portal as 01JA3C4D5E6F7G8H9J0K1M2N3P.
+                      param: url
+                supported:
+                  summary: Already supported
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: portal_already_supported
+                      message: This portal is already searched. See GET /providers.
+                      param: url
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listPortalSuggestions
+      tags: [Job portals]
+      summary: List your portal suggestions
+      description: Returns the portals the current user has suggested, newest first.
+      responses:
+        '200':
+          description: The caller's suggestions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalSuggestionList'
+              example:
+                object: list
+                data:
+                  - object: portal_suggestion
+                    id: 01JA3C4D5E6F7G8H9J0K1M2N3P
+                    name: StepStone
+                    url: https://stepstone.de
+                    note: Most of the Go roles in Germany are posted here.
+                    status: planned
+                    created_at: '2026-10-16T10:00:00Z'
+                    updated_at: '2026-10-16T14:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   securitySchemes:
     sessionToken:
@@ -513,6 +877,229 @@ components:
           type: boolean
           const: true
 
+    Frequency:
+      type: string
+      description: |
+        How often a job search runs: `hourly`, `daily` or `weekly`.
+      enum: [hourly, daily, weekly]
+
+    CreateJobSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Keywords to search for, such as a job title or skill.
+        location:
+          type: string
+          maxLength: 200
+          description: City, region or country to search in. Optional.
+        name:
+          type: string
+          maxLength: 100
+          description: A label for the search. Defaults to `query`.
+        frequency:
+          allOf:
+            - $ref: '#/components/schemas/Frequency'
+          default: daily
+        enabled:
+          type: boolean
+          default: true
+          description: Whether the search runs on its schedule.
+
+    UpdateJobSearchRequest:
+      type: object
+      description: Every field is optional; only the fields sent are changed.
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 200
+        location:
+          type: string
+          maxLength: 200
+          description: Send an empty string to search everywhere.
+        name:
+          type: string
+          maxLength: 100
+          description: Send an empty string to reset it to `query`.
+        frequency:
+          $ref: '#/components/schemas/Frequency'
+        enabled:
+          type: boolean
+
+    JobSearch:
+      type: object
+      description: |
+        A saved search that runs on a schedule against every supported job
+        portal.
+      required: [object, id, name, query, location, frequency, enabled, last_run_at, next_run_at, created_at, updated_at]
+      properties:
+        object:
+          type: string
+          const: job_search
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+        query:
+          type: string
+        location:
+          type: string
+          description: Empty when the search is not limited to a location.
+        frequency:
+          $ref: '#/components/schemas/Frequency'
+        enabled:
+          type: boolean
+        last_run_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the search last ran, or `null` if it has not run yet.
+        next_run_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the search is due to run next, or `null` while it is disabled.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    JobSearchList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobSearch'
+
+    DeletedJobSearch:
+      type: object
+      required: [object, id, deleted]
+      properties:
+        object:
+          type: string
+          const: job_search
+        id:
+          $ref: '#/components/schemas/Ulid'
+        deleted:
+          type: boolean
+          const: true
+
+    Provider:
+      type: object
+      description: A job portal the platform searches.
+      required: [object, name, display_name, website, coverage]
+      properties:
+        object:
+          type: string
+          const: provider
+        name:
+          type: string
+          description: Stable identifier, also used as the provider of scraped jobs.
+          examples:
+            - linkedin
+        display_name:
+          type: string
+          examples:
+            - LinkedIn
+        website:
+          type: string
+          format: uri
+        coverage:
+          type: string
+          description: The country or region the portal lists jobs for.
+          examples:
+            - Denmark
+
+    ProviderList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Provider'
+
+    PortalSuggestionStatus:
+      type: string
+      description: |
+        Where the suggestion is in review:
+
+        - `submitted`: received, not reviewed yet.
+        - `planned`: accepted; support is being built.
+        - `added`: the portal is now searched.
+        - `declined`: the portal will not be added.
+      enum: [submitted, planned, added, declined]
+
+    CreatePortalSuggestionRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          description: |
+            The portal's address, for example `https://www.stepstone.de`. The
+            scheme is optional and defaults to `https`.
+        name:
+          type: string
+          maxLength: 100
+          description: The portal's name. Defaults to the URL's host.
+        note:
+          type: string
+          maxLength: 1000
+          description: Anything that helps the team, such as which jobs you find there.
+
+    PortalSuggestion:
+      type: object
+      description: A job portal a user asked the platform to support.
+      required: [object, id, name, url, note, status, created_at, updated_at]
+      properties:
+        object:
+          type: string
+          const: portal_suggestion
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+          description: The normalized URL.
+        note:
+          type: string
+        status:
+          $ref: '#/components/schemas/PortalSuggestionStatus'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PortalSuggestionList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortalSuggestion'
+
     Error:
       type: object
       required: [type, message]
@@ -548,6 +1135,9 @@ components:
             - invalid_api_key
             - email_already_used
             - phone_already_used
+            - job_search_disabled
+            - portal_already_suggested
+            - portal_already_supported
             - internal_error
             - timeout
         message:
@@ -649,6 +1239,19 @@ components:
               message: No such API key.
               param: id
 
+    JobSearchNotFound:
+      description: The job search does not exist or belongs to another user.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              type: invalid_request_error
+              code: resource_missing
+              message: No such job search.
+              param: id
+
     InternalError:
       description: An unexpected error on our side. No internal details are exposed.
       content:
@@ -684,3 +1287,28 @@ components:
           last_name: Lovelace
           email: ada@example.com
           phone: '+4512345678'
+    JobSearch:
+      summary: A job search
+      value:
+        object: job_search
+        id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+        name: Go jobs in Copenhagen
+        query: senior go engineer
+        location: Copenhagen
+        frequency: daily
+        enabled: true
+        last_run_at: null
+        next_run_at: '2026-10-16T09:00:00Z'
+        created_at: '2026-10-16T09:00:00Z'
+        updated_at: '2026-10-16T09:00:00Z'
+    PortalSuggestion:
+      summary: A portal suggestion
+      value:
+        object: portal_suggestion
+        id: 01JA3C4D5E6F7G8H9J0K1M2N3P
+        name: StepStone
+        url: https://stepstone.de
+        note: Most of the Go roles in Germany are posted here.
+        status: submitted
+        created_at: '2026-10-16T10:00:00Z'
+        updated_at: '2026-10-16T10:00:00Z'

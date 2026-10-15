@@ -206,7 +206,7 @@ CI (`.github/workflows`) runs lint and tests on pushes to `main`, `staging`, `te
 
 `make start` runs the server. `GET /healthz` returns `{"status":"ok"}` when the database is reachable, and `503` otherwise. On `SIGINT`/`SIGTERM` the server stops accepting requests and lets in-flight ones finish for up to 10 seconds.
 
-CV routes (`internal/servers/cv`), all behind the Bearer JWT middleware:
+CV routes (`internal/servers/cv`), all authenticated with a Bearer session token (JWT) or API key:
 
 | Method | Path               | Description                                    |
 |--------|--------------------|------------------------------------------------|
@@ -216,7 +216,7 @@ CV routes (`internal/servers/cv`), all behind the Bearer JWT middleware:
 | PATCH  | `/cv/`             | Not implemented (501)                          |
 | DELETE | `/cv/:id`          | Delete a CV, returns 204                       |
 
-Match routes (`internal/servers/match`), also behind the Bearer JWT middleware:
+Match routes (`internal/servers/match`), authenticated the same way:
 
 | Method | Path                      | Description                                  |
 |--------|---------------------------|----------------------------------------------|
@@ -224,11 +224,34 @@ Match routes (`internal/servers/match`), also behind the Bearer JWT middleware:
 | POST   | `/match/job/:id`          | Match against a stored job                   |
 | POST   | `/match/job-link`         | Not implemented (501)                        |
 
-There are no HTTP routes yet for signup, signin or profile, although the users service implements them.
+Accounts and API keys: `POST /auth/signup`, `POST /auth/signin`, `GET /me`, and `POST`/`GET /api-keys`, `DELETE /api-keys/:id`. The full reference, with request and response examples, is in [`api/openapi.yaml`](api/openapi.yaml).
+
+### Job searches
+
+A job search is a saved query (`query`, optional `location`) that runs on a schedule (`hourly`, `daily` or `weekly`) against **every** supported job portal. Users don't pick a portal. A new or re-enabled search is due straight away, and disabling a search clears its `next_run_at`. Runs happen in the background: the API only sets `next_run_at`, and the scheduler picks up searches that are due.
+
+| Method | Path                       | Description                                              |
+|--------|----------------------------|----------------------------------------------------------|
+| POST   | `/job-searches`            | Create a search, returns 201                             |
+| GET    | `/job-searches`            | List the user's searches (`{"object":"list","data":[...]}`) |
+| GET    | `/job-searches/:id`        | Retrieve a search                                        |
+| PATCH  | `/job-searches/:id`        | Update the fields sent (e.g. `{"enabled": false}`)       |
+| DELETE | `/job-searches/:id`        | Delete a search                                          |
+| POST   | `/job-searches/:id/run`    | Queue an enabled search to run now, returns 202          |
+| GET    | `/providers`               | Read-only list of supported portals (LinkedIn, Jobindex) |
+| POST   | `/portal-suggestions`      | Suggest a new portal (`url`, optional `name`, `note`); 409 if already suggested or supported |
+| GET    | `/portal-suggestions`      | List the user's suggestions and their review `status`    |
+
+```bash
+curl -X POST localhost:8080/job-searches \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"query":"senior go engineer","location":"Copenhagen","frequency":"daily"}'
+```
+
+Portals are implemented in `internal/providers` on top of the scrapers in `internal/scraper`. Each provider builds its search URL from the query and location.
 
 ## Limitations
 
-- There are no HTTP routes for signup or signin yet, so the API can't issue tokens.
 - CV processing runs inside the upload request and can take minutes.
 - `cmd/loader` and `cmd/local` use hardcoded user IDs, and `cmd/loader` uses a hardcoded LinkedIn search (Senior Software Engineer, Copenhagen, 1 page). `cmd/loader` does not run migrations.
 - LinkedIn scraping depends on page structure and may break over time.
