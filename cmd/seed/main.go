@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,11 +12,15 @@ import (
 	"time"
 
 	"cv-evaluator/db"
+	"cv-evaluator/internal/config"
+	"cv-evaluator/internal/llm"
+	"cv-evaluator/internal/llm/deepseek"
 	"cv-evaluator/internal/llm/ollama"
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/users"
 
+	deepseekLib "github.com/cohesion-org/deepseek-go"
 	"github.com/joho/godotenv"
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -47,8 +50,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	ctx := context.Background()
-	dbase, err := db.SetupDatabase()
+	dbase, err := db.Open(cfg.Database)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -57,13 +65,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL")), "/")
-	if baseURL == "" {
-		log.Fatal("OLLAMA_BASE_URL is required")
+	ollamaLLM := ollama.New(&http.Client{Timeout: 30 * time.Minute}, cfg.OllamaBaseURL)
+	deepseekLLM := deepseek.New(deepseekLib.NewClient(cfg.DeepSeekAPIKey))
+	cleaner, err := llm.NewCVCleaner(cfg.CleanupProvider, deepseekLLM, ollamaLLM)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	llm := ollama.New(&http.Client{Timeout: 30 * time.Minute}, baseURL)
-	svc := users.NewWithAuth(dbase, localCleanupService{}, llm, "seed-local-jwt-secret", time.Hour)
+	svc := users.NewWithAuth(dbase, cleaner, ollamaLLM, cfg.JWTSecret, time.Hour)
 
 	userID, created, err := ensureUser(ctx, dbase, svc, users.SignupRequest{
 		FirstName: firstName,
@@ -122,22 +131,4 @@ func ensureUser(ctx context.Context, dbase *gorm.DB, svc *users.Service, req use
 	}
 
 	return created.ID, true, nil
-}
-
-type localCleanupService struct{}
-
-func (localCleanupService) CleanupCV(_ context.Context, content string) (string, error) {
-	payload := map[string]interface{}{
-		"summary":    content,
-		"experience": content,
-		"skills":     []string{},
-		"education":  []string{},
-		"title":      "Software Engineer",
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	return string(b), nil
 }
