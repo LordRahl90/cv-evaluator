@@ -1,0 +1,686 @@
+openapi: 3.1.0
+
+info:
+  title: CV Evaluator API
+  version: 0.1.0
+  summary: Match CVs against job postings with semantic search.
+  description: |
+    The CV Evaluator API is organized around REST. It has predictable,
+    resource-oriented URLs, accepts JSON request bodies, returns JSON
+    responses, and uses standard HTTP response codes, authentication and verbs.
+
+    ## Authentication
+
+    Every request other than sign up and sign in must be authenticated with a
+    bearer credential in the `Authorization` header. Two kinds of credential
+    are accepted, and they are interchangeable on every authenticated endpoint:
+
+    | Credential | Looks like | Get one from | Lifetime |
+    |---|---|---|---|
+    | Session token | a JWT (`eyJhbGciOi...`) | `POST /auth/signup` or `POST /auth/signin` | 24 hours |
+    | API key | `sk_live_` followed by 40 characters | `POST /api-keys` | until revoked |
+
+    ```http
+    Authorization: Bearer sk_live_<your_api_key>
+    ```
+
+    Use session tokens from interactive clients (a browser or mobile app) and
+    API keys from scripts, servers and CI. API keys carry the same privileges
+    as your account, so keep them secret: do not commit them to source control
+    or embed them in client-side code. If a key leaks, revoke it with
+    `DELETE /api-keys/{id}` and create a new one.
+
+    ## Errors
+
+    The API uses conventional HTTP status codes: `2xx` means success, `4xx`
+    means the request was rejected because of something the caller sent, and
+    `5xx` means something went wrong on our side.
+
+    Every error response has the same shape, an `error` object with a `type`,
+    an optional `code`, a human-readable `message` and, when a specific request
+    parameter is at fault, a `param`:
+
+    ```json
+    {
+      "error": {
+        "type": "invalid_request_error",
+        "code": "parameter_missing",
+        "message": "The email parameter is required.",
+        "param": "email"
+      }
+    }
+    ```
+
+    Branch on `type` and `code`; they are stable. `message` is meant for
+    humans and may change.
+
+    ## Identifiers
+
+    Object ids are [ULIDs](https://github.com/ulid/spec): 26-character,
+    lexicographically sortable strings such as `01J9ZK6H3P8Q4W2X5Y7R1T0V3N`.
+  contact:
+    name: CV Evaluator
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Authentication
+    description: |
+      Create an account and exchange credentials for a session token.
+      These endpoints are public.
+  - name: Users
+    description: The account behind the credential used to call the API.
+  - name: API keys
+    description: |
+      Personal API keys let scripts and servers call the API on your behalf
+      without a password. The full secret is returned exactly once, when the
+      key is created; afterwards only its `prefix` is shown, so store the
+      secret somewhere safe straight away. Revoking a key takes effect
+      immediately.
+
+security:
+  - sessionToken: []
+  - apiKey: []
+
+paths:
+  /auth/signup:
+    post:
+      operationId: signup
+      tags: [Authentication]
+      summary: Create an account
+      description: |
+        Creates a new user and returns a session token, so the caller is
+        signed in straight away. Email addresses are case-insensitive and
+        must be unique, as must phone numbers when given.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+            example:
+              first_name: Ada
+              last_name: Lovelace
+              email: ada@example.com
+              phone: '+4512345678'
+              password: correct-horse-battery
+      responses:
+        '201':
+          description: The account was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                session:
+                  $ref: '#/components/examples/Session'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '409':
+          description: |
+            An account with this email (`email_already_used`) or phone number
+            (`phone_already_used`) already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                email:
+                  summary: Email already used
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: email_already_used
+                      message: An account with this email already exists.
+                      param: email
+                phone:
+                  summary: Phone already used
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: phone_already_used
+                      message: An account with this phone number already exists.
+                      param: phone
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/signin:
+    post:
+      operationId: signin
+      tags: [Authentication]
+      summary: Sign in
+      description: |
+        Exchanges an email and password for a new session token. For
+        security, the response does not reveal whether the email exists:
+        an unknown email and a wrong password both return
+        `invalid_credentials`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SigninRequest'
+            example:
+              email: ada@example.com
+              password: correct-horse-battery
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                session:
+                  $ref: '#/components/examples/Session'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: The email or password is incorrect.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: authentication_error
+                  code: invalid_credentials
+                  message: The email or password is incorrect.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /me:
+    get:
+      operationId: getCurrentUser
+      tags: [Users]
+      summary: Retrieve the current user
+      description: |
+        Returns the user that owns the credential on the request. Handy for
+        checking that a session token or API key works.
+      responses:
+        '200':
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                user:
+                  $ref: '#/components/examples/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api-keys:
+    post:
+      operationId: createApiKey
+      tags: [API keys]
+      summary: Create an API key
+      description: |
+        Creates a new personal API key for the current user.
+
+        **The `secret` is only returned in this response.** It is never
+        stored in plain text and cannot be retrieved again; if you lose it,
+        revoke the key and create another.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiKeyRequest'
+            example:
+              name: CI pipeline
+      responses:
+        '201':
+          description: The key was created. Copy the `secret` now.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyWithSecret'
+              example:
+                object: api_key
+                id: 01J9ZM2B7C4D6E8F0G1H2J3K4M
+                name: CI pipeline
+                prefix: sk_live_7Qm2
+                secret: sk_live_7Qm2_example_secret_shown_only_once
+                created_at: '2026-10-16T09:30:00Z'
+                last_used_at: null
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listApiKeys
+      tags: [API keys]
+      summary: List API keys
+      description: |
+        Returns the current user's active API keys, newest first. Revoked
+        keys are not included. Secrets are never returned; use `prefix` to
+        tell keys apart.
+      responses:
+        '200':
+          description: The caller's keys.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyList'
+              example:
+                object: list
+                data:
+                  - object: api_key
+                    id: 01J9ZM2B7C4D6E8F0G1H2J3K4M
+                    name: CI pipeline
+                    prefix: sk_live_7Qm2
+                    created_at: '2026-10-16T09:30:00Z'
+                    last_used_at: '2026-10-16T11:02:17Z'
+                  - object: api_key
+                    id: 01J9ZK6H3P8Q4W2X5Y7R1T0V3N
+                    name: Laptop
+                    prefix: sk_live_Zq81
+                    created_at: '2026-10-01T08:00:00Z'
+                    last_used_at: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api-keys/{id}:
+    delete:
+      operationId: deleteApiKey
+      tags: [API keys]
+      summary: Revoke an API key
+      description: |
+        Permanently revokes one of the current user's API keys. Requests made
+        with the key fail with `invalid_api_key` from this moment on. This
+        cannot be undone.
+
+        Keys belonging to other users are reported as not found.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the key to revoke.
+          schema:
+            $ref: '#/components/schemas/Ulid'
+      responses:
+        '200':
+          description: The key was revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedApiKey'
+              example:
+                object: api_key
+                id: 01J9ZM2B7C4D6E8F0G1H2J3K4M
+                deleted: true
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    sessionToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A session token returned by `POST /auth/signup` or
+        `POST /auth/signin`, sent as `Authorization: Bearer <token>`.
+        Session tokens expire after 24 hours; sign in again to get a new one.
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: sk_live_...
+      description: |
+        A personal API key created with `POST /api-keys`, sent as
+        `Authorization: Bearer sk_live_...`. Keys do not expire, but can be
+        revoked at any time.
+
+  schemas:
+    Ulid:
+      type: string
+      description: A ULID, the format of every object id.
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+      minLength: 26
+      maxLength: 26
+      examples:
+        - 01J9ZK6H3P8Q4W2X5Y7R1T0V3N
+
+    SignupRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          description: The user's email address. Stored lowercased; must be unique.
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: At least 8 characters and at most 72 bytes.
+          writeOnly: true
+        first_name:
+          type: string
+          description: Given name.
+        last_name:
+          type: string
+          description: Family name.
+        phone:
+          type: string
+          description: Phone number, free-form. Must be unique when given.
+
+    SigninRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          writeOnly: true
+
+    User:
+      type: object
+      description: A person with an account.
+      required: [object, id, first_name, last_name, email, phone]
+      properties:
+        object:
+          type: string
+          const: user
+          description: String representing the object's type.
+        id:
+          $ref: '#/components/schemas/Ulid'
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          description: Empty when no phone number was given.
+
+    Session:
+      type: object
+      description: A signed-in session.
+      required: [object, token, token_type, user]
+      properties:
+        object:
+          type: string
+          const: session
+        token:
+          type: string
+          description: |
+            The session token. Send it as `Authorization: Bearer <token>`.
+            Valid for 24 hours.
+        token_type:
+          type: string
+          const: Bearer
+        user:
+          $ref: '#/components/schemas/User'
+
+    CreateApiKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: |
+            A label to help you recognise the key later, such as where it is
+            used. Leading and trailing whitespace is trimmed.
+
+    ApiKey:
+      type: object
+      description: A personal API key. The secret is never included.
+      required: [object, id, name, prefix, created_at, last_used_at]
+      properties:
+        object:
+          type: string
+          const: api_key
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+          description: The label given at creation.
+        prefix:
+          type: string
+          description: The first 12 characters of the key, safe to display.
+          examples:
+            - sk_live_7Qm2
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When the key last authenticated a request, or `null` if it never
+            has. Updated at most once a minute.
+
+    ApiKeyWithSecret:
+      description: An API key as returned at creation, including its secret.
+      allOf:
+        - $ref: '#/components/schemas/ApiKey'
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: |
+                The full API key: `sk_live_` followed by 40 alphanumeric
+                characters. Shown only once; it cannot be retrieved again.
+
+    ApiKeyList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKey'
+
+    DeletedApiKey:
+      type: object
+      required: [object, id, deleted]
+      properties:
+        object:
+          type: string
+          const: api_key
+        id:
+          $ref: '#/components/schemas/Ulid'
+        deleted:
+          type: boolean
+          const: true
+
+    Error:
+      type: object
+      required: [type, message]
+      properties:
+        type:
+          type: string
+          description: |
+            The category of error:
+
+            - `invalid_request_error`: the request was malformed, failed
+              validation, referenced a missing object, or conflicts with
+              existing data.
+            - `authentication_error`: no valid credential was supplied.
+            - `api_error`: something went wrong on our side. These are rare;
+              retrying later is safe for idempotent requests.
+          enum:
+            - invalid_request_error
+            - authentication_error
+            - api_error
+        code:
+          type: string
+          description: |
+            A short, stable string identifying the specific error, when there
+            is one.
+          enum:
+            - invalid_json
+            - parameter_missing
+            - parameter_invalid
+            - resource_missing
+            - missing_credentials
+            - invalid_credentials
+            - invalid_token
+            - invalid_api_key
+            - email_already_used
+            - phone_already_used
+            - internal_error
+            - timeout
+        message:
+          type: string
+          description: A human-readable explanation. May change; do not parse it.
+        param:
+          type: string
+          description: The request parameter the error relates to, if any.
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
+
+  responses:
+    InvalidRequest:
+      description: |
+        The request was malformed (`invalid_json`) or a parameter was missing
+        (`parameter_missing`) or invalid (`parameter_invalid`). `param` names
+        the offending field.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missing:
+              summary: Missing parameter
+              value:
+                error:
+                  type: invalid_request_error
+                  code: parameter_missing
+                  message: The email parameter is required.
+                  param: email
+            invalid:
+              summary: Invalid parameter
+              value:
+                error:
+                  type: invalid_request_error
+                  code: parameter_invalid
+                  message: The password must be at least 8 characters long.
+                  param: password
+            json:
+              summary: Malformed body
+              value:
+                error:
+                  type: invalid_request_error
+                  code: invalid_json
+                  message: The request body must be a valid JSON object.
+
+    Unauthenticated:
+      description: |
+        No credential was sent (`missing_credentials`), or the session token
+        (`invalid_token`) or API key (`invalid_api_key`) is invalid, expired
+        or revoked.
+      headers:
+        WWW-Authenticate:
+          description: Always `Bearer realm="cv-evaluator"`.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missing:
+              summary: No credential
+              value:
+                error:
+                  type: authentication_error
+                  code: missing_credentials
+                  message: "No valid credentials provided. Send an 'Authorization: Bearer <token>' header with a session token or API key."
+            token:
+              summary: Expired session token
+              value:
+                error:
+                  type: authentication_error
+                  code: invalid_token
+                  message: The session token is invalid or has expired.
+            apiKey:
+              summary: Revoked API key
+              value:
+                error:
+                  type: authentication_error
+                  code: invalid_api_key
+                  message: The API key provided is invalid or has been revoked.
+
+    NotFound:
+      description: The requested object does not exist or belongs to another user.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              type: invalid_request_error
+              code: resource_missing
+              message: No such API key.
+              param: id
+
+    InternalError:
+      description: An unexpected error on our side. No internal details are exposed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              type: api_error
+              code: internal_error
+              message: An unexpected error occurred. Please try again later.
+
+  examples:
+    User:
+      summary: A user
+      value:
+        object: user
+        id: 01J9ZK6H3P8Q4W2X5Y7R1T0V3N
+        first_name: Ada
+        last_name: Lovelace
+        email: ada@example.com
+        phone: '+4512345678'
+    Session:
+      summary: A session
+      value:
+        object: session
+        token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMUo5Wks2SDNQOFE0VzJYNVk3UjFUMFYzTiJ9.signature
+        token_type: Bearer
+        user:
+          object: user
+          id: 01J9ZK6H3P8Q4W2X5Y7R1T0V3N
+          first_name: Ada
+          last_name: Lovelace
+          email: ada@example.com
+          phone: '+4512345678'
