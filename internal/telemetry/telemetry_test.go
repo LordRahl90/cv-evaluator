@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cv-evaluator/internal/config"
+	"cv-evaluator/internal/telemetry/telemetrytest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,71 +17,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
-
-type testProviders struct {
-	reader *sdkmetric.ManualReader
-	spans  *tracetest.SpanRecorder
-}
-
-// installTestProviders swaps the global providers for in-memory SDK ones and
-// restores the previous providers when the test ends.
-func installTestProviders(t *testing.T) *testProviders {
-	t.Helper()
-	prevTP, prevMP := otel.GetTracerProvider(), otel.GetMeterProvider()
-
-	reader := sdkmetric.NewManualReader()
-	spans := tracetest.NewSpanRecorder()
-	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
-	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)))
-
-	t.Cleanup(func() {
-		otel.SetTracerProvider(prevTP)
-		otel.SetMeterProvider(prevMP)
-	})
-	return &testProviders{reader: reader, spans: spans}
-}
-
-// histogram returns the data points of the named histogram.
-func (p *testProviders) histogram(t *testing.T, name string) []metricdata.HistogramDataPoint[float64] {
-	t.Helper()
-	var rm metricdata.ResourceMetrics
-	require.NoError(t, p.reader.Collect(context.Background(), &rm))
-	for _, sm := range rm.ScopeMetrics {
-		for _, m := range sm.Metrics {
-			if m.Name != name {
-				continue
-			}
-			assert.Equal(t, "s", m.Unit)
-			h, ok := m.Data.(metricdata.Histogram[float64])
-			require.True(t, ok, "%s is not a float64 histogram", name)
-			return h.DataPoints
-		}
-	}
-	t.Fatalf("metric %s not recorded", name)
-	return nil
-}
-
-func attrsOf(set attribute.Set) map[string]string {
-	out := map[string]string{}
-	for _, kv := range set.ToSlice() {
-		out[string(kv.Key)] = kv.Value.Emit()
-	}
-	return out
-}
-
-func spanAttrs(s sdktrace.ReadOnlySpan) map[string]string {
-	out := map[string]string{}
-	for _, kv := range s.Attributes() {
-		out[string(kv.Key)] = kv.Value.Emit()
-	}
-	return out
-}
 
 func TestSetup_NoEndpointUsesNoopProviders(t *testing.T) {
 	prevTP, prevMP := otel.GetTracerProvider(), otel.GetMeterProvider()
@@ -134,7 +72,7 @@ func TestNewResource(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	attrs := attrsOf(*res.Set())
+	attrs := telemetrytest.Attrs(*res.Set())
 	assert.Equal(t, "cv-evaluator", attrs["service.name"])
 	assert.Equal(t, "1.2.3", attrs["service.version"])
 	assert.Equal(t, "staging", attrs["deployment.environment.name"])
@@ -142,72 +80,72 @@ func TestNewResource(t *testing.T) {
 }
 
 func TestStartRun_Success(t *testing.T) {
-	p := installTestProviders(t)
+	p := telemetrytest.Install(t)
 
 	ctx, end := StartRun(context.Background(), "scrape.linkedin")
 	assert.True(t, trace.SpanFromContext(ctx).SpanContext().IsValid(), "context must carry the run span")
 	end(nil)
 
-	points := p.histogram(t, MetricBackgroundRunDuration)
+	points := p.Histogram(t, MetricBackgroundRunDuration)
 	require.Len(t, points, 1)
 	assert.Equal(t, uint64(1), points[0].Count)
-	assert.Equal(t, map[string]string{"run.kind": "scrape.linkedin", "run.outcome": "success"}, attrsOf(points[0].Attributes))
+	assert.Equal(t, map[string]string{"run.kind": "scrape.linkedin", "run.outcome": "success"}, telemetrytest.Attrs(points[0].Attributes))
 
-	spans := p.spans.Ended()
+	spans := p.Spans()
 	require.Len(t, spans, 1)
 	assert.Equal(t, "background_run scrape.linkedin", spans[0].Name())
 	assert.Equal(t, trace.SpanKindInternal, spans[0].SpanKind())
-	assert.Equal(t, "success", spanAttrs(spans[0])["run.outcome"])
+	assert.Equal(t, "success", telemetrytest.KeyValues(spans[0].Attributes())["run.outcome"])
 	assert.Equal(t, codes.Unset, spans[0].Status().Code)
 }
 
 func TestStartRun_Error(t *testing.T) {
-	p := installTestProviders(t)
+	p := telemetrytest.Install(t)
 
 	_, end := StartRun(context.Background(), "pipeline.match")
 	end(errors.New("boom"))
 
-	points := p.histogram(t, MetricBackgroundRunDuration)
+	points := p.Histogram(t, MetricBackgroundRunDuration)
 	require.Len(t, points, 1)
-	assert.Equal(t, map[string]string{"run.kind": "pipeline.match", "run.outcome": "error"}, attrsOf(points[0].Attributes))
+	assert.Equal(t, map[string]string{"run.kind": "pipeline.match", "run.outcome": "error"}, telemetrytest.Attrs(points[0].Attributes))
 
-	spans := p.spans.Ended()
+	spans := p.Spans()
 	require.Len(t, spans, 1)
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
 	assert.Equal(t, "boom", spans[0].Status().Description)
 }
 
 func TestRunObserver_RecordsBackdatedRun(t *testing.T) {
-	p := installTestProviders(t)
+	p := telemetrytest.Install(t)
 
 	var obs RunObserver
 	obs.OnRunStart("pipeline.embed")
 	obs.OnRunEnd("pipeline.embed", 2*time.Second, nil)
 
-	points := p.histogram(t, MetricBackgroundRunDuration)
+	points := p.Histogram(t, MetricBackgroundRunDuration)
 	require.Len(t, points, 1)
 	assert.InDelta(t, 2.0, points[0].Sum, 0.001)
-	assert.Equal(t, map[string]string{"run.kind": "pipeline.embed", "run.outcome": "success"}, attrsOf(points[0].Attributes))
+	assert.Equal(t, map[string]string{"run.kind": "pipeline.embed", "run.outcome": "success"}, telemetrytest.Attrs(points[0].Attributes))
 
-	spans := p.spans.Ended()
+	spans := p.Spans()
 	require.Len(t, spans, 1)
 	assert.Equal(t, "background_run pipeline.embed", spans[0].Name())
 	assert.InDelta(t, (2 * time.Second).Seconds(), spans[0].EndTime().Sub(spans[0].StartTime()).Seconds(), 0.001)
 }
 
 func TestTrackExternal(t *testing.T) {
-	p := installTestProviders(t)
+	p := telemetrytest.Install(t)
 
 	_, end := TrackExternal(context.Background(), PeerDeepSeek, OpChatCompletion, attribute.String(AttrLLMTask, "job_match"))
 	end(nil)
 	_, end = TrackExternal(context.Background(), PeerDeepSeek, OpChatCompletion, attribute.String(AttrLLMTask, "job_match"))
 	end(errors.New("rate limited"))
 
-	points := p.histogram(t, MetricExternalRequestDuration)
+	points := p.Histogram(t, MetricExternalRequestDuration)
 	require.Len(t, points, 2)
 	got := map[string]uint64{}
 	for _, dp := range points {
-		attrs := attrsOf(dp.Attributes)
+		attrs := telemetrytest.Attrs(dp.Attributes)
 		assert.Equal(t, "deepseek", attrs["peer.service"])
 		assert.Equal(t, "chat_completion", attrs["operation"])
 		assert.Equal(t, "job_match", attrs["llm.task"])
@@ -215,7 +153,7 @@ func TestTrackExternal(t *testing.T) {
 	}
 	assert.Equal(t, map[string]uint64{"success": 1, "error": 1}, got)
 
-	spans := p.spans.Ended()
+	spans := p.Spans()
 	require.Len(t, spans, 2)
 	assert.Equal(t, "deepseek chat_completion", spans[0].Name())
 	assert.Equal(t, trace.SpanKindClient, spans[0].SpanKind())
@@ -223,7 +161,7 @@ func TestTrackExternal(t *testing.T) {
 }
 
 func TestNewTransport(t *testing.T) {
-	p := installTestProviders(t)
+	p := telemetrytest.Install(t)
 	prevProp := otel.GetTextMapPropagator()
 	t.Cleanup(func() { otel.SetTextMapPropagator(prevProp) })
 	otel.SetTextMapPropagator(propagation.TraceContext{})
@@ -253,21 +191,21 @@ func TestNewTransport(t *testing.T) {
 	do(WithOperation(context.Background(), OpCVCleanup), "/missing")
 	do(context.Background(), "/ok")
 
-	points := p.histogram(t, MetricExternalRequestDuration)
+	points := p.Histogram(t, MetricExternalRequestDuration)
 	got := map[string]string{}
 	for _, dp := range points {
-		attrs := attrsOf(dp.Attributes)
+		attrs := telemetrytest.Attrs(dp.Attributes)
 		assert.Equal(t, "ollama", attrs["peer.service"])
 		got[attrs["operation"]] = attrs["outcome"]
 	}
 	assert.Equal(t, map[string]string{"embedding": "success", "cv_cleanup": "error", "request": "success"}, got)
 
-	spans := p.spans.Ended()
+	spans := p.Spans()
 	require.Len(t, spans, 3)
 	assert.Equal(t, "ollama embedding", spans[0].Name())
 	assert.Equal(t, trace.SpanKindClient, spans[0].SpanKind())
-	assert.Equal(t, "embedding", spanAttrs(spans[0])["operation"])
-	assert.Equal(t, "ollama", spanAttrs(spans[0])["peer.service"])
+	assert.Equal(t, "embedding", telemetrytest.KeyValues(spans[0].Attributes())["operation"])
+	assert.Equal(t, "ollama", telemetrytest.KeyValues(spans[0].Attributes())["peer.service"])
 }
 
 func TestNewHTTPClient_KeepsClientSettings(t *testing.T) {
