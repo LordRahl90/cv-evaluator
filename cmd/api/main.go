@@ -107,7 +107,7 @@ func run() error {
 
 	// Job searches run against every supported portal; users can suggest more.
 	// Pass providers.WithTransport(rt) to Default to instrument scraper requests.
-	portals := providers.Default()
+	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
 	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, apiKeyVerifier)
 	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, apiKeyVerifier)
 
