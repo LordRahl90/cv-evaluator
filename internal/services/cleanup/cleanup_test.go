@@ -36,7 +36,7 @@ func TestService_CleanupCV(t *testing.T) {
 
 	svc := New(llmClient)
 
-	res, err := svc.CleanupCV(t.Context(), "./testdata/alugbin-abiodun-resume.pdf")
+	res, err := svc.CleanupCV(t.Context(), "./testdata/dummy-resume.pdf")
 	require.NoError(t, err)
 	require.NotEmpty(t, res)
 
@@ -52,7 +52,7 @@ func TestService_CleanupDeepSeek(t *testing.T) {
 	llmClient := deepseek.New(deepseekLib.NewClient(key))
 	svc := New(llmClient)
 
-	res, err := svc.CleanupCV(t.Context(), "./testdata/alugbin-abiodun-resume.pdf")
+	res, err := svc.CleanupCV(t.Context(), "./testdata/dummy-resume.pdf")
 	require.NoError(t, err)
 	require.NotEmpty(t, res)
 

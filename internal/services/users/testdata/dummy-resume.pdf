@@ -1,0 +1,60 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Length 1505 >>
+stream
+BT
+/F2 18 Tf 1 0 0 1 56 766 Tm (Jane Doe) Tj
+/F1 11 Tf 1 0 0 1 56 749 Tm (Senior Software Engineer) Tj
+/F1 10 Tf 1 0 0 1 56 733 Tm (jane.doe@example.com | +1 555 0100 | Springfield, Example Country) Tj
+/F2 13 Tf 1 0 0 1 56 698 Tm (Summary) Tj
+/F1 10 Tf 1 0 0 1 56 682 Tm (Backend engineer with 8 years of experience building distributed systems in Go.) Tj
+/F1 10 Tf 1 0 0 1 56 666 Tm (Focused on API design, data pipelines, observability and cloud infrastructure.) Tj
+/F2 13 Tf 1 0 0 1 56 631 Tm (Experience) Tj
+/F2 10 Tf 1 0 0 1 56 615 Tm (Senior Software Engineer, Acme Corp \(2021 - Present\)) Tj
+/F1 10 Tf 1 0 0 1 56 599 Tm (- Designed and built Go microservices handling 5k requests per second.) Tj
+/F1 10 Tf 1 0 0 1 56 583 Tm (- Migrated batch jobs to event-driven pipelines using Kafka and PostgreSQL.) Tj
+/F1 10 Tf 1 0 0 1 56 567 Tm (- Introduced OpenTelemetry tracing and reduced incident resolution time by 40%.) Tj
+/F2 10 Tf 1 0 0 1 56 551 Tm (Software Engineer, Example Labs \(2017 - 2021\)) Tj
+/F1 10 Tf 1 0 0 1 56 535 Tm (- Built REST and gRPC APIs in Go and Python for a logistics platform.) Tj
+/F1 10 Tf 1 0 0 1 56 519 Tm (- Maintained Kubernetes deployments and CI/CD pipelines on GitHub Actions.) Tj
+/F2 13 Tf 1 0 0 1 56 484 Tm (Skills) Tj
+/F1 10 Tf 1 0 0 1 56 468 Tm (Go, Python, SQL, PostgreSQL, Redis, Kafka, Docker, Kubernetes, AWS, gRPC, REST) Tj
+/F2 13 Tf 1 0 0 1 56 433 Tm (Education) Tj
+/F1 10 Tf 1 0 0 1 56 417 Tm (BSc Computer Science, Example University \(2013 - 2017\)) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Title (Jane Doe - Resume) /Author (Jane Doe) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000257 00000 n 
+0000000354 00000 n 
+0000000456 00000 n 
+0000002013 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+2080
+%%EOF

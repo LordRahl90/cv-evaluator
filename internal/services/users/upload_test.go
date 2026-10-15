@@ -78,7 +78,7 @@ func makeFileHeaderFromPath(t *testing.T, path string) *multipart.FileHeader {
 
 func TestService_UploadCV(t *testing.T) {
 	svc, user := newUploadTestService(t)
-	cvHeader := makeFileHeaderFromPath(t, "./testdata/alugbin-abiodun-resume.pdf")
+	cvHeader := makeFileHeaderFromPath(t, "./testdata/dummy-resume.pdf")
 
 	err := svc.UploadCV(t.Context(), user.ID, cvHeader)
 	require.NoError(t, err)

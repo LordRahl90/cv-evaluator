@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestService_Extract(t *testing.T) {
-	filename := "./testdata/alugbin-abiodun-resume.pdf"
+	filename := "./testdata/dummy-resume.pdf"
 
 	res, err := Extract(filename)
 	require.NoError(t, err)
@@ -27,7 +27,7 @@ func TestService_Extract(t *testing.T) {
 }
 
 func TestService_ExtractFromFIle(t *testing.T) {
-	filename := "./testdata/alugbin-abiodun-resume.pdf"
+	filename := "./testdata/dummy-resume.pdf"
 	file, err := os.Open(filename)
 	require.NoError(t, err)
 	require.NotNil(t, file)
@@ -42,7 +42,7 @@ func TestService_ExtractFromFIle(t *testing.T) {
 }
 
 func TestService_ExtractStructurally(t *testing.T) {
-	filename := "./testdata/alugbin-abiodun-resume.pdf"
+	filename := "./testdata/dummy-resume.pdf"
 
 	res, err := ExtractContent(t.Context(), filename)
 	require.NoError(t, err)

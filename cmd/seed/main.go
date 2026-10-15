@@ -34,7 +34,7 @@ func main() {
 		force     bool
 	)
 
-	flag.StringVar(&cvPath, "cv", "./data/alugbin-abiodun-resume.pdf", "Path to CV file")
+	flag.StringVar(&cvPath, "cv", "./data/dummy-resume.pdf", "Path to CV file")
 	flag.StringVar(&firstName, "first-name", "Alugbin", "User first name")
 	flag.StringVar(&lastName, "last-name", "Abiodun", "User last name")
 	flag.StringVar(&email, "email", "jane.doe@example.com", "User email")

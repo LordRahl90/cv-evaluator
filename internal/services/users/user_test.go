@@ -52,7 +52,7 @@ func TestService_processCV(t *testing.T) {
 	}, baseURL)
 
 	svc := New(db, llmClient, llmClient)
-	cv, err := os.Open("./testdata/alugbin-abiodun-resume.pdf")
+	cv, err := os.Open("./testdata/dummy-resume.pdf")
 	require.NoError(t, err)
 	require.NotNil(t, cv)
 	defer func() {
