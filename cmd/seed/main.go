@@ -35,8 +35,8 @@ func main() {
 	)
 
 	flag.StringVar(&cvPath, "cv", "./data/dummy-resume.pdf", "Path to CV file")
-	flag.StringVar(&firstName, "first-name", "Alugbin", "User first name")
-	flag.StringVar(&lastName, "last-name", "Abiodun", "User last name")
+	flag.StringVar(&firstName, "first-name", "Jane", "User first name")
+	flag.StringVar(&lastName, "last-name", "Doe", "User last name")
 	flag.StringVar(&email, "email", "jane.doe@example.com", "User email")
 	flag.StringVar(&phone, "phone", "+15550100", "User phone")
 	flag.StringVar(&password, "password", "password123", "User password (only used on first seed)")
