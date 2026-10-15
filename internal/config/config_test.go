@@ -75,3 +75,12 @@ func TestLoad_InvalidCleanupProvider(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CV_CLEANUP_PROVIDER")
 }
+
+func TestLoad_WithoutJWTSecret(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("JWT_SECRET", "")
+
+	cfg, err := Load(WithoutJWTSecret())
+	require.NoError(t, err)
+	assert.Empty(t, cfg.JWTSecret)
+}

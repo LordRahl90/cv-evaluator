@@ -44,6 +44,19 @@ type Config struct {
 	DeepSeekAPIKey  string
 	CleanupProvider string
 	JWTSecret       string
+
+	// jwtSecretOptional is set by WithoutJWTSecret for processes that never
+	// issue or verify tokens.
+	jwtSecretOptional bool
+}
+
+// Option changes how Load reads the configuration.
+type Option func(*Config)
+
+// WithoutJWTSecret lets a process that never issues or verifies tokens,
+// such as the background worker, start without JWT_SECRET.
+func WithoutJWTSecret() Option {
+	return func(c *Config) { c.jwtSecretOptional = true }
 }
 
 // IsDevelopment reports whether the app runs in development mode.
@@ -54,8 +67,8 @@ func (c *Config) IsDevelopment() bool {
 // Load reads the configuration from environment variables and validates it.
 // ENVIRONMENT defaults to production, so a missing setting fails closed.
 // Outside development, JWT_SECRET is required; in development a random
-// secret is generated when it is empty.
-func Load() (*Config, error) {
+// secret is generated when it is empty. WithoutJWTSecret drops both.
+func Load(opts ...Option) (*Config, error) {
 	cfg := &Config{
 		Environment: strings.ToLower(envOr("ENVIRONMENT", EnvProduction)),
 		Port:        envOr("PORT", defaultPort),
@@ -71,12 +84,15 @@ func Load() (*Config, error) {
 		CleanupProvider: strings.ToLower(envOr("CV_CLEANUP_PROVIDER", CleanupProviderDeepSeek)),
 		JWTSecret:       env("JWT_SECRET"),
 	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	if cfg.JWTSecret == "" {
+	if cfg.JWTSecret == "" && !cfg.jwtSecretOptional {
 		secret, err := randomSecret()
 		if err != nil {
 			return nil, err
@@ -106,7 +122,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.JWTSecret == "" && !c.IsDevelopment() {
+	if c.JWTSecret == "" && !c.IsDevelopment() && !c.jwtSecretOptional {
 		errs = append(errs, fmt.Errorf("JWT_SECRET is required when ENVIRONMENT is %q", c.Environment))
 	}
 

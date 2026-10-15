@@ -23,6 +23,8 @@ import (
 	"cv-evaluator/internal/llm/ollama"
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/pipeline"
+	pipelinesources "cv-evaluator/internal/pipeline/sources"
+	"cv-evaluator/internal/providers"
 	"cv-evaluator/internal/queue"
 	"cv-evaluator/internal/services/jobs"
 	"cv-evaluator/internal/services/matcher"
@@ -49,16 +51,10 @@ type options struct {
 	Observer pipeline.RunObserver
 }
 
-// sources returns the job search store and the portal fetcher.
-//
-// TODO(phase-3): replace NoSources with the adapter over the job search
-// store and the provider registry, e.g.
-//
-//	return pipelineadapter.New(dbase, providers.NewRegistry(client))
-//
-// Until then the scheduler finds no searches to run.
-func sources(_ *gorm.DB, _ *http.Client) (pipeline.SearchStore, pipeline.Fetcher) {
-	return pipeline.NoSources{}, pipeline.NoSources{}
+// sources returns the job search store and the portal fetcher. Scrapers use
+// the client's transport so outbound portal requests can be instrumented.
+func sources(dbase *gorm.DB, client *http.Client) (pipeline.SearchStore, pipeline.Fetcher) {
+	return pipelinesources.NewStore(dbase), pipelinesources.NewFetcher(providers.Default(providers.WithTransport(client.Transport)))
 }
 
 func run(opts options) error {
@@ -67,7 +63,7 @@ func run(opts options) error {
 		return err
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.Load(config.WithoutJWTSecret())
 	if err != nil {
 		return err
 	}
