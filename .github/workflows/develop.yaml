@@ -3,34 +3,39 @@ on:
   push:
     branches:
       - "develop"
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.MD"
 
   pull_request:
     branches:
       - "main"
       - "develop"
       - "testing"
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.MD"
+
+# One run per pull request (or branch) at a time: a new push cancels the
+# run for the commit it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
     name: Linting
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
 
+      # setup-go caches modules and the build cache, keyed on go.sum.
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: "1.26"
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Lint and Vet
         uses: golangci/golangci-lint-action@v9
@@ -41,11 +46,12 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
@@ -57,11 +63,12 @@ jobs:
   test-with-race:
     name: Test With Race
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
@@ -74,11 +81,12 @@ jobs:
   test-with-multiple-and-shuffle:
     name: Test With Shuffle and Multiple
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
