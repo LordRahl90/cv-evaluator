@@ -6,37 +6,28 @@ import (
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/testutil/postgres"
 
-	"github.com/oklog/ulid/v2"
 	"github.com/pgvector/pgvector-go"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func newStorageServiceTestDB(t *testing.T) (*Service, *gorm.DB, *models.User) {
+func newStorageServiceTestDB(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
 
 	container := postgres.MustRun(t)
 	db, err := container.OpenGorm(nil)
 	require.NoError(t, err)
 
-	user := &models.User{
-		FirstName: "Storage",
-		LastName:  "Tester",
-		Email:     "storage.jobs@example.com",
-		Password:  "hashed-password",
-	}
-	require.NoError(t, db.Create(user).Error)
-
-	return NewService(db), db, user
+	return NewService(db), db
 }
 
-func makeVector768() pgvector.Vector {
-	return pgvector.NewVector(make([]float32, 768))
+func makeVector768() *pgvector.Vector {
+	v := pgvector.NewVector(make([]float32, 768))
+	return &v
 }
 
-func makeJob(userID ulid.ULID, provider, jobID string) *models.Job {
+func makeJob(provider, jobID string) *models.Job {
 	return &models.Job{
-		UserID:     userID,
 		JobID:      jobID,
 		Provider:   provider,
 		Title:      "Senior Software Engineer",
