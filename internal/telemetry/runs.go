@@ -44,8 +44,8 @@ func RecordRun(ctx context.Context, kind string, duration time.Duration, err err
 func finishRun(ctx context.Context, span trace.Span, kind string, duration time.Duration, err error, opts ...trace.SpanEndOption) {
 	out := outcome(err)
 	span.SetAttributes(attribute.String(AttrRunOutcome, out))
-	// Status only: the error is recorded as an exception where it originated
-	// or where the run's caller handles it (see Start).
+	// Status only, from the run's outcome: the error is recorded as an
+	// exception where it happened (see Start).
 	setErrorStatus(span, err)
 	span.End(opts...)
 

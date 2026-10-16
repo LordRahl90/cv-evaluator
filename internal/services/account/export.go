@@ -150,11 +150,11 @@ type ExportPortalSuggestion struct {
 // Export collects everything stored about the user. It returns
 // ErrUserNotFound when there is no such user. The data is read in one
 // read-only transaction so it is a consistent snapshot.
-func (s *Service) Export(ctx context.Context, userID ulid.ULID) (_ *Export, err error) {
-	ctx, end := telemetry.Start(ctx, "account.Service.Export", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) Export(ctx context.Context, userID ulid.ULID) (*Export, error) {
+	ctx, span := telemetry.Start(ctx, "account.Service.Export", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var out *Export
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").Error; err != nil {
 			return fmt.Errorf("start export snapshot: %w", err)
 		}

@@ -73,20 +73,20 @@ func New(db *gorm.DB) *Service {
 
 // Create issues a new key for userID. The returned Secret is not stored and
 // cannot be retrieved again.
-func (s *Service) Create(ctx context.Context, userID ulid.ULID, name string) (_ *CreatedKey, err error) {
-	ctx, end := telemetry.Start(ctx, "apikeys.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) Create(ctx context.Context, userID ulid.ULID, name string) (*CreatedKey, error) {
+	ctx, span := telemetry.Start(ctx, "apikeys.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, ErrNameRequired
+		return nil, span.RecordError(ErrNameRequired)
 	}
 	if utf8.RuneCountInString(name) > MaxNameLength {
-		return nil, ErrNameTooLong
+		return nil, span.RecordError(ErrNameTooLong)
 	}
 
 	secret, err := generateKey()
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	record := &models.APIKey{
@@ -103,9 +103,9 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, name string) (_ 
 }
 
 // List returns the caller's active keys, newest first.
-func (s *Service) List(ctx context.Context, userID ulid.ULID) (_ []Key, err error) {
-	ctx, end := telemetry.Start(ctx, "apikeys.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]Key, error) {
+	ctx, span := telemetry.Start(ctx, "apikeys.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var records []models.APIKey
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).
@@ -123,9 +123,9 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID) (_ []Key, err erro
 
 // Delete revokes one of the caller's keys. Keys owned by other users are
 // reported as ErrNotFound so their existence is not disclosed.
-func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) (err error) {
-	ctx, end := telemetry.Start(ctx, "apikeys.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrAPIKeyID, keyID))
-	defer end(&err)
+func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) error {
+	ctx, span := telemetry.Start(ctx, "apikeys.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrAPIKeyID, keyID))
+	defer span.End()
 	result := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", keyID, userID).
 		Delete(&models.APIKey{})
@@ -133,7 +133,7 @@ func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) (err erro
 		return fmt.Errorf("delete api key: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrNotFound
+		return span.RecordError(ErrNotFound)
 	}
 	return nil
 }
@@ -141,27 +141,27 @@ func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) (err erro
 // Verify resolves a raw key to its owner. It returns ErrInvalidKey for
 // unknown, malformed or revoked keys, and for keys whose owner was deleted.
 // On success it records last_used_at (at most once per minute per key).
-func (s *Service) Verify(ctx context.Context, rawKey string) (_ ulid.ULID, err error) {
-	ctx, end := telemetry.Start(ctx, "apikeys.Service.Verify")
-	defer end(&err)
+func (s *Service) Verify(ctx context.Context, rawKey string) (ulid.ULID, error) {
+	ctx, span := telemetry.Start(ctx, "apikeys.Service.Verify")
+	defer span.End()
 	if !strings.HasPrefix(rawKey, KeyPrefix) || len(rawKey) != len(KeyPrefix)+secretLength {
-		return ulid.ULID{}, ErrInvalidKey
+		return ulid.ULID{}, span.RecordError(ErrInvalidKey)
 	}
 
 	var record models.APIKey
-	err = s.db.WithContext(ctx).
+	err := s.db.WithContext(ctx).
 		Select("api_keys.*").
 		Joins("JOIN users ON users.id = api_keys.user_id AND users.deleted_at IS NULL").
 		Where("api_keys.key_hash = ?", hashKey(rawKey)).
 		First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ulid.ULID{}, ErrInvalidKey
+		return ulid.ULID{}, span.RecordError(ErrInvalidKey)
 	}
 	if err != nil {
 		return ulid.ULID{}, fmt.Errorf("verify api key: %w", err)
 	}
 
-	telemetry.SetAttributes(ctx, telemetry.ID(telemetry.AttrAPIKeyID, record.ID), telemetry.ID(telemetry.AttrUserID, record.UserID))
+	span.SetAttributes(telemetry.ID(telemetry.AttrAPIKeyID, record.ID), telemetry.ID(telemetry.AttrUserID, record.UserID))
 	now := s.now()
 	if err := s.db.WithContext(ctx).
 		Model(&models.APIKey{}).

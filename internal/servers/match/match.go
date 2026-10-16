@@ -3,11 +3,12 @@ package match
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
+	"cv-evaluator/internal/servers/apierror"
 	"cv-evaluator/internal/servers/middleware"
 	"cv-evaluator/internal/services/matcher"
-	"cv-evaluator/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
@@ -123,20 +124,19 @@ func getUserID(c *gin.Context) (ulid.ULID, bool) {
 	return ulid.ULID{}, false
 }
 
-// handleServiceError maps well-known service errors to appropriate HTTP status codes.
+// handleServiceError maps well-known service errors to appropriate HTTP
+// status codes. 5xx bodies carry the generic api_error message, never the
+// error's text: it may come from the LLM provider.
 func handleServiceError(c *gin.Context, err error) {
-	var statusCode int
 	switch {
 	case errors.Is(err, matcher.ErrNoCV):
 		c.JSON(http.StatusUnprocessableEntity, errorResponse("upload a CV before matching"))
-		return
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		statusCode = http.StatusGatewayTimeout
+		apierror.GatewayTimeout(c, err)
 	default:
-		statusCode = http.StatusInternalServerError
+		slog.ErrorContext(c.Request.Context(), "match handler", "error", err)
+		apierror.InternalServerError(c, err)
 	}
-	telemetry.RecordError(c.Request.Context(), err) // the 5xx path handles the error
-	c.JSON(statusCode, errorResponse(err.Error()))
 }
 
 func errorResponse(msg string) gin.H {

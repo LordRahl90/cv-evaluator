@@ -447,26 +447,38 @@ pipeline.Pipeline.EvaluateOne              search_result.id, user.id, attempt
 
 The scheduler tick is `background_run schedule_tick` → `sources.Store.DueSearches`, then per search `pipeline.Pipeline.runSearch` → `sources.Store.ClaimRun`, one `background_run run_search` per portal (`provider`) → `pipeline.RateLimiter.Wait`, `sources.Fetcher.Search` → `providers.LinkedIn.Search` → `linkedin.Service.SearchJobs` → `linkedin search` (scraper HTTP spans nest here even though colly drops the context, see `telemetry.WithParentSpan`), `pipeline.Pipeline.storePostings`, and finally `sources.Store.MarkRun`.
 
-A cover letter (`POST /match/cover-letter`) shows `coverletter.Service.Generate` → `matcher.Service.LatestCVText`, `users.Service.GetProfile` and `coverletter.Service.Write`, with one `deepseek.Service.CoverLetter` per attempt; a letter that fails the checks and is revised is recorded as a retry (`exception` event with the names of the failed checks, never the letter).
+A cover letter (`POST /match/cover-letter`) shows `coverletter.Service.Generate` → `matcher.Service.LatestCVText`, `users.Service.GetProfile` and `coverletter.Service.Write`, with one `deepseek.Service.CoverLetter` per attempt; a letter that fails the checks and is revised is recorded as a retry (`exception` event with the names of the failed checks, never the letter), and one that fails again is recorded on `coverletter.Service.Write`.
 
 Where the spans come from:
 
 - **Zero-code layers**: `otelgin` (a server span per request), the GORM plugin `telemetry.NewGormPlugin`, registered in `db.Open` (a client span per statement named `gorm.<operation> <table>`, with `db.system=postgresql`, `db.operation`, `db.sql.table`, `db.rows_affected`; never values), the instrumented HTTP transports for DeepSeek, Ollama and the scrapers, and the pipeline's `RunObserver` (`background_run <kind>` per step).
-- **Two lines per meaningful function**: exported service methods, pipeline steps and their helpers, sources, providers and scrapers, CV extraction and the LLM clients start a span named `<package>.<Type>.<Method>` (or `<package>.<func>`):
+- **Two lines per meaningful function**: exported service methods, pipeline steps and their helpers, sources, providers and scrapers, CV extraction and the LLM clients start a span named `<package>.<Type>.<Method>` (or `<package>.<func>`). `telemetry.Start` returns the context and a `*telemetry.Span` handle with `End()`, `RecordError(err) error` and `SetAttributes(...)`; signatures do not change:
 
   ```go
-  func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) (err error) {
-  	ctx, end := telemetry.Start(ctx, "users.Service.DeleteCV", telemetry.ID(telemetry.AttrCVID, cvID))
-  	defer end(&err)
-  	...
+  func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
+  	ctx, span := telemetry.Start(ctx, "users.Service.DeleteCV", telemetry.ID(telemetry.AttrCVID, cvID))
+  	defer span.End()
+  	result := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", cvID, userID).Delete(&models.CV{})
+  	if result.Error != nil {
+  		return result.Error // the database span recorded it: just pass it up
+  	}
+  	if result.RowsAffected == 0 {
+  		return span.RecordError(ErrCVNotFound) // detected here: record it here
+  	}
+  	return nil
+  }
   ```
 
-  The named `err` result only captures the error; callers are unaffected. Trivial getters, pure helpers and tight loops get no span; a per-row loop gets one span with counts as attributes.
+  Trivial getters, pure helpers and tight loops get no span; a per-row loop gets one span with counts as attributes.
 - Pipeline steps poll: `EmbedOne` and `EvaluateOne` claim a row first and only then start their span, back-dated to the claim (`telemetry.StartClaimed`), so idle polls produce no traces. For the same reason the GORM plugin does not start a new trace for a statement run outside one (migrations, idle claims) unless `WithRootDBSpans(true)` is set.
 
 Attributes are ids and counts only (`user.id`, `cv.id`, `job_search.id`, `job.id`, `search_result.id`, `provider`, `attempt`, `status`, row counts). Never names, emails, CV text, job descriptions, prompts, LLM output, passwords, tokens or API keys.
 
-Errors: a failing function's span gets status Error with a short label (the error's Go type, or `canceled`/`deadline_exceeded`), never the message. The error itself is recorded as one `exception` event per trace: where it originates (the failing SQL statement, an outbound HTTP or LLM call, decoding an LLM response, extracting a CV or scraping a page, via `telemetry.StartOrigin`) or where it is handled and turned into an outcome (the HTTP 5xx path in `apierror`, a job or result scheduled for retry or marked failed, via `telemetry.RecordError`). A portal search attempt that is retried is recorded on the portal span with `telemetry.RecordRetry`, which leaves the status alone so a retry that succeeds does not turn the span red. An error recorded at its origin is marked (`telemetry.MarkRecorded`) so the handlers above it only set the status.
+Errors are recorded where they fail. `span.RecordError(err)` sets the span's status to Error with a short label (the error's Go type, or `canceled`/`deadline_exceeded`, never the message), adds one `exception` event, and returns `err` unchanged so it fits on the return line. It is called only in the function that creates or first detects the failure: a validation or decoding error, a missing row turned into `ErrNotFound`, a local I/O or PDF error, a scraper or provider rejecting its input, an unexpected LLM response. A function that gets an error from a callee returns it as it is, so its span stays neutral. External failures are recorded on their own spans: the GORM plugin records a failing statement on its `gorm.*` span (ids and counts only, never values; not found is not a failure), the instrumented HTTP transports record transport errors on the client span (otelhttp marks 4xx/5xx responses), and the DeepSeek client records a failed call on `deepseek.Service.complete`, with the API's text scrubbed to the status and error code (the raw text echoes the masked API key).
+
+Ancestors of a failing span are not marked. The request span turns red from its HTTP 5xx status (otelgin), and `background_run <kind>` spans from the step's outcome. Code that handles an error records it on the current span with `telemetry.RecordError(ctx, err)`: the 5xx path in `apierror` (`InternalServerError(c, err)`, `GatewayTimeout(c, err)`, `AbortInternal`), a job or result scheduled for retry or marked failed, and a portal the pipeline gives up on for this run. A failed attempt that is retried (a portal search, a cover letter sent back for revision) is an event only, via `telemetry.RecordRetry(ctx, err, attempt)`, so a retry that succeeds does not turn the span red. Errors whose text could carry user data or secrets must be scrubbed before they are recorded; event messages are truncated to 512 bytes. 5xx response bodies carry the generic api_error message, never the error's text.
+
+For example, when DeepSeek rejects the key during `POST /cv/`, `deepseek.Service.complete` has the Error status and the (scrubbed) exception, its `deepseek chat_completion` client span is red from the 401, `deepseek.Service.CleanupCV`, `users.Service.ProcessCV` and `users.Service.UploadCV` stay neutral, and the `POST /cv/` server span is red from the 500, with the 5xx path's record.
 
 ### Viewing locally
 

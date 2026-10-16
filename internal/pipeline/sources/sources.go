@@ -40,11 +40,11 @@ func NewStore(db *gorm.DB) *Store {
 }
 
 // DueSearches returns enabled searches whose next run is due, oldest first.
-func (s *Store) DueSearches(ctx context.Context, now time.Time, limit int) (_ []pipeline.Search, err error) {
-	ctx, end := telemetry.Start(ctx, "sources.Store.DueSearches")
-	defer end(&err)
+func (s *Store) DueSearches(ctx context.Context, now time.Time, limit int) ([]pipeline.Search, error) {
+	ctx, span := telemetry.Start(ctx, "sources.Store.DueSearches")
+	defer span.End()
 	var rows []models.JobSearch
-	err = s.db.WithContext(ctx).
+	err := s.db.WithContext(ctx).
 		Where("enabled = ? AND next_run_at IS NOT NULL AND next_run_at <= ?", true, now).
 		Order("next_run_at ASC").
 		Limit(limit).
@@ -53,7 +53,7 @@ func (s *Store) DueSearches(ctx context.Context, now time.Time, limit int) (_ []
 		return nil, err
 	}
 
-	telemetry.SetAttributes(ctx, telemetry.Count(telemetry.AttrCount, len(rows)))
+	span.SetAttributes(telemetry.Count(telemetry.AttrCount, len(rows)))
 	res := make([]pipeline.Search, 0, len(rows))
 	for i := range rows {
 		res = append(res, toSearch(&rows[i]))
@@ -64,9 +64,9 @@ func (s *Store) DueSearches(ctx context.Context, now time.Time, limit int) (_ []
 // ClaimRun takes ownership of one run of the search by pushing next_run_at
 // out to until, but only while the search is still enabled and due. Of
 // several workers racing for the same run, exactly one sees true.
-func (s *Store) ClaimRun(ctx context.Context, id ulid.ULID, now, until time.Time) (_ bool, err error) {
-	ctx, end := telemetry.Start(ctx, "sources.Store.ClaimRun", telemetry.ID(telemetry.AttrJobSearchID, id))
-	defer end(&err)
+func (s *Store) ClaimRun(ctx context.Context, id ulid.ULID, now, until time.Time) (bool, error) {
+	ctx, span := telemetry.Start(ctx, "sources.Store.ClaimRun", telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer span.End()
 	res := s.db.WithContext(ctx).
 		Model(&models.JobSearch{}).
 		Where("id = ? AND enabled AND next_run_at IS NOT NULL AND next_run_at <= ?", id, now).
@@ -74,15 +74,15 @@ func (s *Store) ClaimRun(ctx context.Context, id ulid.ULID, now, until time.Time
 	if res.Error != nil {
 		return false, res.Error
 	}
-	telemetry.SetAttributes(ctx, attribute.Int64(telemetry.AttrRowsClaimed, res.RowsAffected))
+	span.SetAttributes(attribute.Int64(telemetry.AttrRowsClaimed, res.RowsAffected))
 	return res.RowsAffected == 1, nil
 }
 
 // MarkRun records the run. A search disabled while it was running is
 // left unscheduled rather than given a new next run.
-func (s *Store) MarkRun(ctx context.Context, id ulid.ULID, ranAt, next time.Time) (err error) {
-	ctx, end := telemetry.Start(ctx, "sources.Store.MarkRun", telemetry.ID(telemetry.AttrJobSearchID, id))
-	defer end(&err)
+func (s *Store) MarkRun(ctx context.Context, id ulid.ULID, ranAt, next time.Time) error {
+	ctx, span := telemetry.Start(ctx, "sources.Store.MarkRun", telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer span.End()
 	return s.db.WithContext(ctx).
 		Model(&models.JobSearch{}).
 		Where("id = ?", id).
@@ -122,23 +122,23 @@ func (f *Fetcher) Providers() []string {
 }
 
 // Search searches one portal.
-func (f *Fetcher) Search(ctx context.Context, provider string, c pipeline.Criteria) (_ []entities.JobPost, err error) {
-	ctx, end := telemetry.Start(ctx, "sources.Fetcher.Search", attribute.String(telemetry.AttrProvider, provider))
-	defer end(&err)
+func (f *Fetcher) Search(ctx context.Context, provider string, c pipeline.Criteria) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "sources.Fetcher.Search", attribute.String(telemetry.AttrProvider, provider))
+	defer span.End()
 	p, err := f.provider(provider)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err) // unknown provider, detected here
 	}
 	return p.Search(ctx, providers.Criteria(c))
 }
 
 // Details fetches a posting's full description from its portal.
-func (f *Fetcher) Details(ctx context.Context, provider string, job *entities.JobPost) (_ *entities.JobDetails, err error) {
-	ctx, end := telemetry.Start(ctx, "sources.Fetcher.Details", attribute.String(telemetry.AttrProvider, provider))
-	defer end(&err)
+func (f *Fetcher) Details(ctx context.Context, provider string, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "sources.Fetcher.Details", attribute.String(telemetry.AttrProvider, provider))
+	defer span.End()
 	p, err := f.provider(provider)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err) // unknown provider, detected here
 	}
 	return p.Details(ctx, job)
 }

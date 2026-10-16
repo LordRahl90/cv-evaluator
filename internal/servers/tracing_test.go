@@ -179,7 +179,7 @@ func TestTracing_UploadCV(t *testing.T) {
 	noPII(t, p, tracingEmail, "engineer")
 }
 
-func TestTracing_DatabaseErrorIsRecordedOnceAndMarksAncestors(t *testing.T) {
+func TestTracing_DatabaseErrorIsRecordedWhereItFails(t *testing.T) {
 	p, h, db := tracedServer(t)
 	token := signup(t, h)
 	require.NoError(t, db.Exec("ALTER TABLE users RENAME TO users_gone").Error)
@@ -202,19 +202,49 @@ func TestTracing_DatabaseErrorIsRecordedOnceAndMarksAncestors(t *testing.T) {
 	require.NotNil(t, query)
 	assert.Equal(t, "gorm.query users", query.Name())
 
-	assert.Equal(t, 1, telemetrytest.Exceptions(query), "the failing statement records the error")
+	// The failing statement records the error, once.
+	assert.Equal(t, 1, telemetrytest.Exceptions(query))
 	assert.Equal(t, codes.Error, query.Status().Code)
-	for _, s := range []sdktrace.ReadOnlySpan{validate, server} {
-		assert.Equal(t, codes.Error, s.Status().Code, "%s status", s.Name())
-		assert.Zero(t, telemetrytest.Exceptions(s), "%s must not record the error again", s.Name())
-	}
-	assert.Equal(t, "*pgconn.PgError", validate.Status().Description, "the status carries a label, not the message")
+	assert.Equal(t, "*pgconn.PgError", query.Status().Description, "the status carries a label, not the message")
 
-	total := 0
+	// The service span only passed it up: neutral.
+	assert.Equal(t, codes.Unset, validate.Status().Code)
+	assert.Zero(t, telemetrytest.Exceptions(validate))
+
+	// The request span reflects the 5xx, and the 5xx path that handled the
+	// error records it there.
+	assert.Equal(t, codes.Error, server.Status().Code)
+	assert.Equal(t, "500", telemetrytest.KeyValues(server.Attributes())["http.response.status_code"])
+	assert.Equal(t, 1, telemetrytest.Exceptions(server))
+
 	for _, s := range p.Spans() {
-		if s.SpanContext().TraceID() == server.SpanContext().TraceID() {
-			total += telemetrytest.Exceptions(s)
+		if s.SpanContext().TraceID() != server.SpanContext().TraceID() {
+			continue
 		}
+		if s.Name() == query.Name() || s.Name() == server.Name() {
+			continue
+		}
+		assert.Zero(t, telemetrytest.Exceptions(s), "%s must not record the error", s.Name())
+		assert.Equal(t, codes.Unset, s.Status().Code, "%s must stay neutral", s.Name())
 	}
-	assert.Equal(t, 1, total, "one error, one exception event per trace")
+}
+
+func TestTracing_ValidationErrorIsRecordedWhereDetected(t *testing.T) {
+	p, h, _ := tracedServer(t)
+
+	body := `{"email":"` + tracingEmail + `","password":"wrong-password"}`
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/auth/signin", strings.NewReader(body)))
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+
+	signin := p.Span(t, "users.Service.Signin")
+	assert.Equal(t, codes.Error, signin.Status().Code, "Signin detects the bad credentials")
+	assert.Equal(t, 1, telemetrytest.Exceptions(signin))
+
+	server := serverSpan(t, p, "/auth/signin")
+	assert.Equal(t, codes.Unset, server.Status().Code, "a 4xx does not fail the request span")
+	assert.Zero(t, telemetrytest.Exceptions(server))
+	query := p.Span(t, "gorm.query users")
+	assert.Equal(t, codes.Unset, query.Status().Code, "no row is not a database failure")
+	noPII(t, p, tracingEmail, "wrong-password")
 }

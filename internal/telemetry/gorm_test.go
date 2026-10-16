@@ -8,6 +8,7 @@ import (
 	"cv-evaluator/internal/telemetry/telemetrytest"
 	"cv-evaluator/internal/testutil/postgres"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
@@ -47,7 +48,7 @@ func TestGormPlugin(t *testing.T) {
 	db, _ := openTraced(t)
 	p := telemetrytest.Install(t)
 
-	ctx, end := telemetry.Start(context.Background(), "test.Root")
+	ctx, span := telemetry.Start(context.Background(), "test.Root")
 	require.NoError(t, db.WithContext(ctx).Create(&widget{Email: secretEmail}).Error)
 	var w widget
 	require.NoError(t, db.WithContext(ctx).Where("email = ?", secretEmail).First(&w).Error)
@@ -55,7 +56,7 @@ func TestGormPlugin(t *testing.T) {
 	err := db.WithContext(ctx).Where("email = ?", "nobody").First(&widget{}).Error
 	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	require.NoError(t, db.WithContext(ctx).Exec("DELETE FROM widgets WHERE email = ?", "other@example.com").Error)
-	end(nil)
+	span.End()
 
 	root := p.Span(t, "test.Root")
 	var got []string
@@ -88,9 +89,9 @@ func TestGormPlugin_StatementWithPlaceholdersOnly(t *testing.T) {
 	db, _ := openTraced(t, telemetry.WithDBStatement(true))
 	p := telemetrytest.Install(t)
 
-	ctx, end := telemetry.Start(context.Background(), "test.Root")
+	ctx, span := telemetry.Start(context.Background(), "test.Root")
 	require.NoError(t, db.WithContext(ctx).Create(&widget{Email: secretEmail}).Error)
-	end(nil)
+	span.End()
 
 	stmt := telemetrytest.KeyValues(p.Span(t, "gorm.create widgets").Attributes())["db.statement"]
 	assert.Contains(t, stmt, `INSERT INTO "widgets"`)
@@ -103,16 +104,15 @@ func TestGormPlugin_ErrorRecordedOnceOnStatementSpan(t *testing.T) {
 	p := telemetrytest.Install(t)
 	require.NoError(t, db.Create(&widget{Email: secretEmail}).Error)
 
-	create := func(ctx context.Context) (err error) {
-		ctx, end := telemetry.Start(ctx, "test.Service.Create")
-		defer end(&err)
-		return db.WithContext(ctx).Create(&widget{Email: secretEmail}).Error
+	create := func(ctx context.Context) error {
+		ctx, span := telemetry.Start(ctx, "test.Service.Create")
+		defer span.End()
+		return db.WithContext(ctx).Create(&widget{Email: secretEmail}).Error // passed up as it is
 	}
-	ctx, end := telemetry.Start(context.Background(), "test.Handler")
+	ctx, span := telemetry.Start(context.Background(), "test.Handler")
 	err := create(ctx)
 	require.Error(t, err)
-	telemetry.RecordError(ctx, err) // the handler's 5xx path
-	end(&err)
+	span.End()
 
 	stmt := p.Span(t, "gorm.create widgets")
 	assert.Equal(t, 1, telemetrytest.Exceptions(stmt))
@@ -123,10 +123,11 @@ func TestGormPlugin_ErrorRecordedOnceOnStatementSpan(t *testing.T) {
 	}
 	for _, name := range []string{"test.Service.Create", "test.Handler"} {
 		s := p.Span(t, name)
-		assert.Equal(t, codes.Error, s.Status().Code, name)
+		assert.Equal(t, codes.Unset, s.Status().Code, "%s only passes the error up", name)
 		assert.Zero(t, telemetrytest.Exceptions(s), name)
 	}
-	assert.True(t, telemetry.IsRecorded(err))
+	var pgErr *pgconn.PgError
+	assert.ErrorAs(t, err, &pgErr, "the error is returned unchanged")
 }
 
 func TestGormPlugin_NoRootSpansByDefault(t *testing.T) {

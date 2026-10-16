@@ -15,76 +15,104 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
-func instrumented(ctx context.Context, fail error) (err error) {
-	_, end := Start(ctx, "pkg.Service.Do", attribute.String(AttrUserID, "u1"))
-	defer end(&err)
-	return fail
+// failing is a function that detects a failure itself and records it.
+func failing(ctx context.Context, fail error) error {
+	_, span := Start(ctx, "pkg.Service.validate", attribute.String(AttrUserID, "u1"))
+	defer span.End()
+	if fail != nil {
+		return span.RecordError(fail)
+	}
+	return nil
 }
 
-func TestStart_SetsStatusWithoutException(t *testing.T) {
+// passing only passes up its callee's error.
+func passing(ctx context.Context, fail error) error {
+	ctx, span := Start(ctx, "pkg.Service.Do")
+	defer span.End()
+	return failing(ctx, fail)
+}
+
+func TestSpan_RecordErrorWhereItFails(t *testing.T) {
 	p := telemetrytest.Install(t)
 
-	require.NoError(t, instrumented(context.Background(), nil))
-	require.Error(t, instrumented(context.Background(), fmt.Errorf("load: %w", errors.New("secret@example.com not found"))))
+	require.NoError(t, passing(context.Background(), nil))
+	ok := p.Span(t, "pkg.Service.validate")
+	assert.Equal(t, codes.Unset, ok.Status().Code)
+	assert.Zero(t, telemetrytest.Exceptions(ok))
+	assert.Equal(t, "u1", telemetrytest.KeyValues(ok.Attributes())["user.id"])
+
+	sentinel := errors.New("bad input")
+	err := passing(context.Background(), fmt.Errorf("validate: %w", sentinel))
+	require.ErrorIs(t, err, sentinel, "the error is returned unchanged")
+	assert.Equal(t, "validate: bad input", err.Error())
 
 	spans := p.Spans()
-	require.Len(t, spans, 2)
-	assert.Equal(t, "pkg.Service.Do", spans[0].Name())
-	assert.Equal(t, codes.Unset, spans[0].Status().Code)
-	assert.Equal(t, "u1", telemetrytest.KeyValues(spans[0].Attributes())["user.id"])
+	require.Len(t, spans, 4)
+	origin, caller := spans[2], spans[3]
+	assert.Equal(t, "pkg.Service.validate", origin.Name())
+	assert.Equal(t, codes.Error, origin.Status().Code)
+	assert.Equal(t, "*errors.errorString", origin.Status().Description, "the status never carries the message")
+	assert.Equal(t, 1, telemetrytest.Exceptions(origin))
 
-	assert.Equal(t, codes.Error, spans[1].Status().Code)
-	assert.Equal(t, "*errors.errorString", spans[1].Status().Description, "the status never carries the message")
-	assert.Zero(t, telemetrytest.Exceptions(spans[1]), "end does not record an exception")
+	assert.Equal(t, "pkg.Service.Do", caller.Name())
+	assert.Equal(t, codes.Unset, caller.Status().Code, "a span that passes the error up stays neutral")
+	assert.Zero(t, telemetrytest.Exceptions(caller))
 }
 
-func TestStartOrigin_RecordsOnceAndMarks(t *testing.T) {
+func TestSpan_NilSafe(t *testing.T) {
+	var span *Span
+	sentinel := errors.New("x")
+	assert.Same(t, sentinel, span.RecordError(sentinel))
+	assert.NoError(t, span.RecordError(nil))
+	span.SetAttributes(attribute.Int(AttrCount, 1))
+	span.End()
+}
+
+func TestSpan_RecordErrorNil(t *testing.T) {
 	p := telemetrytest.Install(t)
 
-	origin := func(ctx context.Context) (err error) {
-		_, end := StartOrigin(ctx, "pkg.decode")
-		defer end(&err)
-		return errors.New("bad json")
-	}
-	ctx, end := Start(context.Background(), "pkg.Service.Call")
-	err := origin(ctx)
-	require.Error(t, err)
-	assert.True(t, IsRecorded(err))
-	assert.Equal(t, "bad json", err.Error(), "marking keeps the message")
-	RecordError(ctx, err) // a handler further up
-	end(&err)
+	_, span := Start(context.Background(), "pkg.op")
+	assert.NoError(t, span.RecordError(nil))
+	span.SetAttributes(attribute.Int(AttrCount, 3))
+	span.End()
 
-	decode, call := p.Span(t, "pkg.decode"), p.Span(t, "pkg.Service.Call")
-	assert.Equal(t, 1, telemetrytest.Exceptions(decode))
-	assert.Zero(t, telemetrytest.Exceptions(call), "an error already recorded is not recorded again")
-	assert.Equal(t, codes.Error, call.Status().Code)
+	s := p.Span(t, "pkg.op")
+	assert.Equal(t, codes.Unset, s.Status().Code)
+	assert.Zero(t, telemetrytest.Exceptions(s))
+	assert.Equal(t, "3", telemetrytest.KeyValues(s.Attributes())["count"])
 }
 
 func TestRecordError(t *testing.T) {
 	p := telemetrytest.Install(t)
 
-	ctx, end := Start(context.Background(), "handler")
+	ctx, span := Start(context.Background(), "handler")
 	RecordError(ctx, nil)
 	RecordError(ctx, errors.New(strings.Repeat("x", 2000)))
-	end(nil)
+	span.End()
 
-	span := p.Span(t, "handler")
-	require.Equal(t, 1, telemetrytest.Exceptions(span))
-	assert.Equal(t, codes.Error, span.Status().Code)
-	ev := telemetrytest.KeyValues(span.Events()[0].Attributes)
+	s := p.Span(t, "handler")
+	require.Equal(t, 1, telemetrytest.Exceptions(s))
+	assert.Equal(t, codes.Error, s.Status().Code)
+	ev := telemetrytest.KeyValues(s.Events()[0].Attributes)
 	assert.Equal(t, "*errors.errorString", ev["exception.type"])
 	assert.Len(t, ev["exception.message"], maxErrorMessage+3, "long messages are truncated")
 }
 
-func TestMarkRecorded_KeepsErrorChain(t *testing.T) {
-	sentinel := errors.New("sentinel")
-	err := MarkRecorded(fmt.Errorf("wrap: %w", sentinel))
-	assert.ErrorIs(t, err, sentinel)
-	assert.Same(t, err, MarkRecorded(err), "marking twice is a no-op")
-	assert.True(t, IsRecorded(fmt.Errorf("outer: %w", err)))
-	assert.Nil(t, MarkRecorded(nil))
+func TestRecordRetry_LeavesStatus(t *testing.T) {
+	p := telemetrytest.Install(t)
+
+	ctx, span := Start(context.Background(), "portal")
+	RecordRetry(ctx, nil, 1)
+	RecordRetry(ctx, errors.New("timeout"), 1)
+	span.End()
+
+	s := p.Span(t, "portal")
+	require.Equal(t, 1, telemetrytest.Exceptions(s))
+	assert.Equal(t, codes.Unset, s.Status().Code, "a retried attempt does not fail the span")
+	assert.Equal(t, "1", telemetrytest.KeyValues(s.Events()[0].Attributes)["attempt"])
 }
 
 func TestErrorLabel(t *testing.T) {
@@ -98,10 +126,10 @@ func TestStartClaimed(t *testing.T) {
 	p := telemetrytest.Install(t)
 
 	start := time.Now().Add(-time.Second)
-	ctx, end := StartClaimed(context.Background(), "pkg.Worker.StepOne", start, "pkg.claim", attribute.Int(AttrAttempt, 2))
-	_, endWork := Start(ctx, "pkg.work")
-	endWork(nil)
-	end(nil)
+	ctx, span := StartClaimed(context.Background(), "pkg.Worker.StepOne", start, "pkg.claim", attribute.Int(AttrAttempt, 2))
+	_, workSpan := Start(ctx, "pkg.work")
+	workSpan.End()
+	span.End()
 
 	step, claim, work := p.Span(t, "pkg.Worker.StepOne"), p.Span(t, "pkg.claim"), p.Span(t, "pkg.work")
 	assert.Equal(t, start, step.StartTime(), "the step is back-dated to the claim")
@@ -117,30 +145,40 @@ func TestWithParentSpan(t *testing.T) {
 	rt := NewJobBoardTransport(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: r}, nil
 	}))
-	ctx, end := Start(context.Background(), "linkedin.Service.SearchJobs")
+	ctx, span := Start(context.Background(), "linkedin.Service.SearchJobs")
 	// colly builds its requests without a context.
 	req, err := http.NewRequest(http.MethodGet, "https://www.linkedin.com/jobs/search?keywords=go", nil)
 	require.NoError(t, err)
 	res, err := WithParentSpan(ctx, rt).RoundTrip(req)
 	require.NoError(t, err)
 	_ = res.Body.Close()
-	end(nil)
+	span.End()
 
 	telemetrytest.RequireChild(t, p.Span(t, "linkedin.Service.SearchJobs"), p.Span(t, "linkedin search"))
 	assert.Same(t, rt, WithParentSpan(context.Background(), rt), "without a span the transport is unchanged")
 }
 
-func TestRecordingTransport_MarksTransportErrors(t *testing.T) {
-	telemetrytest.Install(t)
+func TestRecordingTransport_RecordsTransportErrorsOnClientSpan(t *testing.T) {
+	p := telemetrytest.Install(t)
 
+	sentinel := errors.New("connection refused")
 	rt := NewTransport(PeerOllama, roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return nil, errors.New("connection refused")
+		return nil, sentinel
 	}))
-	req, err := http.NewRequest(http.MethodGet, "http://ollama.invalid/api", nil)
+	ctx, span := Start(context.Background(), "ollama.Service.CreateEmbedding")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://ollama.invalid/api", nil)
 	require.NoError(t, err)
 	_, err = (&http.Client{Transport: rt}).Do(req) //nolint:bodyclose // no response on error
-	require.Error(t, err)
-	assert.True(t, IsRecorded(err), "otelhttp recorded it on the client span")
+	span.End()
+	require.ErrorIs(t, err, sentinel, "the error is returned unchanged")
+
+	client := p.SpansOfKind(trace.SpanKindClient)
+	require.Len(t, client, 1)
+	assert.Equal(t, codes.Error, client[0].Status().Code, "the call where it failed")
+	assert.Equal(t, 1, telemetrytest.Exceptions(client[0]))
+	caller := p.Span(t, "ollama.Service.CreateEmbedding")
+	assert.Equal(t, codes.Unset, caller.Status().Code)
+	assert.Zero(t, telemetrytest.Exceptions(caller))
 }
 
 func TestParseSQL(t *testing.T) {

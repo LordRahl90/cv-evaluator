@@ -39,15 +39,15 @@ type UpdateProfileRequest struct {
 // It returns ErrEmailAlreadyUsed or ErrPhoneAlreadyUsed when another
 // account has the new email or phone, and ErrUserNotFound when the user
 // does not exist.
-func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req UpdateProfileRequest) (_ *Profile, err error) {
-	ctx, end := telemetry.Start(ctx, "users.Service.UpdateProfile", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req UpdateProfileRequest) (*Profile, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.UpdateProfile", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var updated models.User
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", userID).Take(&updated).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrUserNotFound
+				return span.RecordError(ErrUserNotFound)
 			}
 			return err
 		}
@@ -67,7 +67,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req Updat
 					return err
 				}
 				if taken {
-					return ErrEmailAlreadyUsed
+					return span.RecordError(ErrEmailAlreadyUsed)
 				}
 			}
 			changes["email"] = email
@@ -80,7 +80,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req Updat
 					return err
 				}
 				if taken {
-					return ErrPhoneAlreadyUsed
+					return span.RecordError(ErrPhoneAlreadyUsed)
 				}
 			}
 			changes["phone"] = phone
@@ -116,12 +116,12 @@ func (s *Service) taken(tx *gorm.DB, userID ulid.ULID, column, value string) (bo
 // It returns ErrIncorrectPassword when current is wrong and ErrUserNotFound
 // when the user does not exist. Password rules are the caller's job, as
 // they are for Signup.
-func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current, next string) (_ *AuthResponse, err error) {
-	ctx, end := telemetry.Start(ctx, "users.Service.ChangePassword", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current, next string) (*AuthResponse, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.ChangePassword", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, fmt.Errorf("hash password: %w", err)
+		return nil, span.RecordError(fmt.Errorf("hash password: %w", err))
 	}
 
 	// The new token's issued-at must not be before password_changed_at, and
@@ -133,12 +133,12 @@ func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current,
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", userID).Take(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrUserNotFound
+				return span.RecordError(ErrUserNotFound)
 			}
 			return err
 		}
 		if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(current)) != nil {
-			return ErrIncorrectPassword
+			return span.RecordError(ErrIncorrectPassword)
 		}
 		return tx.Model(&user).Updates(map[string]any{
 			"password":            string(hash),
@@ -151,7 +151,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current,
 
 	token, err := s.generateTokenAt(userID, changedAt)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 	return &AuthResponse{Token: token, User: s.profileFromModel(&user)}, nil
 }
@@ -159,19 +159,19 @@ func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current,
 // VerifyPassword checks password against the user's. It returns
 // ErrIncorrectPassword when it does not match and ErrUserNotFound when the
 // user does not exist.
-func (s *Service) VerifyPassword(ctx context.Context, userID ulid.ULID, password string) (err error) {
-	ctx, end := telemetry.Start(ctx, "users.Service.VerifyPassword", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) VerifyPassword(ctx context.Context, userID ulid.ULID, password string) error {
+	ctx, span := telemetry.Start(ctx, "users.Service.VerifyPassword", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var user models.User
-	err = s.db.WithContext(ctx).Select("id", "password").Where("id = ?", userID).Take(&user).Error
+	err := s.db.WithContext(ctx).Select("id", "password").Where("id = ?", userID).Take(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrUserNotFound
+		return span.RecordError(ErrUserNotFound)
 	}
 	if err != nil {
 		return err
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) != nil {
-		return ErrIncorrectPassword
+		return span.RecordError(ErrIncorrectPassword)
 	}
 	return nil
 }
@@ -182,19 +182,19 @@ func (s *Service) VerifyPassword(ctx context.Context, userID ulid.ULID, password
 //
 // JWT times have one-second precision, so a token issued in the same second
 // as a password change, but before it, is still accepted.
-func (s *Service) ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) (err error) {
-	ctx, end := telemetry.Start(ctx, "users.Service.ValidateSession", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error {
+	ctx, span := telemetry.Start(ctx, "users.Service.ValidateSession", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var user models.User
-	err = s.db.WithContext(ctx).Select("id", "password_changed_at").Where("id = ?", userID).Take(&user).Error
+	err := s.db.WithContext(ctx).Select("id", "password_changed_at").Where("id = ?", userID).Take(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrUserNotFound
+		return span.RecordError(ErrUserNotFound)
 	}
 	if err != nil {
 		return err
 	}
 	if user.PasswordChangedAt != nil && issuedAt.Before(user.PasswordChangedAt.Truncate(time.Second)) {
-		return ErrSessionRevoked
+		return span.RecordError(ErrSessionRevoked)
 	}
 	return nil
 }

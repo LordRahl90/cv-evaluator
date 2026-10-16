@@ -26,13 +26,13 @@ func New(client *http.Client, baseURL string) *Service {
 	}
 }
 
-func (s *Service) CleanupCV(ctx context.Context, content string) (_ string, err error) {
-	ctx, end := telemetry.StartOrigin(ctx, "ollama.Service.CleanupCV")
-	defer end(&err)
+func (s *Service) CleanupCV(ctx context.Context, content string) (string, error) {
+	ctx, span := telemetry.Start(ctx, "ollama.Service.CleanupCV")
+	defer span.End()
 	promptName := "cv-cleanup.txt"
 	b, err := s.loadPrompt(promptName)
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	prompt := string(b) + "\n\n" + prompts.TagCV(content)
 	req := Request{
@@ -45,20 +45,20 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (_ string, err 
 
 	res, err := s.callLLM(telemetry.WithOperation(ctx, telemetry.OpCVCleanup), "/api/generate", req)
 	if err != nil {
-		return "", err
+		return "", err // recorded on the HTTP client span
 	}
 
 	var response *Response
 	if err := json.NewDecoder(bytes.NewBuffer(res)).Decode(&response); err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	return response.Response, nil
 }
 
-func (s *Service) CreateEmbedding(ctx context.Context, content string) (_ []float32, err error) {
-	ctx, end := telemetry.StartOrigin(ctx, "ollama.Service.CreateEmbedding")
-	defer end(&err)
+func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float32, error) {
+	ctx, span := telemetry.Start(ctx, "ollama.Service.CreateEmbedding")
+	defer span.End()
 	slog.DebugContext(ctx, "Creating embedding with Ollama", "content", content)
 	req := Request{
 		Model:  "nomic-embed-text",
@@ -67,7 +67,7 @@ func (s *Service) CreateEmbedding(ctx context.Context, content string) (_ []floa
 
 	res, err := s.callLLM(telemetry.WithOperation(ctx, telemetry.OpEmbedding), "/api/embeddings", req)
 	if err != nil {
-		return nil, err
+		return nil, err // recorded on the HTTP client span
 	}
 
 	response := struct {
@@ -75,7 +75,7 @@ func (s *Service) CreateEmbedding(ctx context.Context, content string) (_ []floa
 	}{}
 
 	if err := json.NewDecoder(bytes.NewBuffer(res)).Decode(&response); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	return response.Embedding, nil

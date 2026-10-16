@@ -75,19 +75,19 @@ func New(db *gorm.DB, supportedWebsites ...string) *Service {
 
 // Create records a suggestion from userID. If the caller already suggested
 // the same URL, it returns the existing suggestion and ErrAlreadySuggested.
-func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (_ *models.PortalSuggestion, err error) {
-	ctx, end := telemetry.Start(ctx, "portalsuggestions.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (*models.PortalSuggestion, error) {
+	ctx, span := telemetry.Start(ctx, "portalsuggestions.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	rec, err := s.build(userID, p)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	if existing, err := s.find(ctx, userID, rec.URL); err != nil || existing != nil {
 		if err != nil {
 			return nil, err
 		}
-		return existing, ErrAlreadySuggested
+		return existing, span.RecordError(ErrAlreadySuggested)
 	}
 
 	if err := s.db.WithContext(ctx).Create(rec).Error; err != nil {
@@ -96,7 +96,7 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 			// Lost a race with a concurrent identical request.
 			existing, findErr := s.find(ctx, userID, rec.URL)
 			if findErr == nil && existing != nil {
-				return existing, ErrAlreadySuggested
+				return existing, span.RecordError(ErrAlreadySuggested)
 			}
 		}
 		return nil, fmt.Errorf("create portal suggestion: %w", err)
@@ -105,9 +105,9 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 }
 
 // List returns the caller's suggestions, newest first.
-func (s *Service) List(ctx context.Context, userID ulid.ULID) (_ []models.PortalSuggestion, err error) {
-	ctx, end := telemetry.Start(ctx, "portalsuggestions.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]models.PortalSuggestion, error) {
+	ctx, span := telemetry.Start(ctx, "portalsuggestions.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var recs []models.PortalSuggestion
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).

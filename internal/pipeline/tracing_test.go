@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"cv-evaluator/internal/entities"
@@ -116,8 +117,12 @@ func TestTracing_FailedEvaluationIsRecordedWhereHandled(t *testing.T) {
 	search := newSearch(userID, "go")
 	fetcher := newFakeFetcher("linkedin")
 	fetcher.setPosts("linkedin", post("linkedin", "1", "a Go job"))
-	h := newHarness(t, newFakeSearches(search), fetcher, func(c *Config) { c.Observer = telemetry.RunObserver{} })
-	h.evaluator.fail = func(int) (string, error) { return "", errors.New("llm unavailable") }
+	var eval llmEvaluator
+	h := newHarness(t, newFakeSearches(search), fetcher, func(c *Config) {
+		c.Observer = telemetry.RunObserver{}
+		eval = llmEvaluator{&fakeEvaluator{fail: func(int) (string, error) { return "", errors.New("llm unavailable") }}}
+		c.Evaluator = eval
+	})
 	seedCV(t, userID, h.clock.Now())
 
 	h.tick()
@@ -126,12 +131,23 @@ func TestTracing_FailedEvaluationIsRecordedWhereHandled(t *testing.T) {
 	_, err = h.pipeline.EvaluateOne(t.Context())
 	require.NoError(t, err)
 
-	step := p.Span(t, "pipeline.Pipeline.EvaluateOne")
+	// The LLM call is where it failed.
+	llm := p.Span(t, "deepseek chat_completion")
+	assert.Equal(t, codes.Error, llm.Status().Code)
+	assert.Equal(t, 1, telemetrytest.Exceptions(llm))
+
+	// The run span reflects the step's outcome, without recording it again.
 	run := p.Span(t, "background_run evaluate_job")
-	assert.Equal(t, codes.Error, run.Status().Code, "the failed step is marked")
+	telemetrytest.RequireChild(t, run, llm)
+	assert.Equal(t, codes.Error, run.Status().Code, "the failed step is marked by its outcome")
 	assert.Zero(t, telemetrytest.Exceptions(run))
-	assert.Equal(t, 1, telemetrytest.Exceptions(step), "recorded once, where the result is scheduled for retry")
-	assert.Equal(t, "pending", telemetrytest.KeyValues(p.Span(t, "pipeline.Pipeline.writeEvaluation").Attributes())["status"])
+
+	// The step handles the failure (schedules a retry) and records that.
+	step := p.Span(t, "pipeline.Pipeline.EvaluateOne")
+	assert.Equal(t, 1, telemetrytest.Exceptions(step), "recorded where the result is scheduled for retry")
+	write := p.Span(t, "pipeline.Pipeline.writeEvaluation")
+	assert.Equal(t, "pending", telemetrytest.KeyValues(write.Attributes())["status"])
+	assert.Equal(t, codes.Unset, write.Status().Code)
 }
 
 func TestTracing_PortalFailureIsRecordedOnThePortalSpan(t *testing.T) {
@@ -153,9 +169,16 @@ func TestTracing_PortalFailureIsRecordedOnThePortalSpan(t *testing.T) {
 	}
 	require.Len(t, portals, 2)
 
+	// The portal span handles the failure: each retried attempt is an
+	// event, and giving up records the error and fails the portal span.
 	failed := portals["jobindex"]
 	assert.Equal(t, codes.Error, failed.Status().Code)
-	assert.Equal(t, DefaultPortalAttempts, telemetrytest.Exceptions(failed), "each failed attempt is recorded on the portal span")
+	require.Equal(t, DefaultPortalAttempts, telemetrytest.Exceptions(failed))
+	events := failed.Events()
+	for i, e := range events[:len(events)-1] {
+		assert.Equal(t, strconv.Itoa(i+1), telemetrytest.KeyValues(e.Attributes)["attempt"], "retried attempt %d", i+1)
+	}
+	assert.NotContains(t, telemetrytest.KeyValues(events[len(events)-1].Attributes), "attempt", "the final failure")
 	assert.Equal(t, codes.Unset, portals["linkedin"].Status().Code)
 	assert.Contains(t, names(children(p, portals["linkedin"])), "pipeline.Pipeline.storePostings")
 

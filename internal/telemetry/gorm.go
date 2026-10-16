@@ -44,10 +44,10 @@ func WithRootDBSpans(enabled bool) GormOption {
 // db.system=postgresql, db.operation, db.sql.table and db.rows_affected.
 // Statement values are never recorded (see WithDBStatement).
 //
-// A failing statement records its error as an exception event on its span
-// (the error's origin) and is returned marked with MarkRecorded, so spans
-// further up only get an Error status (see Start). gorm.ErrRecordNotFound is
-// not treated as a failure: it sets db.record_not_found instead.
+// A failing statement records its error on its own span (an Error status
+// and one exception event) and returns it unchanged; the spans of the code
+// that called it stay neutral (see Start). gorm.ErrRecordNotFound is not
+// treated as a failure: it sets db.record_not_found instead.
 //
 // Register it once with db.Use(telemetry.NewGormPlugin()).
 func NewGormPlugin(opts ...GormOption) gorm.Plugin {
@@ -153,11 +153,9 @@ func (p *gormPlugin) after(op string) func(*gorm.DB) {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			span.SetAttributes(attribute.Bool(AttrDBNotFound, true))
 		default:
-			if !IsRecorded(err) {
-				addException(span, err)
-				db.Error = MarkRecorded(err)
-			}
-			setErrorStatus(span, err)
+			// The statement is where the error happens: it is recorded here,
+			// and the error is returned to the caller unchanged.
+			recordError(span, err)
 		}
 	}
 }

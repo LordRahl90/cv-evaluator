@@ -55,11 +55,11 @@ type Deleted struct {
 // before deleting anything: a worker that got its lock first finishes and
 // its rows are then seen and deleted here; one that comes later finds the
 // row gone and writes nothing.
-func (s *Service) Delete(ctx context.Context, userID ulid.ULID) (_ []Deleted, err error) {
-	ctx, end := telemetry.Start(ctx, "account.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *Service) Delete(ctx context.Context, userID ulid.ULID) ([]Deleted, error) {
+	ctx, span := telemetry.Start(ctx, "account.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var report []Deleted
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		report = nil
 		lock := clause.Locking{Strength: "UPDATE"}
 
@@ -69,7 +69,7 @@ func (s *Service) Delete(ctx context.Context, userID ulid.ULID) (_ []Deleted, er
 			return fmt.Errorf("lock user: %w", err)
 		}
 		if len(users) == 0 {
-			return ErrUserNotFound
+			return span.RecordError(ErrUserNotFound)
 		}
 
 		var ids []ulid.ULID

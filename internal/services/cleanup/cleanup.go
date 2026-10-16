@@ -24,9 +24,9 @@ func New(llmClient LLMClient) *Service {
 	}
 }
 
-func (s *Service) CleanupCV(ctx context.Context, fileName string) (_ string, err error) {
-	ctx, end := telemetry.Start(ctx, "cleanup.Service.CleanupCV")
-	defer end(&err)
+func (s *Service) CleanupCV(ctx context.Context, fileName string) (string, error) {
+	ctx, span := telemetry.Start(ctx, "cleanup.Service.CleanupCV")
+	defer span.End()
 	// first we extract
 	// then we call the llm
 	// then we return the result

@@ -108,11 +108,11 @@ func (l *RateLimiter) reserve(provider string) time.Duration {
 }
 
 // Wait blocks until provider may be called, or ctx is done.
-func (l *RateLimiter) Wait(ctx context.Context, provider string) (err error) {
-	ctx, end := telemetry.Start(ctx, "pipeline.RateLimiter.Wait", attribute.String(telemetry.AttrProvider, provider))
-	defer end(&err)
+func (l *RateLimiter) Wait(ctx context.Context, provider string) error {
+	ctx, span := telemetry.Start(ctx, "pipeline.RateLimiter.Wait", attribute.String(telemetry.AttrProvider, provider))
+	defer span.End()
 	delay := l.reserve(provider)
-	telemetry.SetAttributes(ctx, attribute.Int64("wait_ms", delay.Milliseconds()))
+	span.SetAttributes(attribute.Int64("wait_ms", delay.Milliseconds()))
 	return l.sleep(ctx, delay)
 }
 

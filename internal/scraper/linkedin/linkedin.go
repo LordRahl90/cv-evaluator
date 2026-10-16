@@ -77,20 +77,20 @@ func SearchURL(base, query, location string) (string, error) {
 }
 
 // SearchJobs scrapes up to maxPages result pages starting at searchLink.
-func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages int) (_ []entities.JobPost, err error) {
-	ctx, end := telemetry.StartOrigin(ctx, "linkedin.Service.SearchJobs")
-	defer end(&err)
+func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages int) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "linkedin.Service.SearchJobs")
+	defer span.End()
 	startURL := strings.TrimSpace(searchLink)
 	if startURL == "" {
 		startURL = strings.TrimSpace(s.SearchLinkPage)
 	}
 	if startURL == "" {
-		return nil, ErrSearchURLRequired
+		return nil, span.RecordError(ErrSearchURLRequired)
 	}
 
 	parsedURL, err := url.Parse(startURL)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	allowedDomains := []string{baseDomain}
@@ -196,28 +196,28 @@ func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages in
 	})
 
 	if err := c.Visit(startURL); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
-	telemetry.SetAttributes(ctx, telemetry.Count("postings", len(jobPosts)))
+	span.SetAttributes(telemetry.Count("postings", len(jobPosts)))
 	return jobPosts, nil
 }
 
-func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (_ *entities.JobDetails, err error) {
-	ctx, end := telemetry.StartOrigin(ctx, "linkedin.Service.GetJobDetails")
-	defer end(&err)
+func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "linkedin.Service.GetJobDetails")
+	defer span.End()
 	if job == nil {
-		return nil, errors.New("job is required")
+		return nil, span.RecordError(errors.New("job is required"))
 	}
 
 	detailsURL := strings.TrimSpace(job.DetailsURL)
 	if detailsURL == "" {
-		return nil, errors.New("job details URL is required")
+		return nil, span.RecordError(errors.New("job details URL is required"))
 	}
 
 	parsedURL, err := url.Parse(detailsURL)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	allowedDomains := []string{baseDomain}
@@ -283,11 +283,11 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (_ *
 	})
 
 	if err := c.Visit(detailsURL); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	if details.Details == "" {
-		return nil, errors.New("job details not found")
+		return nil, span.RecordError(errors.New("job details not found"))
 	}
 
 	details.Location = job.Location

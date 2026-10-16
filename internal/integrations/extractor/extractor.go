@@ -13,13 +13,15 @@ import (
 )
 
 // Extract returns the plain text of the PDF at fileName.
-func Extract(ctx context.Context, fileName string) (_ string, err error) {
-	_, end := telemetry.StartOrigin(ctx, "extractor.Extract")
-	defer end(&err)
+// The PDF library has no spans of its own, so its failures are recorded
+// here, where they happen.
+func Extract(ctx context.Context, fileName string) (string, error) {
+	_, span := telemetry.Start(ctx, "extractor.Extract")
+	defer span.End()
 
 	f, r, err := pdf.Open(fileName)
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	defer func() {
 		_ = f.Close()
@@ -27,37 +29,38 @@ func Extract(ctx context.Context, fileName string) (_ string, err error) {
 
 	b, err := r.GetPlainText()
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(b); err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	return buf.String(), nil
 }
 
 // ExtractFromFile returns the plain text of the PDF in file.
-func ExtractFromFile(ctx context.Context, file *os.File) (_ string, err error) {
-	_, end := telemetry.StartOrigin(ctx, "extractor.ExtractFromFile")
-	defer end(&err)
+// Failures are recorded here, like Extract's.
+func ExtractFromFile(ctx context.Context, file *os.File) (string, error) {
+	_, span := telemetry.Start(ctx, "extractor.ExtractFromFile")
+	defer span.End()
 
 	fStat, err := file.Stat()
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	r, err := pdf.NewReader(file, fStat.Size())
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	b, err := r.GetPlainText()
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(b); err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	return buf.String(), nil
 }

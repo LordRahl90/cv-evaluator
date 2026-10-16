@@ -71,19 +71,19 @@ func (p *LinkedIn) Info() Info {
 	return Info{DisplayName: "LinkedIn", Website: "https://www.linkedin.com/jobs", Coverage: "Worldwide"}
 }
 
-func (p *LinkedIn) Search(ctx context.Context, c Criteria) (_ []entities.JobPost, err error) {
-	ctx, end := telemetry.Start(ctx, "providers.LinkedIn.Search")
-	defer end(&err)
+func (p *LinkedIn) Search(ctx context.Context, c Criteria) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "providers.LinkedIn.Search")
+	defer span.End()
 	startURL, err := searchURL(c, linkedin.SearchURL, p.searchBase)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err) // invalid criteria, detected here
 	}
 	return p.scraper.SearchJobs(ctx, startURL, c.MaxPages)
 }
 
-func (p *LinkedIn) Details(ctx context.Context, job *entities.JobPost) (_ *entities.JobDetails, err error) {
-	ctx, end := telemetry.Start(ctx, "providers.LinkedIn.Details")
-	defer end(&err)
+func (p *LinkedIn) Details(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "providers.LinkedIn.Details")
+	defer span.End()
 	return p.scraper.GetJobDetails(ctx, job)
 }
 
@@ -106,19 +106,19 @@ func (p *Jobindex) Info() Info {
 	return Info{DisplayName: "Jobindex", Website: "https://www.jobindex.dk", Coverage: "Denmark"}
 }
 
-func (p *Jobindex) Search(ctx context.Context, c Criteria) (_ []entities.JobPost, err error) {
-	ctx, end := telemetry.Start(ctx, "providers.Jobindex.Search")
-	defer end(&err)
+func (p *Jobindex) Search(ctx context.Context, c Criteria) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "providers.Jobindex.Search")
+	defer span.End()
 	startURL, err := searchURL(c, jobindex.SearchURL, p.searchBase)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err) // invalid criteria, detected here
 	}
 	s := &jobindex.Service{SearchLinkPage: startURL, MaxPages: c.MaxPages, Transport: p.transport}
 	return s.SearchJobs(ctx)
 }
 
-func (p *Jobindex) Details(ctx context.Context, job *entities.JobPost) (_ *entities.JobDetails, err error) {
-	ctx, end := telemetry.Start(ctx, "providers.Jobindex.Details")
-	defer end(&err)
+func (p *Jobindex) Details(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "providers.Jobindex.Details")
+	defer span.End()
 	return (&jobindex.Service{Transport: p.transport}).GetJobDetails(ctx, job)
 }

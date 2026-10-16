@@ -28,11 +28,11 @@ func NewLatestCVSelector(db *gorm.DB) *LatestCVSelector {
 }
 
 // SelectCV returns the user's newest CV, or nil when they have none.
-func (s *LatestCVSelector) SelectCV(ctx context.Context, userID ulid.ULID) (_ *models.CV, err error) {
-	ctx, end := telemetry.Start(ctx, "pipeline.LatestCVSelector.SelectCV", telemetry.ID(telemetry.AttrUserID, userID))
-	defer end(&err)
+func (s *LatestCVSelector) SelectCV(ctx context.Context, userID ulid.ULID) (*models.CV, error) {
+	ctx, span := telemetry.Start(ctx, "pipeline.LatestCVSelector.SelectCV", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var cvs []models.CV
-	err = s.db.WithContext(ctx).
+	err := s.db.WithContext(ctx).
 		Select("id", "created_at", "user_id").
 		Where("user_id = ?", userID).
 		Order("created_at DESC, id DESC").
