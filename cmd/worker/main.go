@@ -22,7 +22,10 @@ import (
 	"cv-evaluator/internal/llm/ollama"
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/pipeline"
+	pipelinesources "cv-evaluator/internal/pipeline/sources"
+	"cv-evaluator/internal/providers"
 	"cv-evaluator/internal/services/matcher"
+	"cv-evaluator/internal/telemetry"
 
 	deepseekLib "github.com/cohesion-org/deepseek-go"
 	"github.com/joho/godotenv"
@@ -30,32 +33,26 @@ import (
 )
 
 func main() {
-	if err := run(options{}); err != nil {
+	if err := run(options{Observer: telemetry.RunObserver{}}); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // options are the worker's injectable dependencies.
 type options struct {
-	// Transport is used for every outbound HTTP call the worker makes (LLM
-	// and embedding APIs, and the portal fetcher once wired). nil means
-	// http.DefaultTransport. Wrap it to add tracing.
+	// Transport is the base for every outbound HTTP call the worker makes.
+	// nil means http.DefaultTransport. The worker adds telemetry itself, so
+	// don't pass an instrumented transport or requests are recorded twice.
 	Transport http.RoundTripper
 	// Observer is told about every pipeline step and scheduler tick. nil means
 	// no-op.
 	Observer pipeline.RunObserver
 }
 
-// sources returns the job search store and the portal fetcher.
-//
-// TODO(phase-3): replace NoSources with the adapter over the job search
-// store and the provider registry, e.g.
-//
-//	return pipelineadapter.New(dbase, providers.NewRegistry(client))
-//
-// Until then the scheduler finds no searches to run.
-func sources(_ *gorm.DB, _ *http.Client) (pipeline.SearchStore, pipeline.Fetcher) {
-	return pipeline.NoSources{}, pipeline.NoSources{}
+// sources returns the job search store and the portal fetcher. Scrapers use
+// the client's transport so outbound portal requests are instrumented.
+func sources(dbase *gorm.DB, client *http.Client) (pipeline.SearchStore, pipeline.Fetcher) {
+	return pipelinesources.NewStore(dbase), pipelinesources.NewFetcher(providers.Default(providers.WithTransport(client.Transport)))
 }
 
 func run(opts options) error {
@@ -64,10 +61,16 @@ func run(opts options) error {
 		return err
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.Load(config.WithoutJWTSecret())
 	if err != nil {
 		return err
 	}
+
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), cfg)
+	if err != nil {
+		return err
+	}
+	defer telemetry.Flush(shutdownTelemetry)
 	settings, err := loadSettings()
 	if err != nil {
 		return err
@@ -98,16 +101,18 @@ func run(opts options) error {
 		transport = http.DefaultTransport
 	}
 	// Keep these well below WORKER_STALE_TIMEOUT, so a row is only
-	// reclaimed when its worker is really gone.
+	// reclaimed when its worker is really gone. ollama.New instruments its
+	// own client; DeepSeek and the portal fetcher are wrapped here, so no
+	// request is recorded twice.
 	llmClient := &http.Client{Timeout: llmTimeout, Transport: transport}
-	fetchClient := &http.Client{Timeout: fetchTimeout, Transport: transport}
+	fetchClient := &http.Client{Timeout: fetchTimeout, Transport: telemetry.NewJobBoardTransport(transport)}
 	if settings.staleTimeout <= llmTimeout {
 		return fmt.Errorf("WORKER_STALE_TIMEOUT (%s) must be longer than the LLM request timeout (%s)",
 			settings.staleTimeout, llmTimeout)
 	}
 
 	ollamaLLM := ollama.New(llmClient, cfg.OllamaBaseURL)
-	deepseekClient, err := deepseekLib.NewClientWithOptions(cfg.DeepSeekAPIKey, deepseekLib.WithHTTPClient(llmClient))
+	deepseekClient, err := deepseekLib.NewClientWithOptions(cfg.DeepSeekAPIKey, deepseekLib.WithHTTPClient(telemetry.NewHTTPClient(telemetry.PeerDeepSeek, llmClient)))
 	if err != nil {
 		return fmt.Errorf("deepseek client: %w", err)
 	}

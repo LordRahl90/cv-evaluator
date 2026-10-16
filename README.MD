@@ -127,7 +127,7 @@ SERVICE_VERSION=dev
 Notes:
 
 - `cmd/api` and `cmd/seed` read settings through `internal/config`, which fails at startup if a required value is missing. The other CLI entrypoints load `.env` with `godotenv.Load()` and exit if it is missing; `cmd/api` treats `.env` as optional.
-- `ENVIRONMENT` defaults to `production`. Outside `development`, `JWT_SECRET` is required; in `development` a random secret is generated when it is empty, and tokens will not survive a restart.
+- `ENVIRONMENT` defaults to `production`. Outside `development`, `JWT_SECRET` is required; in `development` a random secret is generated when it is empty, and tokens will not survive a restart. The worker (`cmd/worker`) never issues or checks tokens, so it doesn't need `JWT_SECRET`.
 - `CV_CLEANUP_PROVIDER` is `deepseek` (default) or `ollama`.
 - `PORT` defaults to `8080`.
 - The `.env.example` DB values match `docker-compose.yml`.
@@ -298,7 +298,7 @@ Settings (all optional):
 | `WORKER_SHUTDOWN_GRACE`     | `30s`   | Time in-flight steps get on shutdown                       |
 | `WORKER_DB_MAX_OPEN_CONNS`  | `10`    | Database pool size. No connection is held during slow work, so this need not match the concurrency |
 
-The worker does not run any searches yet: saved searches and the portal providers are not wired in, so the scheduler finds nothing to run.
+The worker reads due searches from `job_searches` and fetches from every portal in `internal/providers` (adapter: `internal/pipeline/sources`). It never issues or checks tokens, so it doesn't need `JWT_SECRET`.
 
 ## Observability
 
