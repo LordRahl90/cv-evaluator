@@ -46,6 +46,7 @@
 /* CVs and Quick match */
 @import './pages/cvs.css';
 @import './pages/quick-match.css';
+@import './components/cover-letter.css';
 
 /* Matches */
 @import './components/match-ring.css';
