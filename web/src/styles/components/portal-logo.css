@@ -1,0 +1,48 @@
+/*
+ * portal-logo.css — the job portal tile with initials (PortalLogo): LinkedIn
+ * blue, Jobindex navy, a neutral tile for any other portal, and the dashed
+ * "+" tile used for "Missing a job site?".
+ */
+@layer components {
+  .portal-logo {
+    @apply flex items-center justify-center font-bold text-white;
+    flex: none;
+    background: var(--color-portal-other);
+  }
+
+  .portal-logo-md {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-control);
+    font-size: 14px;
+  }
+
+  .portal-logo-sm {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    font-size: 10px;
+  }
+
+  .portal-logo-linkedin {
+    background: var(--color-portal-linkedin);
+  }
+
+  .portal-logo-jobindex {
+    background: var(--color-portal-jobindex);
+  }
+
+  .portal-logo-add {
+    @apply bg-surface text-muted;
+    box-sizing: border-box;
+    border: 1.5px dashed var(--color-portal-dashed);
+  }
+}
+
+/* Portal tile colours from the mockups. */
+@theme {
+  --color-portal-linkedin: #0a66c2;
+  --color-portal-jobindex: #1f3a5f;
+  --color-portal-other: #5f6368;
+  --color-portal-dashed: #b9b5ab;
+}

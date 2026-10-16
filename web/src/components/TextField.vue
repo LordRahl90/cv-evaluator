@@ -11,6 +11,7 @@ const props = withDefaults(
     error?: string
     optional?: boolean
     required?: boolean
+    placeholder?: string
   }>(),
   {
     type: 'text',
@@ -19,6 +20,7 @@ const props = withDefaults(
     error: '',
     optional: false,
     required: false,
+    placeholder: undefined,
   },
 )
 
@@ -48,6 +50,7 @@ const describedBy = computed(
       :name="id"
       :autocomplete="autocomplete"
       :required="required"
+      :placeholder="placeholder"
       :aria-invalid="error ? 'true' : undefined"
       :aria-describedby="describedBy"
     />

@@ -1,0 +1,61 @@
+/*
+ * action-menu.css — the "more actions" (⋮) menu button (ActionMenu) and its
+ * drop-down of items; destructive items are red.
+ */
+@layer components {
+  .action-menu {
+    position: relative;
+    flex: none;
+  }
+
+  .action-menu-trigger {
+    width: 40px;
+    height: 40px;
+  }
+
+  .action-menu.is-open .action-menu-trigger {
+    @apply bg-nav-hover text-ink;
+  }
+
+  .action-menu-panel {
+    @apply bg-surface;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 15;
+    min-width: 168px;
+    padding: 6px;
+    box-sizing: border-box;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow:
+      0 12px 32px rgb(23 25 30 / 0.12),
+      0 2px 6px rgb(23 25 30 / 0.06);
+  }
+
+  .action-menu-item {
+    @apply flex w-full cursor-pointer items-center gap-2.5 bg-transparent text-ink-soft;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: var(--radius-nav);
+    font: inherit;
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .action-menu-item .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .action-menu-item:hover,
+  .action-menu-item:focus-visible {
+    @apply bg-nav-hover text-ink;
+  }
+
+  .action-menu-item.is-danger,
+  .action-menu-item.is-danger:hover,
+  .action-menu-item.is-danger:focus-visible {
+    @apply text-danger;
+  }
+}

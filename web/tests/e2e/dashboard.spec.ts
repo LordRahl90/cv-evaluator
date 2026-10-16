@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
-import { deferred, mockApi, sampleCV, sampleSearches, signedIn } from '../support/mockApi'
+import {
+  deferred,
+  mockApi,
+  mockJobSearchesApi,
+  sampleCV,
+  sampleSearches,
+  signedIn,
+} from '../support/mockApi'
 
 // On phones the navigation sits behind the menu button.
 async function openMenuIfCollapsed(page: Page) {
@@ -86,14 +93,14 @@ test('marks the current page in the navigation', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
 })
 
-test('navigation items lead to "coming soon" pages inside the shell', async ({ page }) => {
+test('navigation items lead to pages inside the shell', async ({ page }) => {
   await mockApi(page)
+  await mockJobSearchesApi(page)
   await page.goto('/')
   await openMenuIfCollapsed(page)
   await page.getByRole('link', { name: 'Job searches' }).click()
   await expect(page).toHaveURL('/searches')
-  await expect(page.getByRole('heading', { name: 'Job searches' })).toBeVisible()
-  await expect(page.getByText('Coming soon')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Job searches', level: 1 })).toBeVisible()
 })
 
 test('a failed load shows the error (old {"error":"..."} format) and can retry', async ({

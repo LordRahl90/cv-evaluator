@@ -1,0 +1,372 @@
+/*
+ * job-searches.css — the Job searches page (JobSearchesView): the search
+ * cards (JobSearchCard) with their meta line, actions, delete confirmation
+ * and messages; the loading skeleton; the empty state with the portals
+ * every search covers and the "no CV yet" note; and the "Job portals"
+ * suggestion section (PortalSuggestions).
+ */
+@layer components {
+  .searches-page {
+    gap: 20px;
+  }
+
+  .searches-list {
+    @apply flex flex-col;
+    gap: 16px;
+  }
+
+  /* Search card */
+  .search-card-main {
+    @apply flex flex-wrap items-center;
+    gap: 12px 16px;
+    padding: 20px 22px;
+  }
+
+  .search-card.is-paused {
+    @apply bg-row-hover;
+  }
+
+  .search-card-icon {
+    @apply flex items-center justify-center bg-accent-soft text-accent;
+    width: 42px;
+    height: 42px;
+    flex: none;
+    border-radius: var(--radius-control);
+  }
+
+  .search-card-icon .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .search-card.is-paused .search-card-icon {
+    @apply bg-chip text-faint;
+  }
+
+  .search-card-body {
+    @apply flex flex-col;
+    flex: 1 1 300px;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .search-card-title-row {
+    @apply flex flex-wrap items-center;
+    gap: 10px;
+  }
+
+  .search-card-title {
+    min-width: 0;
+    font-size: 17px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .search-card.is-paused .search-card-title {
+    @apply text-muted;
+  }
+
+  .search-card-meta {
+    @apply flex flex-wrap text-muted;
+    gap: 4px 18px;
+    font-size: 13px;
+  }
+
+  .search-card-meta > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .search-card-meta b {
+    @apply text-ink;
+    font-weight: 600;
+  }
+
+  .search-card-actions {
+    @apply flex items-center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .search-card-confirm {
+    @apply flex flex-wrap items-center justify-between bg-danger-soft;
+    gap: 12px;
+    margin: 0 22px 18px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-danger-line);
+    border-radius: var(--radius-control);
+  }
+
+  .search-card-confirm-text {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .search-card-confirm-actions {
+    @apply flex flex-wrap;
+    gap: 8px;
+  }
+
+  /* The red "Delete search" confirmation button. */
+  .search-card-delete,
+  .search-card-delete:hover {
+    @apply border-danger bg-danger text-white;
+  }
+
+  .search-card-delete:hover {
+    filter: brightness(0.92);
+  }
+
+  .search-card-message {
+    padding: 0 22px 18px;
+  }
+
+  /* On phones the actions take their own row, lined up under the text. */
+  @media (max-width: 639px) {
+    .search-card-main {
+      padding: 18px 16px;
+    }
+
+    /* The icon would sit alone on its own row; the title says enough. */
+    .search-card-icon {
+      display: none;
+    }
+
+    .search-card-actions {
+      width: 100%;
+      margin-left: 0;
+      padding-top: 10px;
+      border-top: 1px solid var(--color-divider);
+    }
+
+    .search-card-actions .action-menu {
+      margin-left: auto;
+    }
+
+    .search-card-confirm {
+      margin: 0 16px 16px;
+    }
+
+    .search-card-message {
+      padding: 0 16px 16px;
+    }
+  }
+
+  /* Loading skeleton */
+  .search-card-skeleton {
+    @apply flex items-center;
+    gap: 16px;
+    padding: 20px 22px;
+  }
+
+  .search-card-skeleton-icon {
+    width: 42px;
+    height: 42px;
+    flex: none;
+    border-radius: var(--radius-control);
+  }
+
+  .search-card-skeleton-body {
+    @apply flex flex-1 flex-col;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .search-card-skeleton-switch {
+    width: 38px;
+    height: 22px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  /* Empty state */
+  .searches-empty {
+    @apply flex flex-col items-center text-center;
+    gap: 12px;
+    padding: 56px 24px 40px;
+  }
+
+  .searches-empty-icon {
+    @apply flex items-center justify-center bg-accent-soft text-accent;
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+  }
+
+  .searches-empty-icon .icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .searches-empty-title {
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  .searches-empty-text {
+    @apply text-muted;
+    max-width: 480px;
+    margin: 0;
+  }
+
+  .searches-empty-cta {
+    margin-top: 8px;
+  }
+
+  .searches-covers {
+    padding: 6px 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .searches-covers-label {
+    @apply text-muted uppercase;
+    padding: 12px 20px 4px;
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+
+  .searches-covers-grid {
+    @apply grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .searches-portal {
+    @apply flex items-center text-ink;
+    gap: 14px;
+    padding: 18px 20px;
+  }
+
+  .searches-portal-link:hover {
+    @apply bg-row-hover text-ink;
+  }
+
+  .searches-portal-name {
+    font-weight: 600;
+  }
+
+  .searches-portal-coverage,
+  .searches-portal-text {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .searches-portal-logo-skeleton {
+    width: 42px;
+    height: 42px;
+    flex: none;
+    border-radius: var(--radius-control);
+  }
+
+  /* "No CV yet" note */
+  .searches-cv-note {
+    @apply flex flex-wrap items-center;
+    gap: 14px;
+    padding: 18px 22px;
+    background: var(--color-note);
+    border-color: var(--color-note-line);
+  }
+
+  .searches-cv-note > .icon {
+    @apply text-amber-ink;
+    width: 20px;
+    height: 20px;
+  }
+
+  .searches-cv-note-text {
+    flex: 1 1 260px;
+    min-width: 0;
+    margin: 0;
+  }
+
+  /* Job portals and suggestions */
+  .portals {
+    @apply flex flex-col;
+    gap: 16px;
+    margin-top: 8px;
+    padding: 22px;
+    scroll-margin-top: 80px;
+  }
+
+  .portals:focus {
+    outline: none;
+  }
+
+  .portals-sub {
+    @apply text-muted;
+    margin: 4px 0 0;
+  }
+
+  .portals-chips {
+    @apply flex flex-wrap;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .portals-chip {
+    padding: 6px 12px;
+    white-space: normal;
+  }
+
+  .portals-chip-skeleton {
+    width: 120px;
+    height: 30px;
+    border-radius: 999px;
+  }
+
+  .portals-error {
+    @apply flex flex-col items-start;
+    gap: 12px;
+  }
+
+  .portals-error .alert {
+    align-self: stretch;
+  }
+
+  .portals-form {
+    @apply flex flex-wrap items-start;
+    gap: 10px;
+  }
+
+  .portals-form-alert {
+    flex: 1 1 100%;
+  }
+
+  .portals-field-name {
+    flex: 1 1 180px;
+  }
+
+  .portals-field-url {
+    flex: 2 1 240px;
+  }
+
+  /* Line the button up with the inputs (below the labels). */
+  .portals-submit {
+    min-height: 44px;
+    margin-top: 25.5px;
+  }
+
+  @media (max-width: 639px) {
+    .portals {
+      padding: 20px 16px;
+    }
+
+    .portals-submit {
+      width: 100%;
+      margin-top: 4px;
+    }
+  }
+}
+
+/* The amber "before you start" note from the empty-state mockup. */
+@theme {
+  --color-note: #fcf8ef;
+  --color-note-line: #eedfbf;
+}
