@@ -50,6 +50,17 @@ export function formatRunTime(value: DateInput, now: Date = new Date()): string 
   return formatDay(date)
 }
 
+/** "due now", "18:30 today", "07:00 tomorrow", "12 Oct", for scheduled runs. */
+export function formatUpcoming(value: DateInput, now: Date = new Date()): string {
+  const date = new Date(value)
+  if (date.getTime() <= now.getTime()) return 'due now'
+  if (date.toDateString() === now.toDateString()) return `${timeFormat.format(date)} today`
+  const tomorrow = new Date(now)
+  tomorrow.setDate(now.getDate() + 1)
+  if (date.toDateString() === tomorrow.toDateString()) return `${timeFormat.format(date)} tomorrow`
+  return formatDay(date)
+}
+
 export function capitalise(text: string): string {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : ''
 }
