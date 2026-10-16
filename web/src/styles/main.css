@@ -20,7 +20,13 @@
 @import './components/sidebar.css';
 @import './components/user-menu.css';
 @import './components/empty-state.css';
+@import './components/confirm-dialog.css';
+@import './components/upload.css';
+@import './components/score.css';
+@import './components/match-result.css';
 
 @import './pages/auth.css';
 @import './pages/app.css';
 @import './pages/dashboard.css';
+@import './pages/cvs.css';
+@import './pages/quick-match.css';

@@ -6,6 +6,8 @@ import SignUpView from './views/SignUpView.vue'
 import DashboardView from './views/DashboardView.vue'
 import ComingSoonView from './views/ComingSoonView.vue'
 import GuestComingSoonView from './views/GuestComingSoonView.vue'
+import CVsView from './views/CVsView.vue'
+import QuickMatchView from './views/QuickMatchView.vue'
 
 // Pages that are in the navigation but not built yet.
 const comingSoon = (path: string, name: string, title: string): RouteRecordRaw => ({
@@ -49,8 +51,13 @@ const routes: RouteRecordRaw[] = [
       comingSoon('searches', 'searches', 'Job searches'),
       comingSoon('searches/new', 'search-new', 'New search'),
       comingSoon('matches', 'matches', 'Matches'),
-      comingSoon('cvs', 'cvs', 'CVs'),
-      comingSoon('quick-match', 'quick-match', 'Quick match'),
+      { path: 'cvs', name: 'cvs', component: CVsView, meta: { title: 'CVs' } },
+      {
+        path: 'quick-match',
+        name: 'quick-match',
+        component: QuickMatchView,
+        meta: { title: 'Quick match' },
+      },
       comingSoon('keys', 'api-keys', 'API keys'),
       comingSoon('settings', 'settings', 'Settings'),
     ],

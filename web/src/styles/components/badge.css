@@ -21,4 +21,16 @@
   .badge-amber {
     @apply bg-amber-soft text-amber-ink;
   }
+
+  .badge-red {
+    @apply bg-score-low-soft text-score-low-ink;
+  }
+
+  /* Small status dot before the label, in the badge's colour. */
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+  }
 }

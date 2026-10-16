@@ -1,0 +1,201 @@
+/*
+ * cvs.css — the CVs page: the upload-in-progress card, the tips under the
+ * drop zone, the "Used for matching" card and the CV table. From 640px the
+ * table is a normal table; below that each row becomes a stacked card so
+ * nothing scrolls sideways.
+ */
+@layer components {
+  .cv-upload-card {
+    padding: 32px 24px;
+  }
+
+  /* Tips under the drop zone */
+  .tip-grid {
+    @apply grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .tip {
+    @apply flex items-start;
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .tip > .icon {
+    @apply text-accent;
+    margin-top: 2px;
+  }
+
+  .tip-title {
+    font-weight: 600;
+  }
+
+  .tip-text {
+    @apply text-muted;
+  }
+
+  /* The CV matching uses */
+  .cv-in-use {
+    @apply flex flex-col;
+    gap: 4px;
+    padding: 20px 24px;
+  }
+
+  .cv-in-use-label {
+    @apply text-muted;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .cv-in-use-title {
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .cv-in-use-text {
+    @apply text-muted;
+  }
+
+  /* Table */
+  .cv-table-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Row actions: download (shows a spinner while it runs) and delete. */
+  .cv-download-btn:disabled,
+  .cv-delete-btn:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  .cv-download-btn .spinner {
+    width: 14px;
+    height: 14px;
+  }
+
+  .cv-delete-btn:hover {
+    @apply bg-danger-soft text-danger;
+  }
+
+  .cv-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .cv-table th {
+    @apply bg-row-hover text-muted;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-line);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .cv-table td {
+    padding: 16px;
+    border-bottom: 1px solid var(--color-divider);
+    vertical-align: middle;
+  }
+
+  .cv-table tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .cv-table .cv-col-actions {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .cv-row-uploading td {
+    @apply bg-row-hover;
+  }
+
+  .cv-file {
+    @apply flex items-center;
+    gap: 12px;
+  }
+
+  .cv-file-icon {
+    @apply flex items-center justify-center bg-nav-hover text-muted;
+    width: 38px;
+    height: 44px;
+    flex: none;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .cv-file-body {
+    min-width: 0;
+  }
+
+  .cv-file-name {
+    font-weight: 600;
+  }
+
+  .cv-file-meta {
+    @apply text-muted;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .cv-uploaded {
+    @apply text-muted;
+    white-space: nowrap;
+  }
+
+  .cv-note {
+    @apply text-muted;
+    margin: 0;
+    font-size: 12.5px;
+  }
+
+  /* Phones: one stacked card per CV. */
+  @media (max-width: 639px) {
+    .cv-table thead {
+      @apply sr-only;
+    }
+
+    .cv-table,
+    .cv-table tbody,
+    .cv-table tr,
+    .cv-table td {
+      display: block;
+    }
+
+    .cv-table tr {
+      @apply grid items-center;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 12px;
+      padding: 16px;
+      border-bottom: 1px solid var(--color-divider);
+    }
+
+    .cv-table tr:last-child {
+      border-bottom: 0;
+    }
+
+    .cv-table td,
+    .cv-table tr:last-child td {
+      padding: 0;
+      border-bottom: 0;
+    }
+
+    .cv-table td:first-child {
+      grid-column: 1 / -1;
+    }
+
+    .cv-table .cv-uploaded {
+      display: none;
+    }
+
+    .cv-row-uploading {
+      @apply bg-row-hover;
+    }
+  }
+}

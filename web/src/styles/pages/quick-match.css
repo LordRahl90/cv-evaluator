@@ -1,0 +1,187 @@
+/*
+ * quick-match.css — the Quick match page: the two-column layout (form or
+ * result beside "Recent quick matches"), the job description form, the
+ * scoring placeholder and the recent list. Columns wrap into one on narrow
+ * screens. The result card itself is in components/match-result.css.
+ */
+@layer components {
+  .qm-page {
+    gap: 20px;
+  }
+
+  .qm-layout {
+    @apply flex flex-wrap items-start;
+    gap: 20px;
+  }
+
+  .qm-main {
+    @apply flex min-w-0 flex-col;
+    flex: 2 1 480px;
+    gap: 20px;
+  }
+
+  /* Form */
+  .qm-form {
+    @apply flex flex-col;
+    gap: 14px;
+    padding: 24px;
+  }
+
+  .qm-label {
+    font-size: 14px;
+  }
+
+  .qm-form-foot {
+    @apply flex flex-wrap items-center justify-between;
+    gap: 12px;
+  }
+
+  .qm-form-note {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .qm-note-skeleton {
+    display: inline-block;
+    width: 9rem;
+    vertical-align: middle;
+  }
+
+  /* While scoring */
+  .qm-scoring {
+    overflow: hidden;
+  }
+
+  .qm-scoring-head {
+    @apply flex items-center;
+    gap: 20px;
+    padding: 24px;
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  .qm-ring-skeleton {
+    width: 84px;
+    height: 84px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  .qm-scoring-text {
+    @apply flex min-w-0 flex-col;
+    gap: 4px;
+  }
+
+  .qm-scoring-title {
+    font-weight: 600;
+  }
+
+  .qm-scoring-sub {
+    @apply text-muted;
+    font-size: 13px;
+  }
+
+  .qm-scoring-body {
+    @apply flex flex-col;
+    gap: 14px;
+    padding: 24px;
+  }
+
+  /* Recent quick matches */
+  .qm-recent {
+    @apply flex flex-col;
+    flex: 1 1 260px;
+    min-width: 0;
+    gap: 6px;
+    padding: 22px;
+  }
+
+  .qm-recent-title {
+    margin-bottom: 6px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .qm-recent-empty {
+    @apply flex flex-col items-center text-center;
+    gap: 8px;
+    padding: 28px 8px;
+  }
+
+  .qm-recent-empty-icon {
+    @apply flex items-center justify-center bg-nav-hover text-muted;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .qm-recent-empty-icon .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .qm-recent-empty-title {
+    font-weight: 600;
+  }
+
+  .qm-recent-empty-text {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .qm-recent-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .qm-recent-item {
+    @apply flex w-full cursor-pointer items-center bg-transparent text-ink;
+    gap: 12px;
+    padding: 12px 8px;
+    border: 0;
+    border-top: 1px solid var(--color-divider);
+    border-radius: 0;
+    font: inherit;
+    text-align: left;
+  }
+
+  .qm-recent-item:hover {
+    @apply bg-row-hover;
+  }
+
+  .qm-recent-item.is-current {
+    @apply bg-accent-soft;
+  }
+
+  .qm-recent-body {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+
+  .qm-recent-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .qm-recent-time {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  @media (max-width: 639px) {
+    .qm-form,
+    .qm-scoring-head,
+    .qm-scoring-body {
+      padding: 18px;
+    }
+
+    .qm-form .textarea {
+      min-height: 240px;
+    }
+
+    .qm-form-foot .btn {
+      width: 100%;
+    }
+  }
+}

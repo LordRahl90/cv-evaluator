@@ -45,6 +45,18 @@
   --color-danger-soft: #fcebea;
   --color-danger-line: #f2c4c0;
 
+  /* Scores: rings and bars (strong = accent, partial = amber, weak = red) */
+  --color-score-track: #eceae4;
+  --color-score-mid: #b26b00;
+  --color-score-mid-ink: #8a5300;
+  --color-score-low: #b42318;
+  --color-score-low-ink: #9b1c12;
+  --color-score-low-soft: #fde8e6;
+
+  /* Upload drop zone */
+  --color-drop-line: #c9d9d4;
+  --color-drop-bg: #fbfdfc;
+
   /* Type */
   --font-display: 'Bricolage Grotesque', 'Geist', system-ui, sans-serif;
   --font-sans: 'Geist', system-ui, sans-serif;
