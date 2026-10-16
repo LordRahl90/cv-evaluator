@@ -49,6 +49,10 @@ const ICONS = {
     ['circle', { cx: 12, cy: 12, r: 9 }],
     ['path', { d: 'M8 12h8' }],
   ],
+  copy: [
+    ['path', { d: 'M11 9h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z' }],
+    ['path', { d: 'M5 15V5a1 1 0 0 1 1-1h10' }],
+  ],
 } satisfies Record<string, Shape[]>
 
 export type IconName = keyof typeof ICONS

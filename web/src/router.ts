@@ -8,6 +8,8 @@ import ComingSoonView from './views/ComingSoonView.vue'
 import GuestComingSoonView from './views/GuestComingSoonView.vue'
 import CVsView from './views/CVsView.vue'
 import QuickMatchView from './views/QuickMatchView.vue'
+import ApiKeysView from './views/ApiKeysView.vue'
+import SettingsView from './views/SettingsView.vue'
 
 // Pages that are in the navigation but not built yet.
 const comingSoon = (path: string, name: string, title: string): RouteRecordRaw => ({
@@ -58,8 +60,9 @@ const routes: RouteRecordRaw[] = [
         component: QuickMatchView,
         meta: { title: 'Quick match' },
       },
-      comingSoon('keys', 'api-keys', 'API keys'),
-      comingSoon('settings', 'settings', 'Settings'),
+      // API keys and settings
+      { path: 'api-keys', name: 'api-keys', component: ApiKeysView, meta: { title: 'API keys' } },
+      { path: 'settings', name: 'settings', component: SettingsView, meta: { title: 'Settings' } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },

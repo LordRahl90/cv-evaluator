@@ -67,3 +67,13 @@
   --radius-card: 14px;
   --radius-nav: 8px;
 }
+
+/* API keys and dialogs: the "copy it now" banner, code samples, danger hover. */
+@theme {
+  --color-success-soft: #f3f9f7;
+  --color-success-line: #9fcfc2;
+  --color-success-field: #d5e6e0;
+  --color-code: #16201e;
+  --color-code-ink: #d7e7e2;
+  --color-danger-hover: #8f1e18;
+}

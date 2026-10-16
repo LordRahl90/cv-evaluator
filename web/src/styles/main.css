@@ -24,9 +24,15 @@
 @import './components/upload.css';
 @import './components/score.css';
 @import './components/match-result.css';
+@import './components/dialog.css';
+@import './components/button-variants.css';
+@import './components/data-table.css';
+@import './components/code-block.css';
 
 @import './pages/auth.css';
 @import './pages/app.css';
 @import './pages/dashboard.css';
 @import './pages/cvs.css';
 @import './pages/quick-match.css';
+@import './pages/api-keys.css';
+@import './pages/settings.css';

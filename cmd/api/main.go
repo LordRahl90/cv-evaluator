@@ -27,10 +27,12 @@ import (
 	"cv-evaluator/internal/servers/match"
 	"cv-evaluator/internal/servers/middleware"
 	portalhttp "cv-evaluator/internal/servers/portalsuggestions"
+	resulthttp "cv-evaluator/internal/servers/results"
 	apikeysvc "cv-evaluator/internal/services/apikeys"
 	jobsearchsvc "cv-evaluator/internal/services/jobsearches"
 	"cv-evaluator/internal/services/matcher"
 	portalsvc "cv-evaluator/internal/services/portalsuggestions"
+	resultsvc "cv-evaluator/internal/services/results"
 	"cv-evaluator/internal/services/users"
 	"cv-evaluator/internal/telemetry"
 
@@ -110,6 +112,7 @@ func run() error {
 	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
 	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, apiKeyVerifier)
 	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, apiKeyVerifier)
+	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, acceptAPIKeys)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

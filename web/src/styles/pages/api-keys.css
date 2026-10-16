@@ -1,0 +1,136 @@
+/*
+ * api-keys.css — the API keys page: the empty state with its curl example,
+ * the "copy it now" banner that shows a new secret once, the key list
+ * columns and the footnote under the table.
+ */
+@layer components {
+  /* The heading takes focus after a revoke; no ring for that. */
+  .keys-heading:focus {
+    outline: none;
+  }
+
+  /* Empty state */
+  .keys-empty {
+    @apply flex flex-col items-center text-center;
+    gap: 12px;
+    padding: 56px 24px;
+  }
+
+  .keys-empty-icon {
+    @apply flex items-center justify-center bg-accent-soft text-accent;
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+  }
+
+  .keys-empty-icon .icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .keys-empty-title {
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  .keys-empty-text {
+    @apply text-muted;
+    margin: 0;
+    max-width: 440px;
+  }
+
+  .keys-empty-action {
+    min-height: 44px;
+    padding: 0 18px;
+    margin-top: 8px;
+  }
+
+  .keys-usage {
+    @apply flex flex-col;
+    gap: 14px;
+    padding: 22px;
+  }
+
+  .keys-usage-title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  /* New key banner */
+  .secret-banner {
+    @apply flex flex-col border-success-line bg-success-soft;
+    gap: 12px;
+    padding: 20px 22px;
+  }
+
+  .secret-banner-head {
+    @apply flex items-center text-accent;
+    gap: 10px;
+  }
+
+  .secret-banner-head .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .secret-banner-title {
+    @apply text-ink;
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .secret-banner-text {
+    @apply text-muted;
+    margin: 0;
+  }
+
+  .secret-banner-row {
+    @apply flex flex-wrap items-center;
+    gap: 10px;
+  }
+
+  .secret-value {
+    @apply border-success-field bg-surface text-ink;
+    flex: 1 1 360px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 11px 14px;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: var(--radius-control);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow-x: auto;
+  }
+
+  .secret-banner-feedback {
+    @apply text-muted;
+    margin: 0;
+    font-size: 12.5px;
+  }
+
+  .secret-banner-feedback:empty {
+    display: none;
+  }
+
+  /* Key list */
+  .keys-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .keys-prefix {
+    @apply whitespace-nowrap text-muted;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .keys-footnote {
+    @apply text-muted;
+    margin: 0;
+    font-size: 12.5px;
+  }
+}
