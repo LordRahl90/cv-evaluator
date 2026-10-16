@@ -84,6 +84,12 @@ func (s *Service) MatchByJobDescription(ctx context.Context, userID ulid.ULID, j
 	return resp, err
 }
 
+// LatestCVText returns the full extracted text of the user's newest CV, the
+// CV quick matches evaluate. It returns ErrNoCV when the user has none.
+func (s *Service) LatestCVText(ctx context.Context, userID ulid.ULID) (string, error) {
+	return s.cvText(ctx, sectionScope{userID: userID})
+}
+
 // sectionScope selects the CV sections to match against: one CV's sections
 // when cvID is set, otherwise all of the user's sections.
 type sectionScope struct {

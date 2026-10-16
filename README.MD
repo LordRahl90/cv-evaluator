@@ -43,6 +43,8 @@ Scores are integers from 0 to 100. A criterion the LLM could not assess is left 
 
 `make eval-prompt` runs 11 fictional CV and job pairs against the real DeepSeek API and checks that each overall score lands in its expected band. The cases cover a strong fit, a wrong discipline, a junior candidate, a missing must-have, a Danish job description, a prompt-injection attempt, and a candidate whose only Go experience is side projects. It also reports how much scores vary between runs. Cases live in `internal/services/matcher/testdata/prompt_eval.json`; run it before and after changing a prompt. It needs `DEEPSEEK_API_KEY`, makes 33 requests (`EVAL_RUNS=3` per case) and is excluded from normal test runs and CI by the `eval` build tag.
 
+The same target runs the cover letter cases in `internal/services/coverletter/testdata/cover_letter_eval.json` (also alone with `make eval-cover-letter`): a strong fit, a missing must-have and a prompt-injection attempt in the job description. Each letter must pass every server-side check, use at least three facts from the CV and leave out what the injection asks for. `EVAL_SHOW=1` logs the letters.
+
 ## Models used
 
 - **Embeddings**: Ollama `nomic-embed-text` (768 dimensions, matching the `vector(768)` columns).
@@ -236,8 +238,25 @@ Match routes (`internal/servers/match`), authenticated the same way:
 | POST   | `/match/job-description`  | Body `{"job_description": "..."}`            |
 | POST   | `/match/job/:id`          | Match against a stored job                   |
 | POST   | `/match/job-link`         | Not implemented (501)                        |
+| POST   | `/match/cover-letter`     | Write a cover letter, see [Cover letters](#cover-letters) |
 
 Accounts and API keys: `POST /auth/signup`, `POST /auth/signin`, `GET /me`, and `POST`/`GET /api-keys`, `DELETE /api-keys/:id`. The full reference, with request and response examples, is in [`api/openapi.yaml`](api/openapi.yaml).
+
+### Cover letters
+
+`POST /match/cover-letter` (`internal/servers/coverletter`, logic in `internal/services/coverletter`) writes a cover letter for a pasted job. The body is `{"job_description": "...", "evaluation": {...}}`, where `evaluation` is optional: the quick-match result the client already has, used as data only. The CV (the user's newest) and the name that signs the letter (from the profile) always come from the server. The response is `{"subject": "...", "letter": "...", "word_count": n}`; nothing is stored.
+
+- **Prompt.** `internal/llm/prompts/coverletter.tpl` keeps the rules in the system message and the name, job, CV and evaluation in the user message, inside `<job_description>`, `<cv>` and `<evaluation>` tags that are stripped from every input first. It asks for a formal English letter of 250-350 words in 3-4 paragraphs, "Dear Hiring Manager," (unless the posting names a person), built around the 2-3 most important requirements the CV meets, each backed by a concrete CV fact, a gap mentioned only for an unmet must-have and never apologetically, and none of the banned clichés (`entities.CoverLetterBannedPhrases`). It is sent at temperature 0.4 and recorded with `llm.task=cover_letter`.
+- **Checks.** Before a letter is returned the server checks it (`coverletter.Check`): 200-400 words, a one-line subject, a `Dear ...,` salutation, a closing (`Kind regards,` and similar) followed by the user's full name, and no profanity (word list in `profanity.go`, whole words only), banned clichés, exclamation marks, links, brackets or placeholders, or email addresses and phone numbers other than the user's own. A letter that fails is sent back to the LLM once with the list of failed checks; if the rewrite fails too the response is `502 cover_letter_failed`, and the names of the failed checks (never the letter) are logged.
+- **Errors.** `400` for a missing or longer than 20,000 characters `job_description`, `422 cv_missing` without a CV, `429 rate_limited` (with `Retry-After`), `502 cover_letter_failed`, `504 timeout`.
+- **Rate limit.** 5 letters per user per minute (`coverletter.DefaultLimit`), counted for well-formed requests only. The limiter (`internal/servers/ratelimit`) is in memory, so it applies per API process and resets on restart; running several API instances multiplies the limit, and a shared store would be needed then.
+- **Reuse.** `Service.Write` takes the CV, candidate, job and evaluation directly, so a later `POST /results/:id/cover-letter` can pass a stored result's job, evaluation and CV.
+
+```bash
+curl -X POST localhost:8080/match/cover-letter \
+  -H "Authorization: Bearer $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"job_description":"Senior Go engineer ..."}'
+```
 
 ### Account management
 

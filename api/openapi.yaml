@@ -99,6 +99,10 @@ tags:
     description: |
       The jobs your searches found, each scored against your CV in the
       background, and your own triage of them (save, applied, dismiss).
+  - name: Matching
+    description: |
+      Work with a job you paste in rather than one a search found: write a
+      cover letter for it from your CV.
 
 security:
   - sessionToken: []
@@ -1177,6 +1181,129 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /match/cover-letter:
+    post:
+      operationId: writeCoverLetter
+      tags: [Matching]
+      summary: Write a cover letter
+      description: |
+        Writes a cover letter for a job from your newest CV, signed with the
+        name on your profile (`GET /me`). The CV and the name always come
+        from the server; send only the job and, if you already have it, the
+        quick-match evaluation (`POST /match/job-description`) of that job.
+        The evaluation is used as data only, to pick the requirements the
+        letter is built around.
+
+        Every letter is checked before it is returned: 200-400 words, a
+        salutation (`Dear ...,`) and a sign-off (`Kind regards,` or similar,
+        then your full name), and no profanity, clichés (such as
+        "passionate", "perfect fit", "excited to"), exclamation marks, links,
+        placeholders or brackets, or email addresses and phone numbers other
+        than your own. A letter that fails is rewritten once; if the rewrite
+        fails too, the response is `502 cover_letter_failed`.
+
+        Letters are not stored. Each user can write 5 letters per minute;
+        the limit is kept in memory by each API instance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CoverLetterRequest'
+            example:
+              job_description: |
+                Senior Backend Engineer (Go) at Routewise
+
+                Requirements:
+                - 5+ years of backend development, at least 3 in Go
+                - Kafka or another event streaming platform
+                - PostgreSQL
+              evaluation:
+                overall_score: 88
+                requirements:
+                  - requirement: 5+ years of backend development, 3+ in Go
+                    importance: must
+                    met: 'yes'
+                    evidence: 8 years backend, the last 6 in Go
+                strengths: [6 years of production Go]
+                missing_skills: []
+                summary: You meet every must-have.
+      responses:
+        '200':
+          description: The letter.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoverLetter'
+              example:
+                subject: Application for Senior Backend Engineer (Go)
+                letter: "Dear Hiring Manager,\n\nI am applying for the Senior Backend Engineer (Go) role at Routewise. ...\n\nKind regards,\n\nAlex Rivera"
+                word_count: 287
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AccountNotFound'
+        '422':
+          description: You have not uploaded a CV yet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: invalid_request_error
+                  code: cv_missing
+                  message: Upload a CV before writing a cover letter.
+        '429':
+          description: You wrote too many letters in a short time.
+          headers:
+            Retry-After:
+              description: Seconds until the next letter is allowed.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: rate_limit_error
+                  code: rate_limited
+                  message: Too many cover letters in a short time (at most 5 per minute). Try again in 42 seconds.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '502':
+          description: |
+            No letter passing the checks could be written, or the language
+            model could not be reached. Retrying is safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: api_error
+                  code: cover_letter_failed
+                  message: We could not write a cover letter that meets our quality checks. Please try again.
+        '504':
+          description: The language model took too long to answer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: api_error
+                  code: timeout
+                  message: The request timed out.
+
 components:
   securitySchemes:
     sessionToken:
@@ -2234,6 +2361,64 @@ components:
           items:
             $ref: '#/components/schemas/SearchCount'
 
+    CoverLetterRequest:
+      type: object
+      required: [job_description]
+      properties:
+        job_description:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: The job posting, as text. Surrounding whitespace is trimmed.
+        evaluation:
+          $ref: '#/components/schemas/QuickMatchEvaluation'
+
+    QuickMatchEvaluation:
+      type: object
+      description: |
+        A quick-match evaluation of your CV against the job, as returned by
+        `POST /match/job-description`. Optional; it is treated as data only,
+        and long lists and strings are cut.
+      properties:
+        overall_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+        breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionScore'
+        strengths:
+          type: array
+          items:
+            type: string
+        missing_skills:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+
+    CoverLetter:
+      type: object
+      required: [subject, letter, word_count]
+      properties:
+        subject:
+          type: string
+          description: A one-line subject, such as "Application for Senior Backend Engineer".
+        letter:
+          type: string
+          description: |
+            The letter as plain text, with `\n` line breaks and a blank line
+            between the salutation, the paragraphs, the closing and the name.
+        word_count:
+          type: integer
+          description: Words in `letter`, between 200 and 400.
+
     Error:
       type: object
       required: [type, message]
@@ -2249,10 +2434,13 @@ components:
             - `authentication_error`: no valid credential was supplied.
             - `api_error`: something went wrong on our side. These are rare;
               retrying later is safe for idempotent requests.
+            - `rate_limit_error`: too many requests in a short time; wait
+              for the number of seconds in the `Retry-After` header.
           enum:
             - invalid_request_error
             - authentication_error
             - api_error
+            - rate_limit_error
         code:
           type: string
           description: |
@@ -2274,6 +2462,9 @@ components:
             - portal_already_suggested
             - portal_already_supported
             - evaluation_in_progress
+            - cv_missing
+            - rate_limited
+            - cover_letter_failed
             - internal_error
             - timeout
         message:
