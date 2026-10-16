@@ -112,7 +112,8 @@ func TestStartRun_Error(t *testing.T) {
 	spans := p.Spans()
 	require.Len(t, spans, 1)
 	assert.Equal(t, codes.Error, spans[0].Status().Code)
-	assert.Equal(t, "boom", spans[0].Status().Description)
+	assert.Equal(t, "*errors.errorString", spans[0].Status().Description, "the status carries a label, not the message")
+	assert.Empty(t, spans[0].Events(), "a run records no exception event; the error's origin or handler does")
 }
 
 // pipelineObserver mirrors internal/pipeline.RunObserver, so this test fails

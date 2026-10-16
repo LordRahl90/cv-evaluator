@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -85,6 +86,8 @@ func New(db *gorm.DB) *Service {
 // Create saves a new search for userID. An enabled search is due
 // immediately, so its first run happens on the scheduler's next tick.
 func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (*models.JobSearch, error) {
+	ctx, span := telemetry.Start(ctx, "jobsearches.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	rec := &models.JobSearch{
 		UserID:    userID,
 		Name:      strings.TrimSpace(p.Name),
@@ -97,7 +100,7 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 		rec.Frequency = DefaultFrequency
 	}
 	if err := validate(rec); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 	if rec.Enabled {
 		now := s.now()
@@ -112,6 +115,8 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 
 // List returns the caller's searches, newest first.
 func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]models.JobSearch, error) {
+	ctx, span := telemetry.Start(ctx, "jobsearches.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var recs []models.JobSearch
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).
@@ -124,12 +129,14 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]models.JobSearc
 
 // Get returns one of the caller's searches.
 func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*models.JobSearch, error) {
+	ctx, span := telemetry.Start(ctx, "jobsearches.Service.Get", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer span.End()
 	var rec models.JobSearch
 	err := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", id, userID).
 		Take(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
+		return nil, span.RecordError(ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get job search: %w", err)
@@ -141,6 +148,8 @@ func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*models.JobSea
 // immediately, disabling it clears NextRunAt, and changing the frequency of
 // a search that has run before reschedules it from its last run.
 func (s *Service) Update(ctx context.Context, userID, id ulid.ULID, p UpdateParams) (*models.JobSearch, error) {
+	ctx, span := telemetry.Start(ctx, "jobsearches.Service.Update", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer span.End()
 	rec, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -161,7 +170,7 @@ func (s *Service) Update(ctx context.Context, userID, id ulid.ULID, p UpdatePara
 	}
 
 	if err := validate(rec); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	switch {
@@ -183,6 +192,8 @@ func (s *Service) Update(ctx context.Context, userID, id ulid.ULID, p UpdatePara
 
 // Delete soft-deletes one of the caller's searches.
 func (s *Service) Delete(ctx context.Context, userID, id ulid.ULID) error {
+	ctx, span := telemetry.Start(ctx, "jobsearches.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer span.End()
 	res := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", id, userID).
 		Delete(&models.JobSearch{})
@@ -190,7 +201,7 @@ func (s *Service) Delete(ctx context.Context, userID, id ulid.ULID) error {
 		return fmt.Errorf("delete job search: %w", res.Error)
 	}
 	if res.RowsAffected == 0 {
-		return ErrNotFound
+		return span.RecordError(ErrNotFound)
 	}
 	return nil
 }
@@ -198,12 +209,14 @@ func (s *Service) Delete(ctx context.Context, userID, id ulid.ULID) error {
 // RunNow makes an enabled search due now, so the scheduler runs it on its
 // next tick. It returns ErrDisabled for a disabled search.
 func (s *Service) RunNow(ctx context.Context, userID, id ulid.ULID) (*models.JobSearch, error) {
+	ctx, span := telemetry.Start(ctx, "jobsearches.Service.RunNow", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer span.End()
 	rec, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
 	if !rec.Enabled {
-		return nil, ErrDisabled
+		return nil, span.RecordError(ErrDisabled)
 	}
 
 	now := s.now()

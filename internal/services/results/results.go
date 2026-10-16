@@ -17,8 +17,10 @@ import (
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/matcher"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
+	"go.opentelemetry.io/otel/attribute"
 	"gorm.io/gorm"
 )
 
@@ -263,11 +265,13 @@ type listRow struct {
 
 // List returns a page of userID's results.
 func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (*Page, error) {
+	ctx, span := telemetry.Start(ctx, "results.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	if err := normalize(&p); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 	if p.JobSearchID != nil {
-		if err := s.requireSearch(ctx, userID, *p.JobSearchID); err != nil {
+		if err := s.requireSearch(ctx, span, userID, *p.JobSearchID); err != nil {
 			return nil, err
 		}
 	}
@@ -310,7 +314,7 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (*Pa
 		Joins("LEFT JOIN evaluations e ON e.id = sr.evaluation_id AND sr.overall_score IS NOT NULL")
 	if p.StartingAfter != nil {
 		var err error
-		if q, err = s.after(ctx, q, userID, &p); err != nil {
+		if q, err = s.after(ctx, span, q, userID, &p); err != nil {
 			return nil, err
 		}
 	}
@@ -336,8 +340,9 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (*Pa
 	return page, nil
 }
 
-// after continues q past the StartingAfter result, in p.Sort order.
-func (s *Service) after(ctx context.Context, q *gorm.DB, userID ulid.ULID, p *ListParams) (*gorm.DB, error) {
+// after continues q past the StartingAfter result, in p.Sort order. It has
+// no span of its own: a bad cursor is recorded on span, the caller's.
+func (s *Service) after(ctx context.Context, span *telemetry.Span, q *gorm.DB, userID ulid.ULID, p *ListParams) (*gorm.DB, error) {
 	var cursor []struct {
 		CreatedAt    time.Time
 		OverallScore *int
@@ -349,7 +354,7 @@ func (s *Service) after(ctx context.Context, q *gorm.DB, userID ulid.ULID, p *Li
 		return nil, fmt.Errorf("load cursor: %w", err)
 	}
 	if len(cursor) == 0 {
-		return nil, invalid("starting_after", "The starting_after parameter must be the id of one of your results.")
+		return nil, span.RecordError(invalid("starting_after", "The starting_after parameter must be the id of one of your results."))
 	}
 	c, id := cursor[0], *p.StartingAfter
 
@@ -464,7 +469,9 @@ func oneOf(param string, values, allowed []string) ([]string, error) {
 	return out, nil
 }
 
-func (s *Service) requireSearch(ctx context.Context, userID, searchID ulid.ULID) error {
+// requireSearch checks that searchID is one of the user's searches. It has
+// no span of its own: a missing search is recorded on span, the caller's.
+func (s *Service) requireSearch(ctx context.Context, span *telemetry.Span, userID, searchID ulid.ULID) error {
 	var n int64
 	if err := s.db.WithContext(ctx).Model(&models.JobSearch{}).
 		Where("id = ? AND user_id = ?", searchID, userID).
@@ -472,7 +479,7 @@ func (s *Service) requireSearch(ctx context.Context, userID, searchID ulid.ULID)
 		return fmt.Errorf("load job search: %w", err)
 	}
 	if n == 0 {
-		return ErrSearchNotFound
+		return span.RecordError(ErrSearchNotFound)
 	}
 	return nil
 }
@@ -500,6 +507,8 @@ type detailRow struct {
 
 // Get returns one of userID's results with its full job and evaluation.
 func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*Detail, error) {
+	ctx, span := telemetry.Start(ctx, "results.Service.Get", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrResultID, id))
+	defer span.End()
 	var rows []detailRow
 	if err := s.visible(ctx, userID).
 		Select(`sr.id, sr.status, sr.evaluation_status, sr.created_at, sr.updated_at, sr.evaluation_id, sr.overall_score,
@@ -510,7 +519,7 @@ func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*Detail, error
 		return nil, fmt.Errorf("get search result: %w", err)
 	}
 	if len(rows) == 0 {
-		return nil, ErrNotFound
+		return nil, span.RecordError(ErrNotFound)
 	}
 	r := rows[0]
 
@@ -609,13 +618,17 @@ func nonNil(l models.StringList) []string {
 
 // UpdateStatus sets one of userID's results' status and returns the result.
 func (s *Service) UpdateStatus(ctx context.Context, userID, id ulid.ULID, status string) (*Detail, error) {
+	ctx, span := telemetry.Start(ctx, "results.Service.UpdateStatus", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrResultID, id))
+	defer span.End()
 	statuses, err := oneOf("status", []string{status}, models.SearchResultStatuses)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 	if len(statuses) == 0 {
-		return nil, missing("status", "The status parameter is required.")
+		return nil, span.RecordError(missing("status", "The status parameter is required."))
 	}
+	// Set once validated: an enum value, never what the client sent.
+	span.SetAttributes(attribute.String(telemetry.AttrStatus, statuses[0]))
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
 	}
@@ -634,6 +647,8 @@ func (s *Service) UpdateStatus(ctx context.Context, userID, id ulid.ULID, status
 // now. It returns ErrEvaluationInProgress while the result is being
 // evaluated or is already due.
 func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (*Detail, error) {
+	ctx, span := telemetry.Start(ctx, "results.Service.ReEvaluate", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrResultID, id))
+	defer span.End()
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
 	}
@@ -655,13 +670,15 @@ func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (*Detail
 		return nil, fmt.Errorf("re-evaluate search result: %w", res.Error)
 	}
 	if res.RowsAffected == 0 {
-		return nil, ErrEvaluationInProgress
+		return nil, span.RecordError(ErrEvaluationInProgress)
 	}
 	return s.Get(ctx, userID, id)
 }
 
 // Summary counts userID's results.
 func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (*Summary, error) {
+	ctx, span := telemetry.Start(ctx, "results.Service.Summary", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	weekStart := s.now().Add(-7 * 24 * time.Hour)
 
 	var totals struct {

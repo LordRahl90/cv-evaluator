@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -150,6 +151,8 @@ type ExportPortalSuggestion struct {
 // ErrUserNotFound when there is no such user. The data is read in one
 // read-only transaction so it is a consistent snapshot.
 func (s *Service) Export(ctx context.Context, userID ulid.ULID) (*Export, error) {
+	ctx, span := telemetry.Start(ctx, "account.Service.Export", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var out *Export
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").Error; err != nil {

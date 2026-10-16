@@ -8,6 +8,7 @@ import (
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/scraper/jobindex"
 	"cv-evaluator/internal/scraper/linkedin"
+	"cv-evaluator/internal/telemetry"
 )
 
 // Names of the built-in providers.
@@ -71,14 +72,18 @@ func (p *LinkedIn) Info() Info {
 }
 
 func (p *LinkedIn) Search(ctx context.Context, c Criteria) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "providers.LinkedIn.Search")
+	defer span.End()
 	startURL, err := searchURL(c, linkedin.SearchURL, p.searchBase)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err) // invalid criteria, detected here
 	}
 	return p.scraper.SearchJobs(ctx, startURL, c.MaxPages)
 }
 
 func (p *LinkedIn) Details(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "providers.LinkedIn.Details")
+	defer span.End()
 	return p.scraper.GetJobDetails(ctx, job)
 }
 
@@ -102,14 +107,18 @@ func (p *Jobindex) Info() Info {
 }
 
 func (p *Jobindex) Search(ctx context.Context, c Criteria) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "providers.Jobindex.Search")
+	defer span.End()
 	startURL, err := searchURL(c, jobindex.SearchURL, p.searchBase)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err) // invalid criteria, detected here
 	}
 	s := &jobindex.Service{SearchLinkPage: startURL, MaxPages: c.MaxPages, Transport: p.transport}
 	return s.SearchJobs(ctx)
 }
 
 func (p *Jobindex) Details(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "providers.Jobindex.Details")
+	defer span.End()
 	return (&jobindex.Service{Transport: p.transport}).GetJobDetails(ctx, job)
 }

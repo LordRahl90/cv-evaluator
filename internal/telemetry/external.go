@@ -7,7 +7,6 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -65,8 +64,8 @@ func TrackExternal(ctx context.Context, service, operation string, attrs ...attr
 		out := outcome(err)
 		span.SetAttributes(attribute.String(AttrOutcome, out))
 		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
+			// The call is where the error happens: record it here.
+			recordError(span, err)
 		}
 		span.End()
 		recordExternal(ctx, time.Since(start), base, out)
@@ -180,6 +179,13 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	start := time.Now()
 	res, err := t.base.RoundTrip(req)
+	if err != nil {
+		// The call is where a transport error happens: it is recorded on
+		// the client span (otelhttp then sets the span's Error status) and
+		// returned unchanged. A transport error carries no request values;
+		// http.Client adds the URL only above the transport.
+		addException(span, err)
+	}
 
 	out := OutcomeSuccess
 	if err != nil || res.StatusCode >= http.StatusBadRequest {

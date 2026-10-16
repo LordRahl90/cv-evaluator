@@ -76,6 +76,8 @@ func TestMatchByJobDescription_ServiceError(t *testing.T) {
 		`{"job_description":"We are looking for a Go engineer"}`)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.NotContains(t, w.Body.String(), "database unavailable", "5xx bodies never carry the error's text")
+	assert.Contains(t, w.Body.String(), `"type":"api_error"`)
 	svc.AssertExpectations(t)
 }
 

@@ -295,10 +295,10 @@ func handleServiceError(c *gin.Context, err error) {
 	case errors.Is(err, jobsearchsvc.ErrDisabled):
 		apierror.Conflict(c, CodeJobSearchDisabled, "The job search is disabled. Enable it before running it.", "")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		apierror.GatewayTimeout(c)
+		apierror.GatewayTimeout(c, err)
 	default:
 		slog.ErrorContext(c.Request.Context(), "job searches handler", "error", err)
-		apierror.InternalServerError(c)
+		apierror.InternalServerError(c, err)
 	}
 }
 

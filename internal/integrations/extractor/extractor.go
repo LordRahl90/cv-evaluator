@@ -8,12 +8,20 @@ import (
 	"os"
 
 	"github.com/ledongthuc/pdf"
+
+	"cv-evaluator/internal/telemetry"
 )
 
-func Extract(fileName string) (string, error) {
+// Extract returns the plain text of the PDF at fileName.
+// The PDF library has no spans of its own, so its failures are recorded
+// here, where they happen.
+func Extract(ctx context.Context, fileName string) (string, error) {
+	_, span := telemetry.Start(ctx, "extractor.Extract")
+	defer span.End()
+
 	f, r, err := pdf.Open(fileName)
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	defer func() {
 		_ = f.Close()
@@ -21,33 +29,38 @@ func Extract(fileName string) (string, error) {
 
 	b, err := r.GetPlainText()
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(b); err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	return buf.String(), nil
 }
 
-func ExtractFromFile(file *os.File) (string, error) {
+// ExtractFromFile returns the plain text of the PDF in file.
+// Failures are recorded here, like Extract's.
+func ExtractFromFile(ctx context.Context, file *os.File) (string, error) {
+	_, span := telemetry.Start(ctx, "extractor.ExtractFromFile")
+	defer span.End()
+
 	fStat, err := file.Stat()
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	r, err := pdf.NewReader(file, fStat.Size())
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	b, err := r.GetPlainText()
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(b); err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	return buf.String(), nil
 }

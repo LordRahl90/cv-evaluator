@@ -10,7 +10,9 @@ import (
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
 	jobstorage "cv-evaluator/internal/storage/jobs"
+	"cv-evaluator/internal/telemetry"
 
+	"go.opentelemetry.io/otel/attribute"
 	"gorm.io/gorm"
 )
 
@@ -39,6 +41,8 @@ func New(db *gorm.DB, embeddingLLMService EmbeddingLLMService) *Service {
 // embedded yet. Calling it again for the same posting is a no-op once the
 // job is embedded, so a posting is never embedded twice.
 func (s *Service) ProcessJob(ctx context.Context, job *entities.JobPost) (*models.Job, error) {
+	ctx, span := telemetry.Start(ctx, "jobs.Service.ProcessJob", attribute.String(telemetry.AttrProvider, job.Provider))
+	defer span.End()
 	stored, created, err := s.store.Upsert(ctx, job.ToModel())
 	if err != nil {
 		return nil, err
@@ -64,11 +68,13 @@ func (s *Service) ProcessJob(ctx context.Context, job *entities.JobPost) (*model
 // Embed embeds the job's description and stores the vector. It does nothing
 // when the job is already embedded.
 func (s *Service) Embed(ctx context.Context, job *models.Job) error {
+	ctx, span := telemetry.Start(ctx, "jobs.Service.Embed", telemetry.ID(telemetry.AttrJobID, job.ID))
+	defer span.End()
 	if job.IsEmbedded() {
 		return nil
 	}
 	if strings.TrimSpace(job.Detail) == "" {
-		return fmt.Errorf("embed job %s/%s: %w", job.Provider, job.JobID, ErrNoDetail)
+		return span.RecordError(fmt.Errorf("embed job %s/%s: %w", job.Provider, job.JobID, ErrNoDetail))
 	}
 
 	embedding, err := s.embeddingService.CreateEmbedding(ctx, job.Detail)
@@ -90,6 +96,8 @@ func (s *Service) Embed(ctx context.Context, job *models.Job) error {
 // IsJobProcessed returns the stored job when the posting exists and is
 // already embedded, or nil when it still needs processing.
 func (s *Service) IsJobProcessed(ctx context.Context, provider, jobID string) (*models.Job, error) {
+	ctx, span := telemetry.Start(ctx, "jobs.Service.IsJobProcessed", attribute.String(telemetry.AttrProvider, provider))
+	defer span.End()
 	job, err := s.store.FindByProviderAndJobID(ctx, provider, jobID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil

@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -55,6 +56,8 @@ type Deleted struct {
 // its rows are then seen and deleted here; one that comes later finds the
 // row gone and writes nothing.
 func (s *Service) Delete(ctx context.Context, userID ulid.ULID) ([]Deleted, error) {
+	ctx, span := telemetry.Start(ctx, "account.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var report []Deleted
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		report = nil
@@ -66,7 +69,7 @@ func (s *Service) Delete(ctx context.Context, userID ulid.ULID) ([]Deleted, erro
 			return fmt.Errorf("lock user: %w", err)
 		}
 		if len(users) == 0 {
-			return ErrUserNotFound
+			return span.RecordError(ErrUserNotFound)
 		}
 
 		var ids []ulid.ULID

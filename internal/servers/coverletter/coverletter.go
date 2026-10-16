@@ -18,6 +18,7 @@ import (
 	coverlettersvc "cv-evaluator/internal/services/coverletter"
 	"cv-evaluator/internal/services/matcher"
 	"cv-evaluator/internal/services/users"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
@@ -125,9 +126,10 @@ func handleServiceError(c *gin.Context, err error) {
 	case errors.Is(err, users.ErrUserNotFound):
 		apierror.NotFound(c, "The account does not exist.", "")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		apierror.GatewayTimeout(c)
+		apierror.GatewayTimeout(c, err)
 	case errors.Is(err, coverlettersvc.ErrGenerationFailed):
 		// The service has logged which checks failed.
+		telemetry.RecordError(c.Request.Context(), err)
 		apierror.Write(c, http.StatusBadGateway, apierror.Error{
 			Type:    apierror.TypeAPI,
 			Code:    CodeCoverLetterFailed,
@@ -135,6 +137,6 @@ func handleServiceError(c *gin.Context, err error) {
 		})
 	default:
 		slog.ErrorContext(c.Request.Context(), "cover letter handler", "error", err)
-		apierror.InternalServerError(c)
+		apierror.InternalServerError(c, err)
 	}
 }

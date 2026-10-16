@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/gocolly/colly"
 )
@@ -77,17 +78,19 @@ func SearchURL(base, query, location string) (string, error) {
 
 // SearchJobs scrapes up to maxPages result pages starting at searchLink.
 func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages int) ([]entities.JobPost, error) {
+	ctx, span := telemetry.Start(ctx, "linkedin.Service.SearchJobs")
+	defer span.End()
 	startURL := strings.TrimSpace(searchLink)
 	if startURL == "" {
 		startURL = strings.TrimSpace(s.SearchLinkPage)
 	}
 	if startURL == "" {
-		return nil, ErrSearchURLRequired
+		return nil, span.RecordError(ErrSearchURLRequired)
 	}
 
 	parsedURL, err := url.Parse(startURL)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	allowedDomains := []string{baseDomain}
@@ -108,7 +111,7 @@ func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages in
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
-	c.WithTransport(s.transport())
+	c.WithTransport(telemetry.WithParentSpan(ctx, s.transport()))
 
 	var jobPosts []entities.JobPost
 	seenPages := make(map[string]struct{})
@@ -193,25 +196,28 @@ func (s *Service) SearchJobs(ctx context.Context, searchLink string, maxPages in
 	})
 
 	if err := c.Visit(startURL); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
+	span.SetAttributes(telemetry.Count("postings", len(jobPosts)))
 	return jobPosts, nil
 }
 
 func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+	ctx, span := telemetry.Start(ctx, "linkedin.Service.GetJobDetails")
+	defer span.End()
 	if job == nil {
-		return nil, errors.New("job is required")
+		return nil, span.RecordError(errors.New("job is required"))
 	}
 
 	detailsURL := strings.TrimSpace(job.DetailsURL)
 	if detailsURL == "" {
-		return nil, errors.New("job details URL is required")
+		return nil, span.RecordError(errors.New("job details URL is required"))
 	}
 
 	parsedURL, err := url.Parse(detailsURL)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	allowedDomains := []string{baseDomain}
@@ -226,7 +232,7 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
-	c.WithTransport(s.transport())
+	c.WithTransport(telemetry.WithParentSpan(ctx, s.transport()))
 
 	details := &entities.JobDetails{
 		ID:       job.ID,
@@ -277,11 +283,11 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 	})
 
 	if err := c.Visit(detailsURL); err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	if details.Details == "" {
-		return nil, errors.New("job details not found")
+		return nil, span.RecordError(errors.New("job details not found"))
 	}
 
 	details.Location = job.Location

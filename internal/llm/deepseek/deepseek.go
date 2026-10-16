@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"text/template"
@@ -61,21 +62,25 @@ func New(client Client) *Service {
 }
 
 func (s *Service) CleanupCV(ctx context.Context, content string) (string, error) {
+	ctx, span := telemetry.Start(ctx, "deepseek.Service.CleanupCV")
+	defer span.End()
 	slog.DebugContext(ctx, "Cleaning up CV content with DeepSeek LLM", "content_length", len(content))
 	promptContent, err := s.loadPrompt("cv-cleanup.txt")
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	return s.callLLM(ctx, taskCVCleanup, cvCleanupTemperature, string(promptContent), prompts.TagCV(content))
 }
 
 func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput) (string, error) {
+	ctx, span := telemetry.Start(ctx, "deepseek.Service.JobMatch")
+	defer span.End()
 	slog.DebugContext(ctx, "Matching CV with job description using DeepSeek LLM", "job_description_length", len(matchInput.JobDescription))
 
 	system, user, err := s.buildPrompt(matchInput)
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 
 	return s.callLLM(ctx, taskJobMatch, jobMatchTemperature, system, user)
@@ -86,11 +91,13 @@ func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput)
 // previous answer and the reasons it was rejected follow the first
 // exchange, so the LLM revises its own letter.
 func (s *Service) CoverLetter(ctx context.Context, input *entities.CoverLetterInput) (string, error) {
+	ctx, span := telemetry.Start(ctx, "deepseek.Service.CoverLetter")
+	defer span.End()
 	slog.DebugContext(ctx, "Writing a cover letter using DeepSeek LLM", "job_description_length", len(input.JobDescription), "revision", input.Revision != nil)
 
 	messages, err := s.buildCoverLetterMessages(input)
 	if err != nil {
-		return "", err
+		return "", span.RecordError(err)
 	}
 	return s.complete(ctx, taskCoverLetter, coverLetterTemperature, messages)
 }
@@ -105,8 +112,11 @@ func (s *Service) callLLM(ctx context.Context, task string, temperature float32,
 	})
 }
 
-// complete sends messages as one JSON-mode chat completion.
+// complete sends messages as one JSON-mode chat completion. A failed call
+// is recorded here, scrubbed (see scrubError).
 func (s *Service) complete(ctx context.Context, task string, temperature float32, messages []deepseek.ChatCompletionMessage) (string, error) {
+	ctx, span := telemetry.Start(ctx, "deepseek.Service.complete", attribute.String(telemetry.AttrLLMTask, task))
+	defer span.End()
 	ctx = telemetry.WithOperation(ctx, telemetry.OpChatCompletion, attribute.String(telemetry.AttrLLMTask, task))
 
 	req := &deepseek.ChatCompletionRequest{
@@ -120,13 +130,40 @@ func (s *Service) complete(ctx context.Context, task string, temperature float32
 
 	res, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
-		return "", err
+		return "", span.RecordError(scrubError(err))
 	}
 	if len(res.Choices) == 0 {
-		return "", errors.New("deepseek: response has no choices")
+		return "", span.RecordError(errors.New("deepseek: response has no choices"))
 	}
 
 	return res.Choices[0].Message.Content, nil
+}
+
+// apiError is a DeepSeek API error with its text reduced to the status and
+// error codes. The API's message can carry the masked API key ("Your api
+// key: ****demo is invalid") and the response body, neither of which may
+// reach traces, logs or response bodies. errors.As still finds the original
+// *deepseek.APIError.
+type apiError struct {
+	err  *deepseek.APIError
+	text string
+}
+
+func (e *apiError) Error() string { return e.text }
+func (e *apiError) Unwrap() error { return e.err }
+
+// scrubError replaces the text of a DeepSeek API error (see apiError).
+// Other errors, such as transport failures, are returned as they are.
+func scrubError(err error) error {
+	var apiErr *deepseek.APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	text := fmt.Sprintf("deepseek: API error: HTTP %d", apiErr.StatusCode)
+	if apiErr.APICode != 0 {
+		text += fmt.Sprintf(" (code %d)", apiErr.APICode)
+	}
+	return &apiError{err: apiErr, text: text}
 }
 
 func (s *Service) loadPrompt(fileName string) ([]byte, error) {

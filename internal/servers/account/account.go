@@ -231,9 +231,9 @@ func handleServiceError(c *gin.Context, err error, passwordParam string) {
 	case errors.Is(err, users.ErrUserNotFound), errors.Is(err, accountsvc.ErrUserNotFound):
 		apierror.NotFound(c, "The account does not exist.", "")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		apierror.GatewayTimeout(c)
+		apierror.GatewayTimeout(c, err)
 	default:
 		slog.ErrorContext(c.Request.Context(), "account handler", "error", err)
-		apierror.InternalServerError(c)
+		apierror.InternalServerError(c, err)
 	}
 }

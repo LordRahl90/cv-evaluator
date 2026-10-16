@@ -1,8 +1,11 @@
 package telemetry
 
 import (
+	"context"
 	"net/http"
 	"strings"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // PeerJobBoard is the fallback peer.service for scraper requests to a host
@@ -47,3 +50,24 @@ func jobBoardOperation(r *http.Request) string {
 	}
 	return OpSearch
 }
+
+// WithParentSpan returns a transport that sends each request through rt with
+// the span in ctx as its parent. Clients that build requests without a
+// context, such as colly, otherwise start a new trace per request:
+//
+//	c.WithTransport(telemetry.WithParentSpan(ctx, transport))
+//
+// Only the span is carried over; cancellation and deadlines of ctx are not.
+func WithParentSpan(ctx context.Context, rt http.RoundTripper) http.RoundTripper {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return rt
+	}
+	return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return rt.RoundTrip(r.WithContext(trace.ContextWithSpan(r.Context(), span)))
+	})
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

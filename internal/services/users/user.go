@@ -16,6 +16,7 @@ import (
 
 	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/oklog/ulid/v2"
@@ -76,7 +77,9 @@ func NewWithAuth(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMServi
 }
 
 func (s *Service) Create(ctx context.Context, req SignupRequest) (*User, error) {
-	newUser, err := s.createUser(ctx, req)
+	ctx, span := telemetry.Start(ctx, "users.Service.Create")
+	defer span.End()
+	newUser, err := s.createUser(ctx, span, req)
 	if err != nil {
 		return nil, err
 	}
@@ -91,55 +94,63 @@ func (s *Service) Create(ctx context.Context, req SignupRequest) (*User, error) 
 }
 
 func (s *Service) Signup(ctx context.Context, req SignupRequest) (*AuthResponse, error) {
-	newUser, err := s.createUser(ctx, req)
+	ctx, span := telemetry.Start(ctx, "users.Service.Signup")
+	defer span.End()
+	newUser, err := s.createUser(ctx, span, req)
 	if err != nil {
 		return nil, err
 	}
 
+	span.SetAttributes(telemetry.ID(telemetry.AttrUserID, newUser.ID))
 	token, err := s.generateToken(newUser.ID)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	return &AuthResponse{Token: token, User: s.profileFromModel(newUser)}, nil
 }
 
 func (s *Service) Signin(ctx context.Context, req SigninRequest) (*AuthResponse, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.Signin")
+	defer span.End()
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	if email == "" || req.Password == "" {
-		return nil, ErrInvalidCredentials
+		return nil, span.RecordError(ErrInvalidCredentials)
 	}
 
 	var existing models.User
 	err := s.db.WithContext(ctx).Where("email = ?", email).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrInvalidCredentials
+		return nil, span.RecordError(ErrInvalidCredentials)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(existing.Password), []byte(req.Password)); err != nil {
-		return nil, ErrInvalidCredentials
+		return nil, span.RecordError(ErrInvalidCredentials)
 	}
 
+	span.SetAttributes(telemetry.ID(telemetry.AttrUserID, existing.ID))
 	token, err := s.generateToken(existing.ID)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	return &AuthResponse{Token: token, User: s.profileFromModel(&existing)}, nil
 }
 
 func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.Profile")
+	defer span.End()
 	userID, err := s.parseTokenUserID(req.Token)
 	if err != nil {
-		return nil, err
+		return nil, span.RecordError(err)
 	}
 
 	profile, err := s.GetProfile(ctx, userID)
 	if errors.Is(err, ErrUserNotFound) {
-		return nil, ErrInvalidToken
+		return nil, span.RecordError(ErrInvalidToken)
 	}
 	return profile, err
 }
@@ -147,10 +158,12 @@ func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, er
 // GetProfile returns the profile of an already-authenticated user, e.g. one
 // resolved by the auth middleware from a JWT or an API key.
 func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (*Profile, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.GetProfile", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var existing models.User
 	err := s.db.WithContext(ctx).Where("id = ?", userID).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrUserNotFound
+		return nil, span.RecordError(ErrUserNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -161,13 +174,15 @@ func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (*Profile, e
 }
 
 func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) error {
+	ctx, span := telemetry.Start(ctx, "users.Service.UploadCV", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	if cv == nil {
-		return errors.New("cv file is required")
+		return span.RecordError(errors.New("cv file is required"))
 	}
 
 	src, err := cv.Open()
 	if err != nil {
-		return err
+		return span.RecordError(err) // local I/O, no span of its own
 	}
 	defer func() {
 		_ = src.Close()
@@ -175,7 +190,7 @@ func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.
 
 	tmp, err := os.CreateTemp("", "cv-upload-*")
 	if err != nil {
-		return err
+		return span.RecordError(err) // local I/O, no span of its own
 	}
 	defer func() {
 		_ = tmp.Close()
@@ -183,17 +198,19 @@ func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.
 	}()
 
 	if _, err := io.Copy(tmp, src); err != nil {
-		return err
+		return span.RecordError(err) // local I/O, no span of its own
 	}
 
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return err
+		return span.RecordError(err) // local I/O, no span of its own
 	}
 
 	return s.ProcessCV(ctx, userID, tmp)
 }
 
 func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.CV, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.ListUserCVs", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	var cvs []models.CV
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).
@@ -205,12 +222,14 @@ func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.C
 }
 
 func (s *Service) GetCV(ctx context.Context, userID, cvID ulid.ULID) (*models.CV, error) {
+	ctx, span := telemetry.Start(ctx, "users.Service.GetCV", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrCVID, cvID))
+	defer span.End()
 	var cv models.CV
 	err := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", cvID, userID).
 		First(&cv).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrCVNotFound
+		return nil, span.RecordError(ErrCVNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -219,6 +238,8 @@ func (s *Service) GetCV(ctx context.Context, userID, cvID ulid.ULID) (*models.CV
 }
 
 func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
+	ctx, span := telemetry.Start(ctx, "users.Service.DeleteCV", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrCVID, cvID))
+	defer span.End()
 	result := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", cvID, userID).
 		Delete(&models.CV{})
@@ -226,13 +247,15 @@ func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrCVNotFound
+		return span.RecordError(ErrCVNotFound)
 	}
 	return nil
 }
 
 func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) error {
-	cvContent, err := extractor.ExtractFromFile(cv)
+	ctx, span := telemetry.Start(ctx, "users.Service.ProcessCV", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
+	cvContent, err := extractor.ExtractFromFile(ctx, cv)
 	if err != nil {
 		return err
 	}
@@ -255,6 +278,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 	if err := s.db.WithContext(ctx).Create(cvModel).Error; err != nil {
 		return err
 	}
+	span.SetAttributes(telemetry.ID(telemetry.AttrCVID, cvModel.ID))
 
 	// we clean it up to generate different sections
 	sections, err := s.chatLLM.CleanupCV(ctx, cvContent)
@@ -265,7 +289,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 	// we parse the content of the sections into the map
 
 	if err := json.Unmarshal([]byte(sections), &sectionMap); err != nil {
-		return err
+		return span.RecordError(err) // the LLM's answer is decoded here
 	}
 
 	var sectionEmbeddings []models.SectionEmbedding
@@ -280,7 +304,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 		// let's parse the content back to string
 		b, err := json.Marshal(v)
 		if err != nil {
-			return err
+			return span.RecordError(err)
 		}
 
 		sectionEmbedding, err := s.embeddingLLM.CreateEmbedding(ctx, string(b))
@@ -299,14 +323,17 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 		slog.DebugContext(ctx, "Section embedding created", "heading", heading, "embedding", sectionEmbedding)
 	}
 
+	span.SetAttributes(telemetry.Count("cv.sections", len(sectionEmbeddings)))
 	return s.db.WithContext(ctx).Create(&sectionEmbeddings).Error
 }
 
-func (s *Service) createUser(ctx context.Context, req SignupRequest) (*models.User, error) {
+// createUser has no span of its own: failures it detects are recorded on
+// span, the caller's.
+func (s *Service) createUser(ctx context.Context, span *telemetry.Span, req SignupRequest) (*models.User, error) {
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	phone := strings.TrimSpace(req.Phone)
 	if email == "" || req.Password == "" {
-		return nil, ErrInvalidCredentials
+		return nil, span.RecordError(ErrInvalidCredentials)
 	}
 
 	var existing models.User
@@ -318,12 +345,12 @@ func (s *Service) createUser(ctx context.Context, req SignupRequest) (*models.Us
 	err := lookup.First(&existing).Error
 	if err == nil {
 		if strings.EqualFold(existing.Email, email) {
-			return nil, ErrEmailAlreadyUsed
+			return nil, span.RecordError(ErrEmailAlreadyUsed)
 		}
 		if phone != "" && existing.Phone == phone {
-			return nil, ErrPhoneAlreadyUsed
+			return nil, span.RecordError(ErrPhoneAlreadyUsed)
 		}
-		return nil, ErrEmailAlreadyUsed
+		return nil, span.RecordError(ErrEmailAlreadyUsed)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -331,7 +358,7 @@ func (s *Service) createUser(ctx context.Context, req SignupRequest) (*models.Us
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, fmt.Errorf("hash password: %w", err)
+		return nil, span.RecordError(fmt.Errorf("hash password: %w", err))
 	}
 
 	newUser := &models.User{

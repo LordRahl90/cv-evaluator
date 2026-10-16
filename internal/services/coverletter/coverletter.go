@@ -23,6 +23,7 @@ import (
 	"cv-evaluator/internal/llm/prompts"
 	"cv-evaluator/internal/services/matcher"
 	"cv-evaluator/internal/services/users"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -113,6 +114,8 @@ func New(cvs CVs, profiles Profiles, llm LLM) *Service {
 // signed with the name on their profile. It returns ErrNoCV when the user
 // has no CV.
 func (s *Service) Generate(ctx context.Context, userID ulid.ULID, req Request) (*Letter, error) {
+	ctx, span := telemetry.Start(ctx, "coverletter.Service.Generate", telemetry.ID(telemetry.AttrUserID, userID))
+	defer span.End()
 	cv, err := s.cvs.LatestCVText(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -138,8 +141,10 @@ func (s *Service) Generate(ctx context.Context, userID ulid.ULID, req Request) (
 // back once with the failed checks; ErrGenerationFailed is returned when
 // the revision fails too.
 func (s *Service) Write(ctx context.Context, in Input) (*Letter, error) {
+	ctx, span := telemetry.Start(ctx, "coverletter.Service.Write")
+	defer span.End()
 	if strings.TrimSpace(in.CV) == "" {
-		return nil, ErrNoCV
+		return nil, span.RecordError(ErrNoCV)
 	}
 	candidate := in.Candidate
 	candidate.Name = singleLine(prompts.StripTags(candidate.Name))
@@ -172,12 +177,16 @@ func (s *Service) Write(ctx context.Context, in Input) (*Letter, error) {
 		// Log the names of the failed checks only: the messages may quote
 		// the letter, and the letter is personal data.
 		failed = Names(violations)
+		if attempt < attempts {
+			// Sent back for a revision: an event only, the revision may pass.
+			telemetry.RecordRetry(ctx, fmt.Errorf("failed checks %s", strings.Join(failed, ", ")), attempt)
+		}
 		slog.WarnContext(ctx, "cover letter failed the checks", "attempt", attempt, "failed_checks", failed)
 		input.Revision = &entities.CoverLetterRevision{Previous: raw, Violations: messages(violations)}
 	}
 
 	slog.ErrorContext(ctx, "cover letter rejected after a revision", "failed_checks", failed)
-	return nil, fmt.Errorf("%w: failed checks %s", ErrGenerationFailed, strings.Join(failed, ", "))
+	return nil, span.RecordError(fmt.Errorf("%w: failed checks %s", ErrGenerationFailed, strings.Join(failed, ", ")))
 }
 
 // review decodes the LLM's answer and checks the letter.

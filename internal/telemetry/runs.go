@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -45,10 +44,9 @@ func RecordRun(ctx context.Context, kind string, duration time.Duration, err err
 func finishRun(ctx context.Context, span trace.Span, kind string, duration time.Duration, err error, opts ...trace.SpanEndOption) {
 	out := outcome(err)
 	span.SetAttributes(attribute.String(AttrRunOutcome, out))
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-	}
+	// Status only, from the run's outcome: the error is recorded as an
+	// exception where it happened (see Start).
+	setErrorStatus(span, err)
 	span.End(opts...)
 
 	if h := getInstruments().runDuration; h != nil {

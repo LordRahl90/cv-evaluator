@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cv-evaluator/internal/migrator"
+	"cv-evaluator/internal/telemetry"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
@@ -138,6 +139,11 @@ func (c *Container) OpenGorm(config *gorm.Config) (*gorm.DB, error) {
 	// we run the migration
 	db, err := gorm.Open(gormpostgres.Open(c.dsn), config)
 	if err != nil {
+		return nil, err
+	}
+
+	// Traced like db.Open, so tests see the same spans and errors.
+	if err := db.Use(telemetry.NewGormPlugin()); err != nil {
 		return nil, err
 	}
 

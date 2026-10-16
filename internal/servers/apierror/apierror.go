@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"time"
 
+	"cv-evaluator/internal/telemetry"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -118,14 +120,35 @@ func Conflict(c *gin.Context, code, message, param string) {
 	Write(c, http.StatusConflict, InvalidRequest(code, message, param))
 }
 
-// InternalServerError writes a generic 500 api_error.
-func InternalServerError(c *gin.Context) {
+// InternalServerError writes a generic 500 api_error; the error's text never
+// reaches the response. Pass the error that caused it: this is where a
+// failed request's error is handled, so it is recorded on the request span
+// (see telemetry.RecordError).
+func InternalServerError(c *gin.Context, errs ...error) {
+	recordErrors(c, errs)
 	Write(c, http.StatusInternalServerError, Internal())
 }
 
-// GatewayTimeout writes a 504 api_error.
-func GatewayTimeout(c *gin.Context) {
+// AbortInternal aborts with a generic 500 api_error, recording err on the
+// request span like InternalServerError.
+func AbortInternal(c *gin.Context, err error) {
+	recordErrors(c, []error{err})
+	Abort(c, http.StatusInternalServerError, Internal())
+}
+
+// GatewayTimeout writes a 504 api_error, recording the errors passed like
+// InternalServerError.
+func GatewayTimeout(c *gin.Context, errs ...error) {
+	recordErrors(c, errs)
 	Write(c, http.StatusGatewayTimeout, Error{Type: TypeAPI, Code: CodeTimeout, Message: "The request timed out."})
+}
+
+// recordErrors records errs on the request span, the span of the 5xx path
+// that handles them. The spans between it and the failing one stay neutral.
+func recordErrors(c *gin.Context, errs []error) {
+	for _, err := range errs {
+		telemetry.RecordError(c.Request.Context(), err)
+	}
 }
 
 // TooManyRequests writes a 429 rate_limit_error with a Retry-After header

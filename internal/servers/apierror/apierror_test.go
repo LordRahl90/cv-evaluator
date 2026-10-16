@@ -82,8 +82,8 @@ func TestStatusHelpers(t *testing.T) {
 	}{
 		{"not found", func(c *gin.Context) { NotFound(c, "missing", "id") }, http.StatusNotFound, TypeInvalidRequest, CodeResourceMissing},
 		{"conflict", func(c *gin.Context) { Conflict(c, CodeEmailAlreadyUsed, "taken", "email") }, http.StatusConflict, TypeInvalidRequest, CodeEmailAlreadyUsed},
-		{"internal", InternalServerError, http.StatusInternalServerError, TypeAPI, CodeInternal},
-		{"timeout", GatewayTimeout, http.StatusGatewayTimeout, TypeAPI, CodeTimeout},
+		{"internal", func(c *gin.Context) { InternalServerError(c) }, http.StatusInternalServerError, TypeAPI, CodeInternal},
+		{"timeout", func(c *gin.Context) { GatewayTimeout(c) }, http.StatusGatewayTimeout, TypeAPI, CodeTimeout},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

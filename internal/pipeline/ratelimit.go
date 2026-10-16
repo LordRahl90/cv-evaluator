@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/telemetry"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // RateLimitOptions configures per-portal rate limiting.
@@ -106,7 +109,11 @@ func (l *RateLimiter) reserve(provider string) time.Duration {
 
 // Wait blocks until provider may be called, or ctx is done.
 func (l *RateLimiter) Wait(ctx context.Context, provider string) error {
-	return l.sleep(ctx, l.reserve(provider))
+	ctx, span := telemetry.Start(ctx, "pipeline.RateLimiter.Wait", attribute.String(telemetry.AttrProvider, provider))
+	defer span.End()
+	delay := l.reserve(provider)
+	span.SetAttributes(attribute.Int64("wait_ms", delay.Milliseconds()))
+	return l.sleep(ctx, delay)
 }
 
 // Report records the outcome of a call. A failure doubles the portal's
