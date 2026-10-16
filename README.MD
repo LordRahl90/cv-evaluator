@@ -300,6 +300,29 @@ Settings (all optional):
 
 The worker does not run any searches yet: saved searches and the portal providers are not wired in, so the scheduler finds nothing to run.
 
+## Web app
+
+`web/` holds the browser app: Vue 3, Vite, Vue Router, Tailwind CSS v4 and TypeScript. It needs Node 24.
+
+```bash
+cd web
+npm ci
+npm run dev          # http://localhost:5173, proxies /api/* to the Go API
+```
+
+Start the API first (`make start`, on `:8080`). The app calls the API under `/api`, and the Vite dev server forwards those calls to `http://localhost:8080` without the prefix, so the Go server needs no CORS setup. Set `API_URL` to proxy somewhere else, or `VITE_API_BASE_URL` at build time when the API is served from another origin.
+
+```bash
+npm run build        # production build in web/dist
+npm run preview      # serve the build (same /api proxy)
+npm run lint         # ESLint + Prettier check
+npm run typecheck    # vue-tsc
+npx playwright install chromium   # once
+npm run test:e2e     # Playwright, desktop and 375px mobile; the API is mocked
+```
+
+Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per component and page), not in `.vue` files. API calls go through `web/src/api`. CI for the web app is `.github/workflows/web.yaml`; it only runs when `web/` changes, and the Go workflows ignore `web/`.
+
 ## Observability
 
 `cmd/api` and `cmd/seed` set up OpenTelemetry at startup (`internal/telemetry`). Traces and metrics are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no-op providers are used, so local runs and tests need nothing running.

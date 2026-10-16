@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - "**/*.md"
       - "**/*.MD"
+      # The web app has its own workflow (web.yaml).
+      - "web/**"
 
   pull_request:
     branches:
@@ -15,6 +17,8 @@ on:
     paths-ignore:
       - "**/*.md"
       - "**/*.MD"
+      # The web app has its own workflow (web.yaml).
+      - "web/**"
 
 # One run per pull request (or branch) at a time: a new push cancels the
 # run for the commit it replaces.

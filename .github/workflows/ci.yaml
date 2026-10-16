@@ -8,6 +8,8 @@ on:
     paths-ignore:
       - "**/*.md"
       - "**/*.MD"
+      # The web app has its own workflow (web.yaml).
+      - "web/**"
 
   workflow_dispatch:
     inputs:
