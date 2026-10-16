@@ -13,8 +13,6 @@ import (
 
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
-	"cv-evaluator/internal/queue"
-	"cv-evaluator/internal/services/jobs"
 	"cv-evaluator/internal/services/matcher"
 	"cv-evaluator/internal/testutil/postgres"
 
@@ -27,7 +25,6 @@ import (
 
 // The real services satisfy the pipeline's interfaces.
 var (
-	_ Embedder   = (*jobs.Service)(nil)
 	_ Evaluator  = (*matcher.Service)(nil)
 	_ CVSelector = (*LatestCVSelector)(nil)
 )
@@ -60,24 +57,31 @@ func runTests(m *testing.M) int {
 func resetDB(t *testing.T) {
 	t.Helper()
 	require.NoError(t, testDB.Exec(
-		"TRUNCATE queue_tasks, jobs, search_results, evaluations, cvs, section_embeddings").Error)
+		"TRUNCATE jobs, search_results, evaluations, evaluation_scores, cvs, section_embeddings").Error)
 }
 
 // --- fakes -----------------------------------------------------------------
 
+// fakeSearches is an in-memory SearchStore with the same semantics as the
+// real one: due means enabled and next_run_at <= now; ClaimRun is atomic.
 type fakeSearches struct {
 	mu       sync.Mutex
 	searches map[ulid.ULID]*Search
+	claims   map[ulid.ULID]int
 	marks    map[ulid.ULID]int
 	markErr  error
 }
 
 func newFakeSearches(searches ...*Search) *fakeSearches {
-	f := &fakeSearches{searches: map[ulid.ULID]*Search{}, marks: map[ulid.ULID]int{}}
+	f := &fakeSearches{searches: map[ulid.ULID]*Search{}, claims: map[ulid.ULID]int{}, marks: map[ulid.ULID]int{}}
 	for _, s := range searches {
 		f.searches[s.ID] = s
 	}
 	return f
+}
+
+func isDue(s *Search, now time.Time) bool {
+	return s.Enabled && s.NextRunAt != nil && !s.NextRunAt.After(now)
 }
 
 func (f *fakeSearches) DueSearches(_ context.Context, now time.Time, limit int) ([]Search, error) {
@@ -85,7 +89,7 @@ func (f *fakeSearches) DueSearches(_ context.Context, now time.Time, limit int) 
 	defer f.mu.Unlock()
 	var due []Search
 	for _, s := range f.searches {
-		if s.Enabled && s.NextRunAt != nil && !s.NextRunAt.After(now) {
+		if isDue(s, now) {
 			due = append(due, *s)
 		}
 	}
@@ -96,15 +100,16 @@ func (f *fakeSearches) DueSearches(_ context.Context, now time.Time, limit int) 
 	return due, nil
 }
 
-func (f *fakeSearches) GetSearch(_ context.Context, id ulid.ULID) (*Search, error) {
+func (f *fakeSearches) ClaimRun(_ context.Context, id ulid.ULID, now, until time.Time) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s, ok := f.searches[id]
-	if !ok {
-		return nil, nil
+	if !ok || !isDue(s, now) {
+		return false, nil
 	}
-	cp := *s
-	return &cp, nil
+	s.NextRunAt = &until
+	f.claims[id]++
+	return true, nil
 }
 
 func (f *fakeSearches) MarkRun(_ context.Context, id ulid.ULID, ranAt, next time.Time) error {
@@ -124,6 +129,18 @@ func (f *fakeSearches) get(id ulid.ULID) Search {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return *f.searches[id]
+}
+
+func (f *fakeSearches) claimCount(id ulid.ULID) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.claims[id]
+}
+
+func (f *fakeSearches) markCount(id ulid.ULID) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.marks[id]
 }
 
 type fakeFetcher struct {
@@ -158,7 +175,7 @@ func (f *fakeFetcher) Search(_ context.Context, provider string, c Criteria) ([]
 	if err := f.searchErr[provider]; err != nil {
 		return nil, err
 	}
-	// Return copies so handlers cannot mutate the fixture.
+	// Return copies so the pipeline cannot mutate the fixture.
 	return append([]entities.JobPost(nil), f.posts[provider]...), nil
 }
 
@@ -171,6 +188,12 @@ func (f *fakeFetcher) Details(_ context.Context, provider string, job *entities.
 		return nil, errors.New("details not found")
 	}
 	return &entities.JobDetails{ID: job.ID, Details: d}, nil
+}
+
+func (f *fakeFetcher) setPosts(provider string, posts ...entities.JobPost) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.posts[provider] = posts
 }
 
 func (f *fakeFetcher) totalDetailCalls() int {
@@ -189,12 +212,31 @@ func (f *fakeFetcher) searchCount(provider string) int {
 	return f.searchCalls[provider]
 }
 
-type fakeEmbeddingLLM struct {
+type fakeEmbedder struct {
 	calls atomic.Int32
+	delay time.Duration
+	err   error
+
+	mu    sync.Mutex
+	texts map[string]int
 }
 
-func (f *fakeEmbeddingLLM) CreateEmbedding(context.Context, string) ([]float32, error) {
+func (f *fakeEmbedder) CreateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	f.calls.Add(1)
+	f.mu.Lock()
+	if f.texts == nil {
+		f.texts = map[string]int{}
+	}
+	f.texts[text]++
+	f.mu.Unlock()
+	if f.delay > 0 {
+		if err := sleepCtx(ctx, f.delay); err != nil {
+			return nil, err
+		}
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
 	v := make([]float32, 768)
 	v[0] = 1
 	return v, nil
@@ -205,12 +247,26 @@ type fakeEvaluator struct {
 	calls    int
 	cvs      []ulid.ULID
 	fail     func(call int) (string, error) // non-nil error fails the call
+	resp     *matcher.Response
 	delay    time.Duration
 	inFlight atomic.Int32
 	maxSeen  atomic.Int32
 }
 
 const goodRaw = `{"overall_score":77}`
+
+func defaultResponse() *matcher.Response {
+	return &matcher.Response{
+		OverallScore: 77,
+		Breakdown: []matcher.CriterionScore{
+			{Criterion: "skills", Score: 70, Reason: "Go"},
+			{Criterion: "location", Score: 90, Reason: "same city"},
+		},
+		Strengths:     []string{"go"},
+		MissingSkills: []string{"rust"},
+		Summary:       "solid",
+	}
+}
 
 func (f *fakeEvaluator) MatchJob(ctx context.Context, cvID ulid.ULID, _ *models.Job) (*matcher.Response, string, error) {
 	n := f.inFlight.Add(1)
@@ -226,29 +282,23 @@ func (f *fakeEvaluator) MatchJob(ctx context.Context, cvID ulid.ULID, _ *models.
 	f.calls++
 	call := f.calls
 	f.cvs = append(f.cvs, cvID)
-	fail := f.fail
+	fail, resp := f.fail, f.resp
 	f.mu.Unlock()
 
 	if f.delay > 0 {
-		select {
-		case <-time.After(f.delay):
-		case <-ctx.Done():
-			return nil, "", ctx.Err()
+		if err := sleepCtx(ctx, f.delay); err != nil {
+			return nil, "", err
 		}
 	}
-
 	if fail != nil {
 		if raw, err := fail(call); err != nil {
 			return nil, raw, err
 		}
 	}
-	return &matcher.Response{
-		OverallScore:  77,
-		SkillsScore:   70,
-		Strengths:     []string{"go"},
-		MissingSkills: []string{"rust"},
-		Summary:       "solid",
-	}, goodRaw, nil
+	if resp == nil {
+		resp = defaultResponse()
+	}
+	return resp, goodRaw, nil
 }
 
 func (f *fakeEvaluator) callCount() int {
@@ -258,19 +308,6 @@ func (f *fakeEvaluator) callCount() int {
 }
 
 // --- harness ---------------------------------------------------------------
-
-type harness struct {
-	t         *testing.T
-	queue     *queue.Queue
-	searches  *fakeSearches
-	fetcher   *fakeFetcher
-	embedLLM  *fakeEmbeddingLLM
-	evaluator *fakeEvaluator
-	pipeline  *Pipeline
-	worker    *queue.Worker
-	scheduler *Scheduler
-	clock     *testClock
-}
 
 type testClock struct {
 	mu  sync.Mutex
@@ -289,24 +326,37 @@ func (c *testClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
+type harness struct {
+	t         *testing.T
+	searches  *fakeSearches
+	fetcher   *fakeFetcher
+	embedder  *fakeEmbedder
+	evaluator *fakeEvaluator
+	pipeline  *Pipeline
+	clock     *testClock
+}
+
 type harnessOption func(*Config)
 
 func newHarness(t *testing.T, searches *fakeSearches, fetcher *fakeFetcher, opts ...harnessOption) *harness {
 	t.Helper()
 	resetDB(t)
 
-	q := queue.New(testDB, queue.Options{BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond})
-	embedLLM := &fakeEmbeddingLLM{}
+	clock := &testClock{now: time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)}
+	embedder := &fakeEmbedder{}
 	evaluator := &fakeEvaluator{}
-
 	cfg := Config{
-		DB:        testDB,
-		Queue:     q,
-		Searches:  searches,
-		Fetcher:   fetcher,
-		Embedder:  jobs.New(testDB, embedLLM),
-		Evaluator: evaluator,
-		RateLimit: RateLimitOptions{Interval: time.Microsecond, MaxPenalty: time.Microsecond},
+		DB:            testDB,
+		Searches:      searches,
+		Fetcher:       fetcher,
+		Embedder:      embedder,
+		Evaluator:     evaluator,
+		RateLimit:     RateLimitOptions{Interval: time.Microsecond, MaxPenalty: time.Microsecond},
+		PortalBackoff: time.Microsecond,
+		BaseBackoff:   time.Minute,
+		MaxBackoff:    10 * time.Minute,
+		PollInterval:  5 * time.Millisecond,
+		Now:           clock.Now,
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -314,41 +364,42 @@ func newHarness(t *testing.T, searches *fakeSearches, fetcher *fakeFetcher, opts
 
 	p, err := New(cfg)
 	require.NoError(t, err)
-
-	clock := &testClock{now: time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)}
 	return &harness{
-		t:         t,
-		queue:     q,
-		searches:  searches,
-		fetcher:   fetcher,
-		embedLLM:  embedLLM,
-		evaluator: evaluator,
-		pipeline:  p,
-		worker:    queue.NewWorker(q, p.Handlers(), queue.WorkerOptions{}),
-		scheduler: NewScheduler(q, searches, fetcher, SchedulerOptions{Now: clock.Now}),
-		clock:     clock,
+		t: t, searches: searches, fetcher: fetcher, embedder: embedder,
+		evaluator: evaluator, pipeline: p, clock: clock,
 	}
 }
 
-// drain runs tasks until the queue stays empty for a few polls.
+// drain runs embed and evaluate steps until neither finds work at the
+// current clock.
 func (h *harness) drain() {
 	h.t.Helper()
-	idle := 0
-	for i := 0; i < 2000 && idle < 5; i++ {
-		worked, err := h.worker.RunOnce(h.t.Context())
+	for range 1000 {
+		embedded, err := h.pipeline.EmbedOne(h.t.Context())
 		require.NoError(h.t, err)
-		if worked {
-			idle = 0
-			continue
+		evaluated, err := h.pipeline.EvaluateOne(h.t.Context())
+		require.NoError(h.t, err)
+		if !embedded && !evaluated {
+			return
 		}
-		idle++
-		time.Sleep(5 * time.Millisecond)
 	}
+	h.t.Fatal("drain did not settle")
+}
+
+// drainWithRetries drains, then moves the clock past the longest backoff
+// and drains again, until nothing is left to retry.
+func (h *harness) drainWithRetries() {
+	h.t.Helper()
+	for range DefaultMaxAttempts + 1 {
+		h.drain()
+		h.clock.Advance(h.pipeline.cfg.MaxBackoff + time.Second)
+	}
+	h.drain()
 }
 
 func (h *harness) tick() int {
 	h.t.Helper()
-	n, err := h.scheduler.Tick(h.t.Context())
+	n, err := h.pipeline.Tick(h.t.Context())
 	require.NoError(h.t, err)
 	return n
 }
@@ -404,4 +455,15 @@ func count(t *testing.T, model any, where ...any) int64 {
 	}
 	require.NoError(t, q.Count(&n).Error)
 	return n
+}
+
+// seedEmbeddedJob stores an embedded job and a pending result for search.
+func seedEmbeddedJob(t *testing.T, search *Search, provider, id string) (*models.Job, *models.SearchResult) {
+	t.Helper()
+	job := &models.Job{Provider: provider, JobID: id, Detail: "desc " + id, Status: models.JobStatusEmbedded, Embedding: vector(make([]float32, 768))}
+	require.NoError(t, testDB.Create(job).Error)
+	require.NoError(t, upsertSearchResult(testDB, search, job.ID))
+	var r models.SearchResult
+	require.NoError(t, testDB.Where("job_id = ?", job.ID).Take(&r).Error)
+	return job, &r
 }

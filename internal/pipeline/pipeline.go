@@ -6,60 +6,47 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
-	"cv-evaluator/internal/queue"
+	"cv-evaluator/internal/services/matcher"
 	jobstorage "cv-evaluator/internal/storage/jobs"
 
-	"github.com/oklog/ulid/v2"
+	"github.com/pgvector/pgvector-go"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
 
 // Defaults for Config.
 const (
-	DefaultMaxPages                 = 1
-	DefaultMaxConcurrentEvaluations = 2
-	DefaultModel                    = "deepseek-chat"
-	DefaultPromptVersion            = "jobmatch.tpl/v1"
+	DefaultMaxPages          = 1
+	DefaultSearchConcurrency = 2
+	DefaultEmbedWorkers      = 4
+	DefaultEvaluateWorkers   = 2
+	DefaultMaxAttempts       = 5
+	DefaultBaseBackoff       = 30 * time.Second
+	DefaultMaxBackoff        = time.Hour
+	DefaultPortalAttempts    = 3
+	DefaultPortalBackoff     = 5 * time.Second
+	DefaultPollInterval      = 2 * time.Second
+	DefaultSchedulerInterval = time.Minute
+	DefaultSearchBatch       = 100
+	DefaultRunTimeout        = 30 * time.Minute
+	DefaultNoCVRetry         = time.Hour
+	DefaultShutdownGrace     = 30 * time.Second
+	DefaultStaleTimeout      = 5 * time.Minute
+	DefaultModel             = "deepseek-chat"
+	// DefaultPromptVersion identifies the match prompt and criteria list
+	// recorded on each evaluation. Bump it when either changes.
+	DefaultPromptVersion = "jobmatch.tpl/v2"
 )
 
-// RunSearchPayload is the payload of a run_search task: one search against
-// one portal.
-type RunSearchPayload struct {
-	SearchID ulid.ULID `json:"search_id"`
-	Provider string    `json:"provider"`
-}
-
-// EmbedJobPayload is the payload of an embed_job task.
-type EmbedJobPayload struct {
-	JobID ulid.ULID `json:"job_id"`
-}
-
-// EvaluateJobPayload is the payload of an evaluate_job task.
-type EvaluateJobPayload struct {
-	SearchResultID ulid.ULID `json:"search_result_id"`
-}
-
-// Unique task keys. While a task with a key is queued or running, enqueueing
-// the same key again is a no-op.
-func runSearchKey(searchID ulid.ULID, provider string) string {
-	return fmt.Sprintf("%s:%s:%s", queue.KindRunSearch, searchID, provider)
-}
-
-func embedJobKey(jobID ulid.ULID) string {
-	return fmt.Sprintf("%s:%s", queue.KindEmbedJob, jobID)
-}
-
-func evaluateJobKey(resultID ulid.ULID) string {
-	return fmt.Sprintf("%s:%s", queue.KindEvaluateJob, resultID)
-}
-
-// Config wires a Pipeline.
+// Config wires a Pipeline. Zero values take the defaults above.
 type Config struct {
 	DB        *gorm.DB
-	Queue     *queue.Queue
 	Searches  SearchStore
 	Fetcher   Fetcher
 	Embedder  Embedder
@@ -69,34 +56,109 @@ type Config struct {
 	CVs CVSelector
 	// RateLimit configures per-portal rate limiting of Fetcher calls.
 	RateLimit RateLimitOptions
-	// MaxPages is how many result pages are fetched per portal. Default 1.
+	// MaxPages is how many result pages are fetched per portal.
 	MaxPages int
-	// MaxConcurrentEvaluations caps LLM evaluations running at once in this
-	// process, whatever the worker concurrency. Default 2.
-	MaxConcurrentEvaluations int
+
+	// SearchConcurrency is how many searches run at once; each runs all
+	// of its portals concurrently.
+	SearchConcurrency int
+	// EmbedWorkers and EvaluateWorkers are how many embed and evaluate
+	// goroutines run. Each claims one row at a time; no connection is held
+	// while the slow work runs, so the pool size does not need to match.
+	// EvaluateWorkers is the cap on concurrent LLM evaluations in this
+	// process.
+	EmbedWorkers    int
+	EvaluateWorkers int
+	// StaleTimeout is how long a row may stay processing before another
+	// worker reclaims it (its worker is assumed dead). Keep it well above
+	// the HTTP client timeouts of the slow steps.
+	StaleTimeout time.Duration
+
+	// MaxAttempts is how many times a job or search result is tried before
+	// it is marked failed. Retries wait BaseBackoff, doubling each attempt,
+	// up to MaxBackoff.
+	MaxAttempts int
+	BaseBackoff time.Duration
+	MaxBackoff  time.Duration
+	// PortalAttempts and PortalBackoff bound the in-process retries of one
+	// portal search within a run.
+	PortalAttempts int
+	PortalBackoff  time.Duration
+
+	// PollInterval is how long an idle loop waits before claiming again.
+	PollInterval time.Duration
+	// SchedulerInterval is how often due searches are looked for, and
+	// SearchBatch how many are read per tick.
+	SchedulerInterval time.Duration
+	SearchBatch       int
+	// RunTimeout is the lease taken on a search run (see
+	// SearchStore.ClaimRun): if this process dies mid-run, the search is
+	// due again after it.
+	RunTimeout time.Duration
+	// NoCVRetry is how long a result waits before being looked at again
+	// when the user has no CV yet.
+	NoCVRetry time.Duration
+	// ShutdownGrace is how long in-flight steps may run after Run's
+	// context is cancelled. After it they are cancelled and their rows are
+	// released back to their ready state, without using up an attempt.
+	ShutdownGrace time.Duration
+
 	// Model and PromptVersion are recorded on each evaluation.
 	Model         string
 	PromptVersion string
-	// Observer is told about every handler run. Defaults to NopObserver.
+	// Observer is told about every step and scheduler tick. Defaults to
+	// NopObserver.
 	Observer RunObserver
+	// Now returns the current time. Tests use it to control the clock.
+	Now func() time.Time
 }
 
-// Pipeline holds the task handlers.
-type Pipeline struct {
-	queue     *queue.Queue
-	searches  SearchStore
-	fetcher   Fetcher
-	embedder  Embedder
-	evaluator Evaluator
-	cvs       CVSelector
-	jobs      *jobstorage.Service
-	store     *store
+func (c Config) withDefaults() Config {
+	def := func(v *int, d int) {
+		if *v <= 0 {
+			*v = d
+		}
+	}
+	defDur := func(v *time.Duration, d time.Duration) {
+		if *v <= 0 {
+			*v = d
+		}
+	}
+	def(&c.MaxPages, DefaultMaxPages)
+	def(&c.SearchConcurrency, DefaultSearchConcurrency)
+	def(&c.EmbedWorkers, DefaultEmbedWorkers)
+	def(&c.EvaluateWorkers, DefaultEvaluateWorkers)
+	def(&c.MaxAttempts, DefaultMaxAttempts)
+	def(&c.PortalAttempts, DefaultPortalAttempts)
+	def(&c.SearchBatch, DefaultSearchBatch)
+	defDur(&c.BaseBackoff, DefaultBaseBackoff)
+	defDur(&c.MaxBackoff, DefaultMaxBackoff)
+	defDur(&c.PortalBackoff, DefaultPortalBackoff)
+	defDur(&c.PollInterval, DefaultPollInterval)
+	defDur(&c.SchedulerInterval, DefaultSchedulerInterval)
+	defDur(&c.RunTimeout, DefaultRunTimeout)
+	defDur(&c.NoCVRetry, DefaultNoCVRetry)
+	defDur(&c.ShutdownGrace, DefaultShutdownGrace)
+	defDur(&c.StaleTimeout, DefaultStaleTimeout)
+	if c.Model == "" {
+		c.Model = DefaultModel
+	}
+	if c.PromptVersion == "" {
+		c.PromptVersion = DefaultPromptVersion
+	}
+	if c.Now == nil {
+		c.Now = time.Now
+	}
+	c.Observer = observerOrNop(c.Observer)
+	return c
+}
 
-	maxPages      int
-	evalSlots     chan struct{}
-	model         string
-	promptVersion string
-	observer      RunObserver
+// Pipeline runs the scheduler and the embed and evaluate loops.
+type Pipeline struct {
+	cfg     Config
+	db      *gorm.DB
+	fetcher Fetcher
+	jobs    *jobstorage.Service
 }
 
 // New validates cfg and returns a pipeline.
@@ -104,9 +166,6 @@ func New(cfg Config) (*Pipeline, error) {
 	var missing []string
 	if cfg.DB == nil {
 		missing = append(missing, "DB")
-	}
-	if cfg.Queue == nil {
-		missing = append(missing, "Queue")
 	}
 	if cfg.Searches == nil {
 		missing = append(missing, "Searches")
@@ -124,272 +183,443 @@ func New(cfg Config) (*Pipeline, error) {
 		return nil, fmt.Errorf("pipeline: missing %s", strings.Join(missing, ", "))
 	}
 
+	cfg = cfg.withDefaults()
 	if cfg.CVs == nil {
 		cfg.CVs = NewLatestCVSelector(cfg.DB)
 	}
-	if cfg.MaxPages <= 0 {
-		cfg.MaxPages = DefaultMaxPages
-	}
-	if cfg.MaxConcurrentEvaluations <= 0 {
-		cfg.MaxConcurrentEvaluations = DefaultMaxConcurrentEvaluations
-	}
-	if cfg.Model == "" {
-		cfg.Model = DefaultModel
-	}
-	if cfg.PromptVersion == "" {
-		cfg.PromptVersion = DefaultPromptVersion
-	}
-
 	return &Pipeline{
-		queue:         cfg.Queue,
-		searches:      cfg.Searches,
-		fetcher:       &limitedFetcher{Fetcher: cfg.Fetcher, limiter: NewRateLimiter(cfg.RateLimit)},
-		embedder:      cfg.Embedder,
-		evaluator:     cfg.Evaluator,
-		cvs:           cfg.CVs,
-		jobs:          jobstorage.NewService(cfg.DB),
-		store:         &store{db: cfg.DB},
-		maxPages:      cfg.MaxPages,
-		evalSlots:     make(chan struct{}, cfg.MaxConcurrentEvaluations),
-		model:         cfg.Model,
-		promptVersion: cfg.PromptVersion,
-		observer:      observerOrNop(cfg.Observer),
+		cfg:     cfg,
+		db:      cfg.DB,
+		fetcher: &limitedFetcher{Fetcher: cfg.Fetcher, limiter: NewRateLimiter(cfg.RateLimit)},
+		jobs:    jobstorage.NewService(cfg.DB),
 	}, nil
 }
 
-// Handlers returns the queue handlers for the pipeline's task kinds.
-func (p *Pipeline) Handlers() map[queue.Kind]queue.Handler {
-	return map[queue.Kind]queue.Handler{
-		queue.KindRunSearch:   observed(p.observer, queue.KindRunSearch, p.RunSearch),
-		queue.KindEmbedJob:    observed(p.observer, queue.KindEmbedJob, p.EmbedJob),
-		queue.KindEvaluateJob: observed(p.observer, queue.KindEvaluateJob, p.EvaluateJob),
+func (p *Pipeline) now() time.Time {
+	return p.cfg.Now().UTC()
+}
+
+// backoff returns the delay after the given (1-based) failed attempt.
+func (p *Pipeline) backoff(attempt int) time.Duration {
+	delay := p.cfg.BaseBackoff
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= p.cfg.MaxBackoff {
+			return p.cfg.MaxBackoff
+		}
+	}
+	return min(delay, p.cfg.MaxBackoff)
+}
+
+// Run starts the scheduler and the worker loops and blocks until ctx is
+// cancelled and they have stopped. Steps in flight when ctx is cancelled
+// get ShutdownGrace to finish.
+func (p *Pipeline) Run(ctx context.Context) {
+	// Steps run on a context that outlives ctx by ShutdownGrace.
+	work, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelWork()
+	stop := context.AfterFunc(ctx, func() {
+		time.AfterFunc(p.cfg.ShutdownGrace, cancelWork)
+	})
+	defer stop()
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		p.loop(ctx, p.cfg.SchedulerInterval, func() (bool, error) {
+			n, err := p.Tick(work)
+			return n > 0, err
+		})
+	})
+	wg.Go(func() { p.pool(ctx, p.cfg.EmbedWorkers, func() (bool, error) { return p.EmbedOne(work) }) })
+	wg.Go(func() { p.pool(ctx, p.cfg.EvaluateWorkers, func() (bool, error) { return p.EvaluateOne(work) }) })
+	wg.Wait()
+}
+
+// pool runs n loops of step until ctx is cancelled.
+func (p *Pipeline) pool(ctx context.Context, n int, step func() (bool, error)) {
+	var g errgroup.Group
+	g.SetLimit(n)
+	for range n {
+		g.Go(func() error {
+			p.loop(ctx, p.cfg.PollInterval, step)
+			return nil
+		})
+	}
+	_ = g.Wait()
+}
+
+// loop calls step until ctx is cancelled. It goes straight on while step
+// finds work and waits idle after an empty or failed pass.
+func (p *Pipeline) loop(ctx context.Context, idle time.Duration, step func() (bool, error)) {
+	for ctx.Err() == nil {
+		worked, err := step()
+		if err != nil && ctx.Err() == nil {
+			slog.ErrorContext(ctx, "pipeline step failed", "error", err)
+		}
+		if worked && err == nil {
+			continue
+		}
+		_ = sleepCtx(ctx, idle)
 	}
 }
 
-// RunSearch runs one search against one portal. Each posting is upserted as
-// a global job and linked to the search; new jobs are queued for
-// embedding, already embedded ones go straight to evaluation.
-func (p *Pipeline) RunSearch(ctx context.Context, task *queue.Task) error {
-	var payload RunSearchPayload
-	if err := queue.Decode(task, &payload); err != nil {
+// --- searches --------------------------------------------------------------
+
+// Tick runs every due search once and returns how many it ran. Each search
+// is claimed atomically first (SearchStore.ClaimRun), so with several
+// worker processes each run happens once. A claimed search runs all portals
+// concurrently; a portal that keeps failing is logged and does not affect
+// the others. The search is then marked run (next run from its frequency).
+func (p *Pipeline) Tick(ctx context.Context) (int, error) {
+	var ran int
+	err := observe(ctx, p.cfg.Observer, KindScheduleTick, func(ctx context.Context) error {
+		var err error
+		ran, err = p.tick(ctx)
 		return err
-	}
-	log := slog.With("search_id", payload.SearchID.String(), "provider", payload.Provider)
-
-	search, err := p.searches.GetSearch(ctx, payload.SearchID)
-	if err != nil {
-		return fmt.Errorf("load search: %w", err)
-	}
-	if search == nil || !search.Enabled {
-		log.InfoContext(ctx, "search deleted or disabled; skipping")
-		return nil
-	}
-
-	posts, err := p.fetcher.Search(ctx, payload.Provider, Criteria{
-		Query:    search.Query,
-		Location: search.Location,
-		MaxPages: p.maxPages,
 	})
-	if err != nil {
-		return fmt.Errorf("search %s: %w", payload.Provider, err)
+	return ran, err
+}
+
+func (p *Pipeline) tick(ctx context.Context) (int, error) {
+	providers := p.fetcher.Providers()
+	if len(providers) == 0 {
+		slog.DebugContext(ctx, "scheduler: no job providers configured; not running searches")
+		return 0, nil
 	}
 
-	var newJobs, toEvaluate int
-	for i := range posts {
-		post := &posts[i]
-		if strings.TrimSpace(post.ID) == "" {
-			log.WarnContext(ctx, "skipping posting without an id", "url", post.DetailsURL)
-			continue
-		}
-		post.Provider = payload.Provider
+	due, err := p.cfg.Searches.DueSearches(ctx, p.now(), p.cfg.SearchBatch)
+	if err != nil {
+		return 0, fmt.Errorf("scheduler: load due searches: %w", err)
+	}
 
-		job, created, err := p.jobs.Upsert(ctx, post.ToModel())
-		if err != nil {
+	// A plain errgroup (no shared context): one search failing must not
+	// cancel the others. Wait returns the first error.
+	var (
+		g   errgroup.Group
+		ran atomic.Int32
+	)
+	g.SetLimit(p.cfg.SearchConcurrency)
+	for _, search := range due {
+		g.Go(func() error {
+			ok, err := p.runSearch(ctx, &search, providers)
+			if ok {
+				ran.Add(1)
+			}
+			if err != nil && ctx.Err() == nil {
+				slog.ErrorContext(ctx, "search run failed", "search_id", search.ID.String(), "error", err)
+			}
 			return err
-		}
-		if created {
-			newJobs++
-		}
+		})
+	}
+	err = g.Wait()
+	return int(ran.Load()), err
+}
 
-		result, err := p.store.upsertSearchResult(ctx, search, job.ID)
-		if err != nil {
-			return err
-		}
+// runSearch claims and runs one search. It reports whether it ran it.
+func (p *Pipeline) runSearch(ctx context.Context, search *Search, providers []string) (bool, error) {
+	if !search.Enabled {
+		return false, nil
+	}
+	started := p.now()
+	claimed, err := p.cfg.Searches.ClaimRun(ctx, search.ID, started, started.Add(p.cfg.RunTimeout))
+	if err != nil {
+		return false, fmt.Errorf("claim search %s: %w", search.ID, err)
+	}
+	if !claimed {
+		return false, nil // another worker took this run
+	}
 
-		if job.IsEmbedded() {
-			toEvaluate++
-			if err := p.enqueueEvaluation(ctx, result.ID); err != nil {
+	log := slog.With("search_id", search.ID.String())
+	var wg sync.WaitGroup
+	for _, provider := range providers {
+		wg.Go(func() {
+			if err := p.runPortal(ctx, search, provider); err != nil && ctx.Err() == nil {
+				log.WarnContext(ctx, "portal failed for search", "provider", provider, "error", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		// Shutting down: leave the lease to expire so the run is retried.
+		return true, ctx.Err()
+	}
+	next := NextRunAfter(search.Frequency, started)
+	if err := p.cfg.Searches.MarkRun(ctx, search.ID, started, next); err != nil {
+		return true, fmt.Errorf("mark search %s run: %w", search.ID, err)
+	}
+	log.InfoContext(ctx, "search ran", "providers", providers, "next_run_at", next)
+	return true, nil
+}
+
+// runPortal searches one portal, retrying a few times with backoff, and
+// stores what it finds: each posting as a global job and a search result.
+func (p *Pipeline) runPortal(ctx context.Context, search *Search, provider string) error {
+	return observe(ctx, p.cfg.Observer, KindRunSearch, func(ctx context.Context) error {
+		criteria := Criteria{Query: search.Query, Location: search.Location, MaxPages: p.cfg.MaxPages}
+
+		var (
+			posts []entities.JobPost
+			err   error
+		)
+		for attempt := 1; ; attempt++ {
+			posts, err = p.fetcher.Search(ctx, provider, criteria)
+			if err == nil {
+				break
+			}
+			if attempt >= p.cfg.PortalAttempts || ctx.Err() != nil {
+				return fmt.Errorf("search %s after %d attempts: %w", provider, attempt, err)
+			}
+			if err := sleepCtx(ctx, p.cfg.PortalBackoff<<(attempt-1)); err != nil {
 				return err
 			}
-			continue
 		}
-		if _, _, err := p.queue.Enqueue(ctx, queue.KindEmbedJob, EmbedJobPayload{JobID: job.ID},
-			queue.WithUniqueKey(embedJobKey(job.ID))); err != nil {
-			return err
-		}
-	}
 
-	log.InfoContext(ctx, "search ran", "postings", len(posts), "new_jobs", newJobs, "queued_evaluations", toEvaluate)
-	return nil
+		var created int
+		for i := range posts {
+			post := &posts[i]
+			if strings.TrimSpace(post.ID) == "" {
+				continue
+			}
+			post.Provider = provider
+			job, isNew, err := p.jobs.Upsert(ctx, post.ToModel())
+			if err != nil {
+				return err
+			}
+			if isNew {
+				created++
+			}
+			if err := upsertSearchResult(p.db.WithContext(ctx), search, job.ID); err != nil {
+				return err
+			}
+		}
+		slog.InfoContext(ctx, "portal searched", "search_id", search.ID.String(), "provider", provider,
+			"postings", len(posts), "new_jobs", created)
+		return nil
+	})
 }
 
-// EmbedJob fetches a job's description when it is missing, embeds it, and
-// queues an evaluation for every search result of the job that has none.
-func (p *Pipeline) EmbedJob(ctx context.Context, task *queue.Task) error {
-	var payload EmbedJobPayload
-	if err := queue.Decode(task, &payload); err != nil {
-		return err
+// --- jobs ------------------------------------------------------------------
+
+// errPermanent marks a failure that retrying cannot fix.
+var errPermanent = errors.New("permanent")
+
+// writeCtx returns a context for writing a step's outcome: it is not
+// cancelled with ctx, so a result computed just before shutdown is still
+// recorded, but it is bounded.
+func writeCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+}
+
+// EmbedOne claims one job that needs work (a short statement, see
+// claimJob), then with no connection held fetches its description if it
+// is missing and embeds it, then writes the outcome. It reports whether
+// there was a job to handle.
+func (p *Pipeline) EmbedOne(ctx context.Context) (bool, error) {
+	now := p.now()
+	job, err := claimJob(p.db.WithContext(ctx), now, now.Add(-p.cfg.StaleTimeout))
+	if err != nil || job == nil {
+		return false, err
 	}
 
-	job, err := p.jobs.FindByID(ctx, payload.JobID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return queue.Permanent(fmt.Errorf("job %s not found", payload.JobID))
-	}
-	if err != nil {
-		return err
-	}
-
-	if !job.IsEmbedded() {
+	var embedding []float32
+	fetched := false
+	stepErr := observe(ctx, p.cfg.Observer, KindEmbedJob, func(ctx context.Context) error {
 		if strings.TrimSpace(job.Detail) == "" {
 			details, err := p.fetcher.Details(ctx, job.Provider, jobPost(job))
 			if err != nil {
-				return fmt.Errorf("fetch details for %s/%s: %w", job.Provider, job.JobID, err)
+				return fmt.Errorf("fetch details: %w", err)
 			}
 			if details == nil || strings.TrimSpace(details.Details) == "" {
-				return queue.Permanent(fmt.Errorf("job %s/%s has no description", job.Provider, job.JobID))
-			}
-			if err := p.jobs.SaveDetail(ctx, job.ID, details.Details); err != nil {
-				return err
+				return fmt.Errorf("%w: job has no description", errPermanent)
 			}
 			job.Detail = details.Details
+			fetched = true
 		}
-		if err := p.embedder.Embed(ctx, job); err != nil {
-			return fmt.Errorf("embed job %s: %w", job.ID, err)
+		var err error
+		embedding, err = p.cfg.Embedder.CreateEmbedding(ctx, job.Detail)
+		if err != nil {
+			return fmt.Errorf("embed: %w", err)
 		}
+		return nil
+	})
+
+	wctx, cancel := writeCtx(ctx)
+	defer cancel()
+	db := p.db.WithContext(wctx)
+
+	updates := map[string]any{"claimed_at": nil}
+	if fetched {
+		// Keep a fetched description even if embedding failed.
+		updates["detail"] = job.Detail
+		updates["visited"] = true
+	}
+	ready := models.JobStatusNew
+	if job.Detail != "" {
+		ready = models.JobStatusDescribed
 	}
 
-	results, err := p.store.unevaluatedResults(ctx, job.ID)
-	if err != nil {
-		return err
+	switch {
+	case stepErr == nil:
+		updates["embedding"] = vector(embedding)
+		updates["status"] = models.JobStatusEmbedded
+		updates["next_attempt_at"] = nil
+		updates["last_error"] = ""
+	case ctx.Err() != nil:
+		// Shutting down: release the job without using up the attempt.
+		updates["status"] = ready
+		updates["attempts"] = job.Attempts - 1
+	default:
+		p.applyFailure(updates, "status", ready, models.JobStatusFailed, job.Attempts, stepErr)
+		slog.WarnContext(ctx, "job step failed", "job_id", job.ID.String(), "provider", job.Provider,
+			"attempt", job.Attempts, "error", stepErr)
 	}
-	for _, r := range results {
-		if err := p.enqueueEvaluation(ctx, r.ID); err != nil {
-			return err
-		}
+	if err := db.Model(&models.Job{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
+		return true, fmt.Errorf("record job %s: %w", job.ID, err)
 	}
-	return nil
+	return true, nil
 }
 
-// EvaluateJob evaluates a search result's job against the user's CV and
-// stores the evaluation. A completed evaluation for the same CV is not
-// redone. If the user has no CV the task completes without evaluating.
-func (p *Pipeline) EvaluateJob(ctx context.Context, task *queue.Task) error {
-	var payload EvaluateJobPayload
-	if err := queue.Decode(task, &payload); err != nil {
-		return err
+// applyFailure sets the retry state for a failed attempt in updates: back
+// to ready with an exponential backoff, or failed once attempts reach
+// MaxAttempts or the error is permanent. attempts already counts this one.
+func (p *Pipeline) applyFailure(updates map[string]any, statusCol, ready, failed string, attempts int, cause error) {
+	updates["last_error"] = cause.Error()
+	if errors.Is(cause, errPermanent) || attempts >= p.cfg.MaxAttempts {
+		updates[statusCol] = failed
+		updates["next_attempt_at"] = nil
+		return
 	}
-	log := slog.With("search_result_id", payload.SearchResultID.String())
+	updates[statusCol] = ready
+	updates["next_attempt_at"] = p.now().Add(p.backoff(attempts))
+}
 
-	result, err := p.store.searchResult(ctx, payload.SearchResultID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		log.InfoContext(ctx, "search result gone; skipping evaluation")
+// --- evaluations -----------------------------------------------------------
+
+// evaluationOutcome is what an evaluation attempt produced, to be written
+// once the slow work is done.
+type evaluationOutcome struct {
+	cv       *models.CV
+	resp     *matcher.Response
+	raw      string
+	matchErr error
+}
+
+// EvaluateOne claims one search result whose job is embedded and that
+// waits for evaluation (a short statement, see claimResult), then with no
+// transaction held evaluates it against the user's CV, then writes the
+// evaluation, its scores and the result's state in one short transaction.
+// It reports whether there was a result to handle.
+func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
+	now := p.now()
+	result, err := claimResult(p.db.WithContext(ctx), now, now.Add(-p.cfg.StaleTimeout))
+	if err != nil || result == nil {
+		return false, err
+	}
+	log := slog.With("search_result_id", result.ID.String())
+
+	var out evaluationOutcome
+	stepErr := observe(ctx, p.cfg.Observer, KindEvaluateJob, func(ctx context.Context) error {
+		var job models.Job
+		if err := p.db.WithContext(ctx).Where("id = ?", result.JobID).Take(&job).Error; err != nil {
+			return fmt.Errorf("load job: %w", err)
+		}
+		cv, err := p.cfg.CVs.SelectCV(ctx, result.UserID)
+		if err != nil || cv == nil {
+			return err
+		}
+		out.cv = cv
+		out.resp, out.raw, out.matchErr = p.cfg.Evaluator.MatchJob(ctx, cv.ID, &job)
+		if out.matchErr != nil {
+			return fmt.Errorf("evaluate: %w", out.matchErr)
+		}
+		return nil
+	})
+
+	wctx, cancel := writeCtx(ctx)
+	defer cancel()
+	updates := map[string]any{"claimed_at": nil}
+
+	switch {
+	case ctx.Err() != nil && (stepErr != nil || out.resp == nil):
+		// Shutting down: release the result without using up the attempt.
+		updates["evaluation_status"] = models.EvaluationPending
+		updates["attempts"] = result.Attempts - 1
+	case stepErr == nil && out.cv == nil:
+		log.InfoContext(ctx, "user has no CV; skipping evaluation for now",
+			"user_id", result.UserID.String(), "retry_in", p.cfg.NoCVRetry)
+		updates["evaluation_status"] = models.EvaluationPending
+		updates["attempts"] = result.Attempts - 1
+		updates["next_attempt_at"] = p.now().Add(p.cfg.NoCVRetry)
+		updates["last_error"] = "user has no CV"
+	case stepErr == nil:
+		updates["evaluation_status"] = models.EvaluationDone
+		updates["next_attempt_at"] = nil
+		updates["last_error"] = ""
+	default:
+		p.applyFailure(updates, "evaluation_status", models.EvaluationPending, models.EvaluationFailed,
+			result.Attempts, stepErr)
+		log.WarnContext(ctx, "evaluation failed", "attempt", result.Attempts, "error", stepErr)
+	}
+
+	err = p.db.WithContext(wctx).Transaction(func(tx *gorm.DB) error {
+		if out.cv != nil && (out.resp != nil || out.matchErr != nil) {
+			if err := saveEvaluation(tx, p.evaluationRow(result, &out), breakdown(out.resp)); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&models.SearchResult{}).Where("id = ?", result.ID).Updates(updates).Error
+	})
+	if err != nil {
+		return true, fmt.Errorf("record search result %s: %w", result.ID, err)
+	}
+	if out.resp != nil {
+		log.InfoContext(ctx, "job evaluated", "cv_id", out.cv.ID.String(), "overall_score", out.resp.OverallScore)
+	}
+	return true, nil
+}
+
+func breakdown(resp *matcher.Response) []matcher.CriterionScore {
+	if resp == nil {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
+	return resp.Breakdown
+}
 
-	job, err := p.jobs.FindByID(ctx, result.JobID)
-	if err != nil {
-		return fmt.Errorf("load job %s: %w", result.JobID, err)
-	}
-	if !job.IsEmbedded() {
-		// embed_job queues this evaluation again once the job is embedded.
-		log.InfoContext(ctx, "job not embedded yet; queueing embedding first", "job_id", job.ID.String())
-		_, _, err := p.queue.Enqueue(ctx, queue.KindEmbedJob, EmbedJobPayload{JobID: job.ID},
-			queue.WithUniqueKey(embedJobKey(job.ID)))
-		return err
-	}
-
-	cv, err := p.cvs.SelectCV(ctx, result.UserID)
-	if err != nil {
-		return err
-	}
-	if cv == nil {
-		log.InfoContext(ctx, "user has no CV; skipping evaluation", "user_id", result.UserID.String())
-		return nil
-	}
-
-	existing, err := p.store.evaluation(ctx, result.ID, cv.ID)
-	if err != nil {
-		return err
-	}
-	if existing != nil && existing.Status == models.StatusCompleted {
-		log.DebugContext(ctx, "already evaluated", "cv_id", cv.ID.String())
-		return nil
-	}
-
-	release, err := p.acquireEvalSlot(ctx)
-	if err != nil {
-		return err
-	}
-	resp, raw, matchErr := p.evaluator.MatchJob(ctx, cv.ID, job)
-	release()
-
+// evaluationRow builds the evaluation to store: the parsed response, or the
+// failure with whatever raw output the LLM gave.
+func (p *Pipeline) evaluationRow(result *models.SearchResult, out *evaluationOutcome) *models.Evaluation {
 	eval := &models.Evaluation{
 		SearchResultID: result.ID,
-		CVID:           cv.ID,
-		RawResponse:    raw,
-		Model:          p.model,
-		PromptVersion:  p.promptVersion,
+		CVID:           out.cv.ID,
+		RawResponse:    out.raw,
+		Model:          p.cfg.Model,
+		PromptVersion:  p.cfg.PromptVersion,
 		Strengths:      models.StringList{},
 		MissingSkills:  models.StringList{},
 	}
-	if matchErr != nil {
+	if out.resp == nil {
 		eval.Status = models.StatusFailed
-		eval.Error = matchErr.Error()
-		if err := p.store.saveEvaluation(context.WithoutCancel(ctx), eval); err != nil {
-			log.ErrorContext(ctx, "record failed evaluation", "error", err)
+		if out.matchErr != nil {
+			eval.Error = out.matchErr.Error()
 		}
-		return fmt.Errorf("evaluate: %w", matchErr)
+		return eval
 	}
-
 	eval.Status = models.StatusCompleted
-	eval.OverallScore = resp.OverallScore
-	eval.SkillsScore = resp.SkillsScore
-	eval.ExperienceScore = resp.ExperienceScore
-	eval.SeniorityScore = resp.SeniorityScore
-	eval.DomainScore = resp.DomainScore
-	eval.LocationScore = resp.LocationScore
-	eval.Summary = resp.Summary
-	if resp.Strengths != nil {
-		eval.Strengths = resp.Strengths
+	eval.OverallScore = out.resp.OverallScore
+	eval.Summary = out.resp.Summary
+	if out.resp.Strengths != nil {
+		eval.Strengths = out.resp.Strengths
 	}
-	if resp.MissingSkills != nil {
-		eval.MissingSkills = resp.MissingSkills
+	if out.resp.MissingSkills != nil {
+		eval.MissingSkills = out.resp.MissingSkills
 	}
-	if err := p.store.saveEvaluation(ctx, eval); err != nil {
-		return err
-	}
-
-	log.InfoContext(ctx, "job evaluated", "cv_id", cv.ID.String(), "overall_score", resp.OverallScore)
-	return nil
+	return eval
 }
 
-func (p *Pipeline) enqueueEvaluation(ctx context.Context, resultID ulid.ULID) error {
-	_, _, err := p.queue.Enqueue(ctx, queue.KindEvaluateJob, EvaluateJobPayload{SearchResultID: resultID},
-		queue.WithUniqueKey(evaluateJobKey(resultID)))
-	return err
-}
-
-// acquireEvalSlot waits for one of the MaxConcurrentEvaluations slots.
-func (p *Pipeline) acquireEvalSlot(ctx context.Context) (func(), error) {
-	select {
-	case p.evalSlots <- struct{}{}:
-		return func() { <-p.evalSlots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+func vector(v []float32) *pgvector.Vector {
+	vec := pgvector.NewVector(v)
+	return &vec
 }
 
 func jobPost(job *models.Job) *entities.JobPost {
@@ -401,148 +631,5 @@ func jobPost(job *models.Job) *entities.JobPost {
 		Location:   job.Location,
 		PostedAt:   job.PostedAt,
 		DetailsURL: job.DetailsURL,
-	}
-}
-
-// Scheduler periodically finds due searches and queues one run_search task
-// per (search, portal).
-type Scheduler struct {
-	queue     *queue.Queue
-	searches  SearchStore
-	providers func() []string
-	interval  time.Duration
-	batchSize int
-	now       func() time.Time
-	observer  RunObserver
-}
-
-// SchedulerOptions configures a Scheduler.
-type SchedulerOptions struct {
-	// Observer is told about every tick (kind schedule_tick). Defaults to
-	// NopObserver.
-	Observer RunObserver
-	// Interval between scans for due searches. Default 1m.
-	Interval time.Duration
-	// BatchSize is how many due searches are read at a time. Default 100.
-	BatchSize int
-	// Now returns the current time. Default time.Now.
-	Now func() time.Time
-}
-
-// NewScheduler returns a scheduler that runs every search against all of
-// fetcher's portals.
-func NewScheduler(q *queue.Queue, searches SearchStore, fetcher Fetcher, opts SchedulerOptions) *Scheduler {
-	if opts.Interval <= 0 {
-		opts.Interval = time.Minute
-	}
-	if opts.BatchSize <= 0 {
-		opts.BatchSize = 100
-	}
-	if opts.Now == nil {
-		opts.Now = time.Now
-	}
-	return &Scheduler{
-		queue:     q,
-		searches:  searches,
-		providers: fetcher.Providers,
-		interval:  opts.Interval,
-		batchSize: opts.BatchSize,
-		now:       opts.Now,
-		observer:  observerOrNop(opts.Observer),
-	}
-}
-
-// maxBatchesPerTick bounds one Tick in case a SearchStore keeps returning
-// the same searches (e.g. MarkRun not taking effect).
-const maxBatchesPerTick = 50
-
-// Tick queues every due search once and returns how many run_search tasks
-// it added. A search is marked as run (LastRunAt now, NextRunAt from its
-// frequency) only after a task for each portal has been queued; if
-// queueing fails part way, the search stays due and the next tick retries
-// it, and the unique keys stop the portals already queued from being
-// queued twice.
-func (s *Scheduler) Tick(ctx context.Context) (int, error) {
-	var added int
-	err := observe(ctx, s.observer, KindScheduleTick, func(ctx context.Context) error {
-		var err error
-		added, err = s.tick(ctx)
-		return err
-	})
-	return added, err
-}
-
-func (s *Scheduler) tick(ctx context.Context) (int, error) {
-	providers := s.providers()
-	if len(providers) == 0 {
-		slog.WarnContext(ctx, "scheduler: no job providers configured; not running searches")
-		return 0, nil
-	}
-
-	var added int
-	for range maxBatchesPerTick {
-		now := s.now().UTC()
-		due, err := s.searches.DueSearches(ctx, now, s.batchSize)
-		if err != nil {
-			return added, fmt.Errorf("scheduler: load due searches: %w", err)
-		}
-
-		var errs []error
-		for _, search := range due {
-			n, err := s.schedule(ctx, &search, providers, now)
-			added += n
-			if err != nil {
-				errs = append(errs, err)
-			}
-		}
-		if len(errs) > 0 {
-			return added, errors.Join(errs...)
-		}
-		if len(due) < s.batchSize {
-			break
-		}
-	}
-	return added, nil
-}
-
-func (s *Scheduler) schedule(ctx context.Context, search *Search, providers []string, now time.Time) (int, error) {
-	if !search.Enabled {
-		return 0, nil
-	}
-
-	var added int
-	for _, provider := range providers {
-		_, inserted, err := s.queue.Enqueue(ctx, queue.KindRunSearch,
-			RunSearchPayload{SearchID: search.ID, Provider: provider},
-			queue.WithUniqueKey(runSearchKey(search.ID, provider)))
-		if err != nil {
-			return added, fmt.Errorf("scheduler: queue search %s on %s: %w", search.ID, provider, err)
-		}
-		if inserted {
-			added++
-		}
-	}
-
-	next := NextRunAfter(search.Frequency, now)
-	if err := s.searches.MarkRun(ctx, search.ID, now, next); err != nil {
-		return added, fmt.Errorf("scheduler: mark search %s run: %w", search.ID, err)
-	}
-	slog.InfoContext(ctx, "scheduled search", "search_id", search.ID.String(), "providers", providers, "next_run_at", next)
-	return added, nil
-}
-
-// Run ticks immediately and then every Interval until ctx is cancelled.
-func (s *Scheduler) Run(ctx context.Context) {
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-	for {
-		if _, err := s.Tick(ctx); err != nil && ctx.Err() == nil {
-			slog.ErrorContext(ctx, "scheduler tick failed", "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
 	}
 }

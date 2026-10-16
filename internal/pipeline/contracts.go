@@ -2,17 +2,22 @@
 // postings from every supported portal, stores each posting once, embeds it
 // once, evaluates it against the user's CV and stores the evaluation.
 //
-// Work flows through the Postgres queue (internal/queue):
+// There is no separate task queue. Progress is kept on the domain rows and
+// workers claim rows in the state they need with SELECT ... FOR UPDATE SKIP
+// LOCKED, inside a transaction that also records the outcome:
 //
-//	Scheduler ─ due search ─▶ run_search(search, provider)   one per portal
-//	run_search ─ new job ───▶ embed_job(job)                 once per job
-//	run_search ─ embedded ──▶ evaluate_job(search result)
-//	embed_job ─ embedded ───▶ evaluate_job(each unevaluated result of the job)
+//	job search  next_run_at due ─ ClaimRun ─▶ run every portal ─▶ MarkRun
+//	                              (upsert jobs, search results)
+//	jobs        new ─ fetch details ─▶ described ─ embed ─▶ embedded
+//	search      evaluation_status pending (job embedded) ─ evaluate ─▶ done
+//	results
 //
-// Every handler is idempotent: jobs are upserted on (provider, job_id),
-// search results on (search, job), evaluations on (search result, CV), and
-// tasks are enqueued with unique keys, so re-running any task never
-// duplicates rows.
+// Failed steps increment attempts and set next_attempt_at with exponential
+// backoff; after MaxAttempts the row is marked failed. A crash rolls the
+// transaction back, which frees the rows for another worker, so several
+// worker processes can run at once. Every step is idempotent: jobs are
+// upserted on (provider, job_id), search results on (search, job) and
+// evaluations on (search result, CV).
 //
 // The pipeline depends on consumer-side interfaces (SearchStore, Fetcher)
 // rather than on the job search and provider packages directly; a thin
@@ -58,17 +63,19 @@ type Criteria struct {
 	MaxPages int
 }
 
-// SearchStore reads saved searches and records when they ran.
+// SearchStore reads saved searches and records their runs.
 type SearchStore interface {
 	// DueSearches returns up to limit searches that are enabled and have a
 	// NextRunAt that is not after now (enabled AND next_run_at <= now). A
 	// nil NextRunAt means the search is not scheduled.
 	DueSearches(ctx context.Context, now time.Time, limit int) ([]Search, error)
-	// GetSearch returns the search, or nil and no error if it no longer
-	// exists.
-	GetSearch(ctx context.Context, id ulid.ULID) (*Search, error)
-	// MarkRun records that the search was run at ranAt and is next due at
-	// next.
+	// ClaimRun atomically takes ownership of one run of the search: if it
+	// is still enabled and due (next_run_at <= now), it sets next_run_at to
+	// until and reports true. Only one caller can win a given run; the
+	// others get false. until is a lease: if the owner dies before MarkRun,
+	// the search becomes due again then.
+	ClaimRun(ctx context.Context, id ulid.ULID, now, until time.Time) (bool, error)
+	// MarkRun records that the search ran at ranAt and is next due at next.
 	MarkRun(ctx context.Context, id ulid.ULID, ranAt, next time.Time) error
 }
 
@@ -87,11 +94,9 @@ type CVSelector interface {
 	SelectCV(ctx context.Context, userID ulid.ULID) (*models.CV, error)
 }
 
-// Embedder embeds a job's description and stores it on the job. It does
-// nothing for a job that is already embedded. services/jobs.Service
-// satisfies it.
+// Embedder embeds a job description. The Ollama client satisfies it.
 type Embedder interface {
-	Embed(ctx context.Context, job *models.Job) error
+	CreateEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
 // Evaluator matches a CV against a stored job and returns the parsed

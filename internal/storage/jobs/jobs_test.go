@@ -76,9 +76,7 @@ func TestService_Upsert_Concurrent(t *testing.T) {
 		created int
 	)
 	for range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			job, c, err := svc.Upsert(t.Context(), makeJob("linkedin", "race"))
 			assert.NoError(t, err)
 			if err != nil {
@@ -90,7 +88,7 @@ func TestService_Upsert_Concurrent(t *testing.T) {
 			if c {
 				created++
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -126,7 +124,7 @@ func TestService_SaveDetailAndEmbedding(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a fresh description", got.Detail)
 	assert.True(t, got.Visited)
-	assert.Equal(t, models.StatusCompleted, got.Status)
+	assert.Equal(t, models.JobStatusEmbedded, got.Status)
 	require.True(t, got.IsEmbedded())
 	assert.InDelta(t, 1, got.Embedding.Slice()[0], 0.0001)
 }

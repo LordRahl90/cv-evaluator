@@ -44,7 +44,6 @@ func TestRateLimiter_SpacesCallsPerProvider(t *testing.T) {
 	l, clock := newTestLimiter(RateLimitOptions{
 		Interval:    time.Second,
 		PerProvider: map[string]time.Duration{"jobindex": 3 * time.Second},
-		MaxWait:     time.Minute,
 	})
 	ctx := t.Context()
 
@@ -61,7 +60,7 @@ func TestRateLimiter_SpacesCallsPerProvider(t *testing.T) {
 }
 
 func TestRateLimiter_BacksOffAfterFailures(t *testing.T) {
-	l, clock := newTestLimiter(RateLimitOptions{Interval: time.Second, MaxPenalty: 5 * time.Second, MaxWait: time.Minute})
+	l, clock := newTestLimiter(RateLimitOptions{Interval: time.Second, MaxPenalty: 5 * time.Second})
 	ctx := t.Context()
 	boom := errors.New("429")
 
@@ -83,26 +82,21 @@ func TestRateLimiter_BacksOffAfterFailures(t *testing.T) {
 	assert.Equal(t, []time.Duration{time.Second}, clock.sleeps)
 }
 
-func TestRateLimiter_LongWaitRequeues(t *testing.T) {
-	l, clock := newTestLimiter(RateLimitOptions{Interval: time.Second, MaxPenalty: time.Hour, MaxWait: 10 * time.Second})
+func TestRateLimiter_PenaltyIsPerProvider(t *testing.T) {
+	l, clock := newTestLimiter(RateLimitOptions{Interval: time.Second, MaxPenalty: time.Hour})
 	ctx := t.Context()
 
 	require.NoError(t, l.Wait(ctx, "linkedin"))
-	for range 6 { // penalty grows to 32s
+	for range 6 {
 		l.Report("linkedin", errors.New("blocked"))
 	}
-
-	err := l.Wait(ctx, "linkedin")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrRateLimited)
-	assert.Len(t, clock.sleeps, 1, "the caller is not blocked")
-
-	// The other portal is unaffected.
+	clock.sleeps = nil
 	require.NoError(t, l.Wait(ctx, "jobindex"))
+	assert.Equal(t, []time.Duration{0}, clock.sleeps, "a failing portal does not slow the others")
 }
 
 func TestRateLimiter_HonoursContext(t *testing.T) {
-	l := NewRateLimiter(RateLimitOptions{Interval: time.Hour, MaxWait: 2 * time.Hour})
+	l := NewRateLimiter(RateLimitOptions{Interval: time.Hour})
 	require.NoError(t, l.Wait(t.Context(), "linkedin"))
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)

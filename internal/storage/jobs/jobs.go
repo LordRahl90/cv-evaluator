@@ -58,7 +58,7 @@ func (s *Service) Upsert(ctx context.Context, job *models.Job) (*models.Job, boo
 func (s *Service) SaveDetail(ctx context.Context, id ulid.ULID, detail string) error {
 	return s.db.WithContext(ctx).Model(&models.Job{}).
 		Where("id = ?", id).
-		Updates(map[string]any{"detail": detail, "visited": true}).Error
+		Updates(map[string]any{"detail": detail, "visited": true, "status": models.JobStatusDescribed}).Error
 }
 
 // SaveEmbedding stores a job's embedding and marks it completed.
@@ -66,7 +66,7 @@ func (s *Service) SaveEmbedding(ctx context.Context, id ulid.ULID, embedding []f
 	vec := pgvector.NewVector(embedding)
 	return s.db.WithContext(ctx).Model(&models.Job{}).
 		Where("id = ?", id).
-		Updates(map[string]any{"embedding": &vec, "status": models.StatusCompleted}).Error
+		Updates(map[string]any{"embedding": &vec, "status": models.JobStatusEmbedded, "last_error": ""}).Error
 }
 
 func (s *Service) FindByID(ctx context.Context, id ulid.ULID) (*models.Job, error) {

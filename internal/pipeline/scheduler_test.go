@@ -1,19 +1,21 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
-	"cv-evaluator/internal/queue"
 
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestScheduler_FansOutPerProvider(t *testing.T) {
+func TestTick_RunsDueSearchesOnEveryPortal(t *testing.T) {
 	due := newSearch(ulid.Make(), "go")
 	disabled := newSearch(ulid.Make(), "off")
 	disabled.Enabled = false
@@ -23,70 +25,161 @@ func TestScheduler_FansOutPerProvider(t *testing.T) {
 	unscheduled := newSearch(ulid.Make(), "unscheduled")
 	unscheduled.NextRunAt = nil
 
-	h := newHarness(t, newFakeSearches(due, disabled, notDue, unscheduled), newFakeFetcher("linkedin", "jobindex"))
+	fetcher := newFakeFetcher("linkedin", "jobindex")
+	h := newHarness(t, newFakeSearches(due, disabled, notDue, unscheduled), fetcher)
 
-	assert.Equal(t, 2, h.tick())
+	assert.Equal(t, 1, h.tick())
+	assert.Equal(t, 1, fetcher.searchCount("linkedin"))
+	assert.Equal(t, 1, fetcher.searchCount("jobindex"))
+	assert.Equal(t, []Criteria{
+		{Query: "go", Location: "Copenhagen", MaxPages: DefaultMaxPages},
+		{Query: "go", Location: "Copenhagen", MaxPages: DefaultMaxPages},
+	}, fetcher.criteria)
 
-	var tasks []models.QueueTask
-	require.NoError(t, testDB.Order("unique_key").Find(&tasks).Error)
-	require.Len(t, tasks, 2)
-	for i, provider := range []string{"jobindex", "linkedin"} {
-		var p RunSearchPayload
-		require.NoError(t, queue.Decode(&tasks[i], &p))
-		assert.Equal(t, RunSearchPayload{SearchID: due.ID, Provider: provider}, p)
-		assert.Equal(t, runSearchKey(due.ID, provider), *tasks[i].UniqueKey)
+	assert.Equal(t, 1, h.searches.markCount(due.ID))
+	for _, s := range []*Search{disabled, notDue, unscheduled} {
+		assert.Zero(t, h.searches.claimCount(s.ID))
+	}
+	got := h.searches.get(due.ID)
+	assert.Equal(t, h.clock.Now().Add(24*time.Hour), *got.NextRunAt)
+}
+
+func TestTick_StoresResultsOnceAcrossReruns(t *testing.T) {
+	user := ulid.Make()
+	search := newSearch(user, "go")
+	fetcher := newFakeFetcher("linkedin")
+	fetcher.setPosts("linkedin", post("linkedin", "1", "d1"), post("linkedin", "2", ""), post("linkedin", "", "no id"))
+	h := newHarness(t, newFakeSearches(search), fetcher)
+
+	for range 3 {
+		h.tick()
+		h.clock.Advance(25 * time.Hour)
 	}
 
-	assert.Equal(t, 1, h.searches.marks[due.ID])
-	assert.Zero(t, h.searches.marks[disabled.ID])
-	assert.Zero(t, h.searches.marks[notDue.ID])
-	assert.Zero(t, h.searches.marks[unscheduled.ID])
+	assert.Equal(t, 3, fetcher.searchCount("linkedin"))
+	assert.Equal(t, int64(2), count(t, &models.Job{}), "postings without an id are skipped")
+	assert.Equal(t, int64(1), count(t, &models.Job{}, "status = ?", models.JobStatusDescribed))
+	assert.Equal(t, int64(1), count(t, &models.Job{}, "status = ?", models.JobStatusNew))
+	assert.Equal(t, int64(2), count(t, &models.SearchResult{}))
+
+	var r models.SearchResult
+	require.NoError(t, testDB.First(&r).Error)
+	assert.Equal(t, models.SearchResultNew, r.Status)
+	assert.Equal(t, models.EvaluationPending, r.EvaluationStatus)
+	assert.Equal(t, user, r.UserID)
 }
 
-func TestScheduler_DedupesWhileQueued(t *testing.T) {
+// Two worker processes ticking at the same time run each search once.
+func TestTick_ConcurrentSchedulersRunEachSearchOnce(t *testing.T) {
+	var searches []*Search
+	for range 6 {
+		searches = append(searches, newSearch(ulid.Make(), "q"))
+	}
+	store := newFakeSearches(searches...)
+	fetcher := newFakeFetcher("linkedin", "jobindex")
+	h := newHarness(t, store, fetcher)
+	other, err := New(h.pipeline.cfg)
+	require.NoError(t, err)
+
+	var (
+		wg  sync.WaitGroup
+		ran [2]int
+	)
+	for i, p := range []*Pipeline{h.pipeline, other} {
+		wg.Go(func() {
+			n, err := p.Tick(t.Context())
+			assert.NoError(t, err)
+			ran[i] = n
+		})
+	}
+	wg.Wait()
+
+	assert.Equal(t, 6, ran[0]+ran[1])
+	for _, s := range searches {
+		assert.Equal(t, 1, store.claimCount(s.ID))
+		assert.Equal(t, 1, store.markCount(s.ID))
+	}
+	assert.Equal(t, 6, fetcher.searchCount("linkedin"))
+	assert.Equal(t, 6, fetcher.searchCount("jobindex"))
+}
+
+func TestTick_PortalFailureDoesNotAffectOthers(t *testing.T) {
 	search := newSearch(ulid.Make(), "go")
-	searches := newFakeSearches(search)
-	searches.markErr = errors.New("db down")
-	h := newHarness(t, searches, newFakeFetcher("linkedin", "jobindex"))
+	fetcher := newFakeFetcher("linkedin", "jobindex")
+	fetcher.setPosts("linkedin", post("linkedin", "1", "d"))
+	fetcher.searchErr["jobindex"] = errors.New("jobindex is down")
+	h := newHarness(t, newFakeSearches(search), fetcher)
 
-	_, err := h.scheduler.Tick(t.Context())
-	require.Error(t, err, "a failed MarkRun is reported")
+	assert.Equal(t, 1, h.tick())
 
-	// The search is still due, but its tasks are already queued.
-	searches.markErr = nil
-	assert.Equal(t, 0, h.tick())
-	assert.Equal(t, int64(2), count(t, &models.QueueTask{}))
-	assert.Equal(t, 1, searches.marks[search.ID])
+	assert.Equal(t, DefaultPortalAttempts, fetcher.searchCount("jobindex"), "a failing portal is retried a few times")
+	assert.Equal(t, 1, fetcher.searchCount("linkedin"))
+	assert.Equal(t, int64(1), count(t, &models.SearchResult{}))
+	assert.Equal(t, 1, h.searches.markCount(search.ID), "the search is still marked run")
 }
 
-func TestScheduler_NoProviders(t *testing.T) {
+func TestTick_MarkRunFailureLeavesLease(t *testing.T) {
+	search := newSearch(ulid.Make(), "go")
+	store := newFakeSearches(search)
+	store.markErr = errors.New("db down")
+	h := newHarness(t, store, newFakeFetcher("linkedin"))
+
+	_, err := h.pipeline.Tick(t.Context())
+	require.Error(t, err)
+
+	// The claim's lease keeps the search from running again right away...
+	store.markErr = nil
+	assert.Equal(t, 0, h.tick())
+	// ...and once it expires the search is due again.
+	h.clock.Advance(DefaultRunTimeout + time.Second)
+	assert.Equal(t, 1, h.tick())
+}
+
+type blockingFetcher struct {
+	*fakeFetcher
+	started chan struct{}
+	once    sync.Once
+}
+
+func (f *blockingFetcher) Search(ctx context.Context, _ string, _ Criteria) ([]entities.JobPost, error) {
+	f.once.Do(func() { close(f.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestTick_ShutdownMidRunDoesNotMarkRun(t *testing.T) {
+	search := newSearch(ulid.Make(), "go")
+	store := newFakeSearches(search)
+	fetcher := &blockingFetcher{fakeFetcher: newFakeFetcher("linkedin"), started: make(chan struct{})}
+	h := newHarness(t, store, fetcher.fakeFetcher, func(c *Config) { c.Fetcher = fetcher })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.pipeline.Tick(ctx)
+		done <- err
+	}()
+	<-fetcher.started
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	assert.Equal(t, 1, store.claimCount(search.ID))
+	assert.Zero(t, store.markCount(search.ID), "an interrupted run is not marked; its lease expires")
+}
+
+func TestTick_NoProviders(t *testing.T) {
 	search := newSearch(ulid.Make(), "go")
 	h := newHarness(t, newFakeSearches(search), newFakeFetcher())
 
 	assert.Equal(t, 0, h.tick())
-	assert.Zero(t, h.searches.marks[search.ID], "a search is not marked run when nothing ran")
+	assert.Zero(t, h.searches.claimCount(search.ID))
 }
 
-func TestScheduler_DrainsInBatches(t *testing.T) {
-	var searches []*Search
-	for range 7 {
-		searches = append(searches, newSearch(ulid.Make(), "q"))
-	}
+func TestTick_NoSourcesIsQuiet(t *testing.T) {
 	resetDB(t)
-	fs := newFakeSearches(searches...)
-	q := queue.New(testDB, queue.Options{})
-	s := NewScheduler(q, fs, newFakeFetcher("linkedin"), SchedulerOptions{BatchSize: 3})
-
-	n, err := s.Tick(t.Context())
+	p, err := New(Config{DB: testDB, Searches: NoSources{}, Fetcher: NoSources{}, Embedder: &fakeEmbedder{}, Evaluator: &fakeEvaluator{}})
 	require.NoError(t, err)
-	assert.Equal(t, 7, n)
-}
-
-func TestScheduler_NoSourcesIsQuiet(t *testing.T) {
-	resetDB(t)
-	q := queue.New(testDB, queue.Options{})
-	s := NewScheduler(q, NoSources{}, NoSources{}, SchedulerOptions{})
-	n, err := s.Tick(t.Context())
+	n, err := p.Tick(t.Context())
 	require.NoError(t, err)
 	assert.Zero(t, n)
 }

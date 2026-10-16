@@ -28,7 +28,7 @@ func TestService_ProcessJob_CreatesNewJob(t *testing.T) {
 	var got models.Job
 	err = db.WithContext(t.Context()).Where("provider = ? AND job_id = ?", job.Provider, job.ID).First(&got).Error
 	require.NoError(t, err)
-	assert.Equal(t, models.StatusCompleted, got.Status)
+	assert.Equal(t, models.JobStatusEmbedded, got.Status)
 	assert.Equal(t, job.Details.Details, got.Detail)
 	assert.True(t, got.IsEmbedded())
 
@@ -64,7 +64,7 @@ func TestService_ProcessJob_SkipsWhenAlreadyEmbedded(t *testing.T) {
 		Title:      "Senior Software Engineer",
 		Company:    "ACME",
 		DetailsURL: "https://example.com/jobs/job-2",
-		Status:     models.StatusCompleted,
+		Status:     models.JobStatusEmbedded,
 		Detail:     "already saved",
 		Embedding:  makeJobEmbeddingVector(),
 	}
@@ -95,14 +95,14 @@ func TestService_ProcessJob_ReturnsEmbeddingError(t *testing.T) {
 	var got models.Job
 	require.NoError(t, db.Where("job_id = ?", "job-3").First(&got).Error)
 	assert.False(t, got.IsEmbedded())
-	assert.Equal(t, models.StatusPending, got.Status)
+	assert.Equal(t, models.JobStatusDescribed, got.Status)
 
 	embedding.AssertExpectations(t)
 }
 
 func TestService_Embed_RequiresDetail(t *testing.T) {
 	svc, db, embedding := newJobsServiceTestDB(t)
-	job := &models.Job{Provider: "linkedin", JobID: "no-detail", Status: models.StatusPending}
+	job := &models.Job{Provider: "linkedin", JobID: "no-detail", Status: models.JobStatusNew}
 	require.NoError(t, db.Create(job).Error)
 
 	err := svc.Embed(t.Context(), job)
@@ -113,10 +113,10 @@ func TestService_Embed_RequiresDetail(t *testing.T) {
 func TestService_IsJobProcessed(t *testing.T) {
 	svc, db, _ := newJobsServiceTestDB(t)
 	embedded := &models.Job{
-		JobID: "job-4", Provider: "linkedin", Status: models.StatusCompleted,
+		JobID: "job-4", Provider: "linkedin", Status: models.JobStatusEmbedded,
 		Detail: "stored details", Embedding: makeJobEmbeddingVector(),
 	}
-	pending := &models.Job{JobID: "job-5", Provider: "linkedin", Status: models.StatusPending}
+	pending := &models.Job{JobID: "job-5", Provider: "linkedin", Status: models.JobStatusNew}
 	require.NoError(t, db.Create(embedded).Error)
 	require.NoError(t, db.Create(pending).Error)
 
