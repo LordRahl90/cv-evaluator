@@ -19,6 +19,8 @@ const formError = ref('')
 const busy = ref(false)
 
 const expired = computed(() => route.query.expired === '1' && !formError.value)
+// Set by Settings after the account was deleted.
+const deleted = computed(() => route.query.deleted === '1' && !formError.value)
 
 async function submit() {
   if (busy.value) return
@@ -85,6 +87,9 @@ const points: { icon: IconName; title: string; text: string }[] = [
       </div>
 
       <AlertMessage v-if="formError">{{ formError }}</AlertMessage>
+      <AlertMessage v-else-if="deleted" tone="info">
+        Your account was deleted, along with all of its data.
+      </AlertMessage>
       <AlertMessage v-else-if="expired" tone="info">
         Your session has ended. Sign in again to continue.
       </AlertMessage>

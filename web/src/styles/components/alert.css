@@ -1,6 +1,7 @@
 /*
  * alert.css — inline messages (AlertMessage): .alert-error for failed
- * requests, .alert-info for neutral notices such as an ended session.
+ * requests, .alert-info for neutral notices such as an ended session and
+ * .alert-success for a confirmed change such as a saved profile.
  */
 @layer components {
   .alert {
@@ -25,5 +26,9 @@
 
   .alert-info {
     @apply bg-accent-soft text-accent-ink;
+  }
+
+  .alert-success {
+    @apply bg-success-soft border-success-line text-accent-ink;
   }
 }

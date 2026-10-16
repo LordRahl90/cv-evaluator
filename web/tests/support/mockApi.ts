@@ -249,3 +249,154 @@ export async function mockApiKeys(page: Page, options: MockApiKeysOptions = {}) 
 
   return { keys, created, revoked }
 }
+
+// ---- Account (PATCH /me, POST /me/password, DELETE /me, GET /me/export) --
+
+/** The password the mocked account accepts, and the token a change returns. */
+export const ACCOUNT_PASSWORD = 'password123'
+export const RENEWED_TOKEN = 'renewed-token'
+
+export interface MockAccountOptions {
+  user?: User
+  /** Error answer for PATCH /me instead of saving. */
+  updateError?: { status: number; body: unknown }
+  /** Error answer for GET /me/export. */
+  exportError?: { status: number; body: unknown }
+  /** Error answer for DELETE /me (after the password check passes). */
+  deleteError?: { status: number; body: unknown }
+  /** Held until resolved before answering every account write and the export. */
+  gate?: Promise<void>
+}
+
+export function sampleExport(user: User = jane) {
+  return {
+    object: 'account_export',
+    exported_at: '2026-10-16T10:00:00Z',
+    profile: {
+      id: user.id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: user.email,
+      phone: user.phone,
+      created_at: '2026-09-01T09:00:00Z',
+      updated_at: '2026-10-16T09:00:00Z',
+      password_changed_at: null,
+    },
+    cvs: [],
+    job_searches: [],
+    results: [],
+    api_keys: [],
+    portal_suggestions: [],
+  }
+}
+
+const incorrectPassword = (param: string) =>
+  apiError('invalid_request_error', 'incorrect_password', 'The password is incorrect.', param)
+
+/**
+ * An in-memory account behind GET/PATCH/DELETE /me, POST /me/password and
+ * GET /me/export, with the same rules as internal/servers/account: a wrong
+ * password is a 400 incorrect_password, a password change returns a new
+ * session, and after deletion every call is a 401. Register it after
+ * mockApi. Returns the live user and the requests seen.
+ */
+export async function mockAccount(page: Page, options: MockAccountOptions = {}) {
+  const state = {
+    user: { ...(options.user ?? jane) },
+    password: ACCOUNT_PASSWORD,
+    token: 'test-token',
+    deleted: false,
+    updates: [] as Record<string, string>[],
+    passwordChanges: [] as { current_password: string; new_password: string }[],
+    deletions: [] as { password: string }[],
+    exports: 0,
+    /** Authorization header of every call, in order. */
+    authHeaders: [] as string[],
+  }
+
+  // Answers like the auth middleware: 401 without the current token.
+  const authorized = (route: Route) => {
+    const header = route.request().headers()['authorization'] ?? ''
+    state.authHeaders.push(header)
+    if (state.deleted || header !== `Bearer ${state.token}`) {
+      void json(
+        route,
+        401,
+        apiError(
+          'authentication_error',
+          'invalid_token',
+          'The session is no longer valid. Sign in again.',
+        ),
+      )
+      return false
+    }
+    return true
+  }
+
+  await page.route('**/api/me', async (route) => {
+    const method = route.request().method()
+    if (method === 'GET') {
+      if (!authorized(route)) return
+      return json(route, 200, state.user)
+    }
+    if (options.gate) await options.gate
+    if (!authorized(route)) return
+    if (method === 'PATCH') {
+      const body = route.request().postDataJSON() as Record<string, string>
+      state.updates.push(body)
+      if (options.updateError) {
+        return json(route, options.updateError.status, options.updateError.body)
+      }
+      for (const [key, value] of Object.entries(body)) {
+        const v = value.trim()
+        ;(state.user as unknown as Record<string, string>)[key] =
+          key === 'email' ? v.toLowerCase() : v
+      }
+      return json(route, 200, state.user)
+    }
+    if (method === 'DELETE') {
+      const body = route.request().postDataJSON() as { password: string }
+      state.deletions.push(body)
+      if (body.password !== state.password) return json(route, 400, incorrectPassword('password'))
+      if (options.deleteError) {
+        return json(route, options.deleteError.status, options.deleteError.body)
+      }
+      state.deleted = true
+      return route.fulfill({ status: 204 })
+    }
+    return route.fallback()
+  })
+
+  await page.route('**/api/me/password', async (route) => {
+    if (options.gate) await options.gate
+    if (!authorized(route)) return
+    const body = route.request().postDataJSON() as {
+      current_password: string
+      new_password: string
+    }
+    state.passwordChanges.push(body)
+    if (body.current_password !== state.password) {
+      return json(route, 400, incorrectPassword('current_password'))
+    }
+    state.password = body.new_password
+    state.token = RENEWED_TOKEN
+    return json(route, 200, { ...session(state.user), token: RENEWED_TOKEN })
+  })
+
+  await page.route('**/api/me/export', async (route) => {
+    if (options.gate) await options.gate
+    if (!authorized(route)) return
+    state.exports++
+    if (options.exportError) {
+      return json(route, options.exportError.status, options.exportError.body)
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'Content-Disposition': 'attachment; filename="cv-evaluator-export.json"' },
+      body: JSON.stringify(sampleExport(state.user)),
+    })
+  })
+
+  return state
+}

@@ -1,7 +1,8 @@
 /*
- * settings.css — the settings page: a narrower column than other pages and
- * the read-only profile card (label/value grid, its loading placeholders,
- * the load error and the "not editable yet" note).
+ * settings.css — the settings page: a narrower column than other pages, the
+ * profile and password forms (two-column field grid, actions row), the
+ * profile's loading placeholders and load error, the red "Delete account"
+ * section and the list in its confirmation dialog.
  */
 @layer components {
   .settings-stack {
@@ -14,46 +15,49 @@
     padding: 24px;
   }
 
-  .profile-grid {
-    @apply grid;
-    gap: 18px 14px;
+  .settings-section-head {
+    @apply flex flex-col;
+    gap: 4px;
+  }
+
+  .settings-text {
+    @apply text-muted;
     margin: 0;
+  }
+
+  /* One column on phones, two from tablet width up, as in the mockup. */
+  .settings-grid {
+    @apply grid;
+    gap: 14px;
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* Two by two from tablet width up, as in the mockup. */
   @media (min-width: 640px) {
-    .profile-grid {
+    .settings-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    /* Starts a new row, e.g. "New password" under "Current password". */
+    .settings-grid-row-start {
+      grid-column-start: 1;
     }
   }
 
-  .profile-item {
+  .settings-actions {
+    @apply flex flex-wrap justify-end;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .settings-skeleton-field {
     @apply flex min-w-0 flex-col;
-    gap: 6px;
+    gap: 8px;
   }
 
-  .profile-label {
-    @apply text-muted;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .profile-value {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 500;
-    overflow-wrap: anywhere;
-  }
-
-  .profile-value.is-empty {
-    @apply text-faint;
-    font-weight: 400;
-  }
-
-  .profile-skeleton-value {
-    width: 70%;
-    height: 20px;
+  .settings-skeleton-input {
+    height: 44px;
+    border-radius: var(--radius-control);
   }
 
   .settings-error {
@@ -65,11 +69,33 @@
     align-self: stretch;
   }
 
-  .settings-note {
-    @apply text-muted;
+  /* Danger zone */
+  .settings-danger {
+    border-color: var(--color-danger-line);
+  }
+
+  .settings-danger-title {
+    @apply text-danger;
+  }
+
+  .settings-danger-actions {
+    @apply flex flex-wrap items-center;
+    gap: 10px;
+  }
+
+  /* Phones: the two buttons stack at full width. */
+  @media (max-width: 479px) {
+    .settings-danger-actions .btn,
+    .settings-actions .btn {
+      width: 100%;
+    }
+  }
+
+  .delete-list {
+    @apply flex flex-col text-ink-soft;
+    gap: 4px;
     margin: 0;
-    padding-top: 16px;
-    border-top: 1px solid var(--color-divider);
-    font-size: 13px;
+    padding-left: 20px;
+    list-style: disc;
   }
 }
