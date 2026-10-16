@@ -68,8 +68,8 @@ type MatchInput struct {
 	// JobLocation is the location the portal lists for the job, if any.
 	// It is context only; location is not scored.
 	JobLocation string
-	// RelevantCV is the CV sections closest to the job description.
-	RelevantCV string
+	// CV is the candidate's full CV text.
+	CV string
 	// Hints are embedding similarities, labelled by what they compare.
 	Hints []SimilarityHint
 	// Criteria to score. Empty means EvaluationCriteria.
@@ -84,18 +84,40 @@ func (in *MatchInput) CriteriaOrDefault() []Criterion {
 	return EvaluationCriteria
 }
 
+// Requirement importance and whether the CV meets it, as the LLM reports
+// them in the response's "requirements" list.
+const (
+	RequirementMust = "must"
+	RequirementNice = "nice"
+
+	RequirementMet     = "yes"
+	RequirementPartial = "partial"
+	RequirementNotMet  = "no"
+)
+
+type schemaRequirement struct {
+	Requirement string `json:"requirement"`
+	Importance  string `json:"importance"`
+	Met         string `json:"met"`
+	Evidence    string `json:"evidence"`
+}
+
 type schemaScore struct {
 	Criterion string `json:"criterion"`
 	Score     int    `json:"score"`
 	Reason    string `json:"reason"`
 }
 
+// responseSchema fields are in the order the LLM should fill them: the
+// requirements and their evidence first, then the scores that follow from
+// them, so the model reasons before it scores.
 type responseSchema struct {
-	OverallScore  int           `json:"overall_score"`
-	Breakdown     []schemaScore `json:"breakdown"`
-	Strengths     []string      `json:"strengths"`
-	MissingSkills []string      `json:"missing_skills"`
-	Summary       string        `json:"summary"`
+	Requirements  []schemaRequirement `json:"requirements"`
+	Breakdown     []schemaScore       `json:"breakdown"`
+	OverallScore  int                 `json:"overall_score"`
+	Strengths     []string            `json:"strengths"`
+	MissingSkills []string            `json:"missing_skills"`
+	Summary       string              `json:"summary"`
 }
 
 // ResponseSchema returns the JSON shape the LLM must answer with, with one
@@ -103,6 +125,10 @@ type responseSchema struct {
 func (in *MatchInput) ResponseSchema() string {
 	criteria := in.CriteriaOrDefault()
 	schema := responseSchema{
+		Requirements: []schemaRequirement{{
+			Importance: RequirementMust + "|" + RequirementNice,
+			Met:        RequirementMet + "|" + RequirementPartial + "|" + RequirementNotMet,
+		}},
 		Breakdown:     make([]schemaScore, len(criteria)),
 		Strengths:     []string{},
 		MissingSkills: []string{},

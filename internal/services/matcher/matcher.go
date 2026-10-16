@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 
 	"cv-evaluator/internal/entities"
@@ -25,6 +24,20 @@ var (
 		"skills":     0.4,
 		"title":      0.1,
 	}
+)
+
+// ErrNoCV is returned when there is no CV to match against.
+var ErrNoCV = errors.New("no CV to match against")
+
+const (
+	// maxCVChars caps the CV text sent to the LLM. Real CVs are far
+	// shorter; this only guards against pathological uploads.
+	maxCVChars = 20000
+	// maxRequirements caps the requirements kept from a response.
+	maxRequirements = 20
+	// mustHaveCap is the highest overall score a CV can get when it misses
+	// a must-have requirement. It matches the score scale in the prompt.
+	mustHaveCap = 69
 )
 
 type EmbeddingLLMService interface {
@@ -91,6 +104,11 @@ type sectionScope struct {
 }
 
 func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job) (*Response, string, error) {
+	cvText, err := s.cvText(ctx, scope)
+	if err != nil {
+		return nil, "", err
+	}
+
 	var queryEmbedding pgvector.Vector
 	if job.IsEmbedded() {
 		queryEmbedding = *job.Embedding
@@ -119,10 +137,13 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 		return nil, "", err
 	}
 
+	// The full CV goes to the LLM: a CV has only a handful of sections, so
+	// retrieving the closest ones barely filters anything and can drop
+	// education or the title. Retrieval still feeds the similarity hints.
 	matchInput := &entities.MatchInput{
-		JobDescription: job.Detail,
-		JobLocation:    job.Location,
-		RelevantCV:     s.buildCVContext(ctx, results),
+		JobDescription: stripPromptTags(job.Detail),
+		JobLocation:    stripPromptTags(job.Location),
+		CV:             stripPromptTags(cvText),
 		Hints:          similarityHints(results),
 		Criteria:       entities.EvaluationCriteria,
 	}
@@ -139,9 +160,50 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 	return response, raw, nil
 }
 
+// cvText returns the CV's full extracted text: the given CV's for a CV
+// scope, otherwise the user's newest. It returns ErrNoCV when there is none.
+func (s *Service) cvText(ctx context.Context, scope sectionScope) (string, error) {
+	query := s.db.WithContext(ctx).Model(&models.CV{})
+	if scope.cvID != (ulid.ULID{}) {
+		query = query.Where("id = ?", scope.cvID)
+	} else {
+		query = query.Where("user_id = ?", scope.userID).Order("created_at DESC")
+	}
+
+	var contents []string
+	if err := query.Limit(1).Pluck("extracted_content", &contents).Error; err != nil {
+		return "", fmt.Errorf("load CV: %w", err)
+	}
+	if len(contents) == 0 || strings.TrimSpace(contents[0]) == "" {
+		return "", ErrNoCV
+	}
+	text := strings.TrimSpace(contents[0])
+	if r := []rune(text); len(r) > maxCVChars {
+		text = string(r[:maxCVChars])
+	}
+	return text, nil
+}
+
+// promptTags are the tags the prompt wraps untrusted text in.
+var promptTags = strings.NewReplacer(
+	"</job_description>", "", "<job_description>", "",
+	"</cv>", "", "<cv>", "",
+	"</JOB_DESCRIPTION>", "", "<JOB_DESCRIPTION>", "",
+	"</CV>", "", "<CV>", "",
+)
+
+// stripPromptTags removes the prompt's own tags from scraped or uploaded
+// text, so a job posting or CV can't close its tag early and smuggle text
+// into the instructions.
+func stripPromptTags(text string) string {
+	return promptTags.Replace(text)
+}
+
 // decodeResponse parses the LLM's JSON answer. The decode error is wrapped
 // so callers can see why the response was rejected. Only known criteria are
-// kept, each once (the first wins), with scores clamped to 0-100.
+// kept, each once (the first wins), with scores clamped to 0-100. Only
+// well-formed requirements are kept, and a missing must-have caps the
+// overall score at mustHaveCap.
 func decodeResponse(raw string) (*Response, error) {
 	var response *Response
 	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&response); err != nil {
@@ -165,7 +227,45 @@ func decodeResponse(raw string) (*Response, error) {
 		kept = append(kept, s)
 	}
 	response.Breakdown = kept
+
+	response.Requirements = cleanRequirements(response.Requirements)
+	for _, r := range response.Requirements {
+		if r.Importance == entities.RequirementMust && r.Met == entities.RequirementNotMet {
+			response.OverallScore = min(response.OverallScore, mustHaveCap)
+			break
+		}
+	}
 	return response, nil
+}
+
+// cleanRequirements normalises the LLM's requirements and drops any whose
+// importance or met value is not one of the allowed values.
+func cleanRequirements(in []Requirement) []Requirement {
+	out := make([]Requirement, 0, len(in))
+	for _, r := range in {
+		r.Requirement = strings.TrimSpace(r.Requirement)
+		r.Importance = strings.ToLower(strings.TrimSpace(r.Importance))
+		r.Met = strings.ToLower(strings.TrimSpace(r.Met))
+		r.Evidence = strings.TrimSpace(r.Evidence)
+		if r.Requirement == "" {
+			continue
+		}
+		switch r.Importance {
+		case entities.RequirementMust, entities.RequirementNice:
+		default:
+			continue
+		}
+		switch r.Met {
+		case entities.RequirementMet, entities.RequirementPartial, entities.RequirementNotMet:
+		default:
+			continue
+		}
+		out = append(out, r)
+		if len(out) == maxRequirements {
+			break
+		}
+	}
+	return out
 }
 
 func clampScore(n int) int {
@@ -215,74 +315,4 @@ func similarityHints(results []MatchResult) []entities.SimilarityHint {
 		})
 	}
 	return hints
-}
-
-func (s *Service) buildCVContext(ctx context.Context, input []MatchResult) string {
-	slog.DebugContext(ctx, "building CV context", "input", input)
-	grouped := groupSections(input)
-
-	sortByScore(grouped.Skills)
-	sortByScore(grouped.Experience)
-	sortByScore(grouped.Summary)
-	sortByScore(grouped.Other)
-	var b strings.Builder
-	// SKILLS (top 5)
-	b.WriteString("[SKILLS - MOST RELEVANT]\n")
-	for i, m := range grouped.Skills {
-		if i >= 5 {
-			break
-		}
-		_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
-	}
-	// EXPERIENCE (top 5)
-	b.WriteString("\n[EXPERIENCE - MOST RELEVANT]\n")
-	for i, m := range grouped.Experience {
-		if i >= 5 {
-			break
-		}
-		_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
-	}
-	// SUMMARY (top 2)
-	b.WriteString("\n[SUMMARY]\n")
-	for i, m := range grouped.Summary {
-		if i >= 2 {
-			break
-		}
-		//_, _ = b.WriteString(fmt.Sprintf("- %s\n", m.Content))
-		_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
-	}
-	// OPTIONAL: OTHER CONTEXT (small cap)
-	if len(grouped.Other) > 0 {
-		b.WriteString("\n[ADDITIONAL CONTEXT]\n")
-		for i, m := range grouped.Other {
-			if i >= 3 {
-				break
-			}
-			_, _ = fmt.Fprintf(&b, "- %s\n", m.Content)
-		}
-	}
-	return b.String()
-}
-
-func groupSections(matches []MatchResult) CVContext {
-	ctx := CVContext{}
-	for _, m := range matches {
-		switch strings.ToLower(m.SectionHeading) {
-		case "skills":
-			ctx.Skills = append(ctx.Skills, m)
-		case "experience":
-			ctx.Experience = append(ctx.Experience, m)
-		case "summary":
-			ctx.Summary = append(ctx.Summary, m)
-		default:
-			ctx.Other = append(ctx.Other, m)
-		}
-	}
-	return ctx
-}
-
-func sortByScore(matches []MatchResult) {
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].Score > matches[j].Score
-	})
 }
