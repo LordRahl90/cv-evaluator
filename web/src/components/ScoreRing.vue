@@ -3,7 +3,9 @@
 import { computed } from 'vue'
 import { scoreBand } from '../utils/score'
 
-const props = withDefaults(defineProps<{ score: number; size?: 'lg' | 'sm' }>(), { size: 'lg' })
+const props = withDefaults(defineProps<{ score: number; size?: 'lg' | 'md' | 'sm' }>(), {
+  size: 'lg',
+})
 
 const value = computed(() => Math.max(0, Math.min(100, Math.round(props.score))))
 </script>

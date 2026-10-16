@@ -3,20 +3,32 @@
 // CV. The call runs the LLM inside the request (5-30 s), so the form locks
 // and a placeholder result shows while it runs. Recent results are kept in
 // this component only: nothing is saved, and they clear when you leave.
+//
+// From a result the user can have a cover letter written (a banner offers
+// it for strong matches, a secondary button otherwise). The letter replaces
+// the result on the page, with a compact summary of the match below it;
+// letters are kept per match, in memory only, like the results.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AlertMessage from '../components/AlertMessage.vue'
 import AppIcon from '../components/AppIcon'
 import BusyButton from '../components/BusyButton.vue'
+import CoverLetterBanner from '../components/CoverLetterBanner.vue'
+import CoverLetterPanel from '../components/CoverLetterPanel.vue'
 import MatchResultCard from '../components/MatchResultCard.vue'
+import MatchSummaryCard from '../components/MatchSummaryCard.vue'
 import ScoreRing from '../components/ScoreRing.vue'
 import { listCVs } from '../api/cvs'
 import { isNoCVError, matchJobDescription, type MatchResult } from '../api/match'
 import type { CVSummary } from '../api/types'
+import { useCoverLetters } from '../composables/useCoverLetters'
 import { formatDate, formatAgo } from '../utils/format'
+import { STRONG_SCORE } from '../utils/matches'
 
 interface QuickMatch {
   id: number
   title: string
+  /** The pasted description, sent again to write a cover letter. */
+  text: string
   words: number
   result: MatchResult
   at: number
@@ -96,12 +108,14 @@ async function submit() {
     const match: QuickMatch = {
       id: nextId++,
       title: titleFrom(text),
+      text,
       words: wordCount(text),
       result,
       at: Date.now(),
       cv: latestCV.value,
     }
     current.value = match
+    letterOpen.value = false
     recent.value = [match, ...recent.value].slice(0, RECENT_LIMIT)
     description.value = ''
     window.scrollTo({ top: 0 })
@@ -121,11 +135,39 @@ async function submit() {
 
 function scoreAnother() {
   current.value = null
+  letterOpen.value = false
   submitError.value = ''
 }
 
 function show(match: QuickMatch) {
   current.value = match
+  letterOpen.value = false
+}
+
+// Cover letters
+const letters = useCoverLetters()
+const letterOpen = ref(false)
+const draft = computed(() =>
+  current.value ? (letters.drafts.get(current.value.id) ?? null) : null,
+)
+const strong = computed(() => (current.value?.result.overall_score ?? 0) >= STRONG_SCORE)
+
+/** Shows the current match's letter, writing it first if there is none. */
+function openLetter() {
+  const match = current.value
+  if (!match) return
+  letterOpen.value = true
+  window.scrollTo({ top: 0 })
+  if (!draft.value || draft.value.status === 'error') regenerate()
+}
+
+function regenerate() {
+  const match = current.value
+  if (match) void letters.write(match.id, match.text, match.result)
+}
+
+function updateLetter(field: 'subject' | 'letter', value: string) {
+  if (current.value) letters.update(current.value.id, field, value)
 }
 
 const subtitle = computed(() => {
@@ -146,7 +188,16 @@ const subtitle = computed(() => {
           <h1 class="page-title">Quick match</h1>
           <p class="page-sub">{{ noCV ? 'Score any job against your CV.' : subtitle }}</p>
         </div>
-        <div v-if="current && !noCV" class="page-actions">
+        <div v-if="current && !noCV && !letterOpen" class="page-actions">
+          <button
+            v-if="!strong"
+            type="button"
+            class="btn btn-secondary"
+            data-testid="cl-write"
+            @click="openLetter"
+          >
+            <AppIcon name="pen" />{{ draft ? 'Open cover letter' : 'Write cover letter' }}
+          </button>
           <button type="button" class="btn btn-secondary" @click="scoreAnother">
             <AppIcon name="plus" />Score another job
           </button>
@@ -166,7 +217,31 @@ const subtitle = computed(() => {
         </RouterLink>
       </section>
 
-      <div v-else class="qm-layout">
+      <!-- Cover letter for the current match -->
+      <template v-else-if="letterOpen && current && draft">
+        <CoverLetterPanel
+          :draft="draft"
+          :title="current.title"
+          :now="letters.now.value"
+          :edited="letters.isEdited(current.id)"
+          @regenerate="regenerate"
+          @update:subject="updateLetter('subject', $event)"
+          @update:letter="updateLetter('letter', $event)"
+        />
+        <MatchSummaryCard
+          :result="current.result"
+          :title="current.title"
+          @show-result="letterOpen = false"
+        />
+      </template>
+
+      <CoverLetterBanner
+        v-if="!noCV && !letterOpen && current && strong"
+        :has-letter="!!draft"
+        @write="openLetter"
+      />
+
+      <div v-if="!noCV && !(letterOpen && current && draft)" class="qm-layout">
         <div class="qm-main">
           <MatchResultCard
             v-if="current"

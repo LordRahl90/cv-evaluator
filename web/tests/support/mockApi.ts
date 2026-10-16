@@ -1089,3 +1089,126 @@ export async function mockAccount(page: Page, options: MockAccountOptions = {}) 
 
   return state
 }
+
+// ---------------------------------------------------------------------------
+// Cover letters (POST /match/cover-letter)
+
+/** A quick match strong enough (80+) for the cover letter banner. */
+export const sampleStrongMatch = {
+  requirements: [
+    {
+      requirement: '5+ years of backend development, at least 3 in Go',
+      importance: 'must',
+      met: 'yes',
+      evidence: 'Eight years of backend work, the last six in Go.',
+    },
+    {
+      requirement: 'Kafka or another event streaming platform',
+      importance: 'must',
+      met: 'yes',
+      evidence: 'Go services processing 30,000 shipment events per minute on Kafka.',
+    },
+    {
+      requirement: 'Experience with observability (tracing, metrics)',
+      importance: 'must',
+      met: 'yes',
+      evidence: 'Introduced OpenTelemetry tracing; incident resolution time down 40%.',
+    },
+    {
+      requirement: 'Terraform',
+      importance: 'nice',
+      met: 'no',
+      evidence: '',
+    },
+  ],
+  breakdown: [
+    { criterion: 'skills', score: 90, reason: 'Go, Kafka and PostgreSQL in production.' },
+    { criterion: 'experience', score: 88, reason: 'Six years owning event-driven Go services.' },
+    { criterion: 'seniority', score: 85, reason: 'Senior role, mentors three engineers.' },
+    { criterion: 'domain', score: 72, reason: 'Logistics, though not routing itself.' },
+    { criterion: 'education', score: 80, reason: 'BSc Computer Science.' },
+  ],
+  overall_score: 86,
+  strengths: [
+    '6 years of production Go',
+    'Kafka pipelines at 30k events a minute',
+    'OpenTelemetry tracing rollout',
+  ],
+  missing_skills: ['Terraform (nice to have)'],
+  summary:
+    'You meet every must-have: six years of Go on event pipelines, Kafka and PostgreSQL in production, and hands-on tracing work. Lead with your event-sourcing migration; be ready to talk about Terraform.',
+}
+
+export const sampleStrongJobDescription = `Senior Backend Engineer (Go)
+
+Northwind Logistics builds the routing engine behind same-day delivery. You will own Go services processing shipment events.
+
+Requirements: 5+ years of backend development, at least 3 in Go. Kafka or another event streaming platform. PostgreSQL. Experience with observability (tracing, metrics). Terraform is a plus.`
+
+export const sampleCoverLetter = {
+  subject: 'Application for Senior Backend Engineer (Go)',
+  letter: `Dear Hiring Manager,
+
+I am applying for the Senior Backend Engineer (Go) position at Northwind Logistics. For the past six years I have built and operated Go services that process high volumes of events, which is the core of the role you describe.
+
+At Parcelflow I own the Go microservices that process 30,000 shipment events per minute on Kafka and PostgreSQL. I led the move of these services to event sourcing, which lets us replay shipment state without downtime. Your posting asks for production experience with Kafka and PostgreSQL; I have run both at this scale for over four years.
+
+You also ask for experience with observability. I introduced OpenTelemetry tracing across our services, which cut the time to resolve incidents by 40%. I would apply the same approach to your routing engine, where a delayed event affects same-day delivery.
+
+I have not yet used Terraform in production. I maintain our CI/CD pipelines in GitHub Actions and our AWS resources, and I would expect to work in your infrastructure-as-code setup within my first months.
+
+I would welcome the opportunity to discuss how my experience with event-driven Go services fits your team's plans.
+
+Kind regards,
+
+Jane Doe`,
+  word_count: 236,
+}
+
+export interface CoverLetterOptions {
+  /** Held until resolved, so tests can see the writing state. */
+  gate?: Promise<void>
+  /** Answers in turn; the last one repeats. Default: sampleCoverLetter. */
+  replies?: Reply[]
+}
+
+/** Mocks POST /match/cover-letter; returns the request bodies it saw. */
+export async function mockCoverLetter(page: Page, options: CoverLetterOptions = {}) {
+  const bodies: unknown[] = []
+  const replies = options.replies ?? [{ status: 200, body: sampleCoverLetter }]
+  await page.route('**/api/match/cover-letter', async (route) => {
+    const reply = replies[Math.min(bodies.length, replies.length - 1)]
+    bodies.push(route.request().postDataJSON())
+    if (options.gate) await options.gate
+    return json(route, reply.status, reply.body)
+  })
+  return bodies
+}
+
+/** The API's cover letter errors, as the Go handler writes them. */
+export const coverLetterErrors = {
+  noCV: {
+    status: 422,
+    body: apiError(
+      'invalid_request_error',
+      'cv_missing',
+      'Upload a CV before writing a cover letter.',
+    ),
+  },
+  rateLimited: {
+    status: 429,
+    body: apiError(
+      'rate_limit_error',
+      'rate_limited',
+      'Too many cover letters in a short time (at most 5 per minute). Try again in 42 seconds.',
+    ),
+  },
+  failed: {
+    status: 502,
+    body: apiError(
+      'api_error',
+      'cover_letter_failed',
+      'We could not write a cover letter that meets our quality checks. Please try again.',
+    ),
+  },
+} satisfies Record<string, Reply>

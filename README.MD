@@ -388,6 +388,8 @@ npm run test:e2e     # Playwright, desktop and 375px mobile; the API is mocked
 
 Job searches (`/searches`, `/searches/new`, `/searches/:id/edit`) list, create, edit, pause, run and delete saved searches, show the portals every search runs on (`GET /providers`) and let users suggest new portals (`/portal-suggestions`). Playwright mocks the API per test with `web/tests/support/mockApi.ts` (`mockApi` for the shell and overview, `mockJobSearchesApi` for job searches, providers and portal suggestions).
 
+Quick match (`/quick-match`) can write a cover letter for the job it just scored (`POST /match/cover-letter`, via `web/src/api/coverLetter.ts`): a banner offers it for scores of 80 or more, a secondary button below that. The letter's subject and text are editable, Copy puts "Subject: …" and the letter on the clipboard (or selects it for Ctrl/Cmd+C when the browser refuses), and Regenerate asks first when the letter was edited. Letters, like quick matches, live only on the page. The three progress steps while it is written are time-based, since the API answers in one call (`mockCoverLetter` mocks it in tests).
+
 Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per component and page), not in `.vue` files. API calls go through `web/src/api`. CI for the web app is `.github/workflows/web.yaml`; it only runs when `web/` changes, and the Go workflows ignore `web/`.
 
 ## Observability

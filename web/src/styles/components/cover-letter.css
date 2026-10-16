@@ -1,0 +1,305 @@
+/*
+ * cover-letter.css — writing a cover letter from a quick match:
+ *   .cl-banner   the green "Strong match: worth applying" call to action
+ *                above a result scored 80 or more (CoverLetterBanner);
+ *   .cl-panel    the letter card (CoverLetterPanel): header with
+ *                Regenerate / Copy, the three progress steps and skeleton
+ *                lines while writing, the check chips, the editable subject
+ *                and letter, the copy fallback and the "not saved" notice;
+ *   .cl-summary  the compact match summary under the letter
+ *                (MatchSummaryCard).
+ */
+@layer components {
+  /* Banner */
+  .cl-banner {
+    @apply flex flex-wrap items-center bg-success-soft;
+    gap: 18px;
+    padding: 20px 24px;
+    border: 1px solid var(--color-success-line);
+    border-radius: var(--radius-card);
+  }
+
+  .cl-banner-icon {
+    @apply flex items-center justify-center bg-accent text-white;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 12px;
+  }
+
+  .cl-banner-icon .icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .cl-banner-text {
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+
+  .cl-banner-title {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .cl-banner-sub {
+    @apply text-muted;
+    margin: 2px 0 0;
+  }
+
+  /* Letter panel */
+  .cl-panel {
+    @apply flex flex-col;
+    gap: 18px;
+    padding: 24px;
+  }
+
+  .cl-head {
+    @apply flex flex-wrap items-start justify-between;
+    gap: 12px;
+  }
+
+  .cl-head-text {
+    min-width: 0;
+  }
+
+  .cl-title {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .cl-sub {
+    @apply text-muted;
+    margin: 2px 0 0;
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+
+  .cl-actions {
+    @apply flex flex-wrap;
+    gap: 8px;
+  }
+
+  /* Progress steps (time-based) */
+  .cl-steps {
+    @apply flex flex-wrap bg-row-hover;
+    gap: 10px 22px;
+    margin: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-control);
+    list-style: none;
+  }
+
+  .cl-step {
+    @apply flex items-center;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .cl-step.is-todo {
+    @apply text-muted;
+  }
+
+  .cl-step-dot {
+    @apply flex items-center justify-center;
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  .cl-step.is-done .cl-step-dot {
+    @apply bg-accent text-white;
+  }
+
+  .cl-step-dot .icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .cl-step.is-active .cl-step-dot {
+    @apply bg-amber-soft;
+  }
+
+  .cl-step.is-todo .cl-step-dot {
+    border: 1.5px solid var(--color-line-strong);
+  }
+
+  .cl-step-spinner {
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--color-warning-line);
+    border-top-color: var(--color-score-mid);
+    border-radius: 999px;
+    animation: spin 700ms linear infinite;
+  }
+
+  .cl-skeleton {
+    @apply flex flex-col;
+    gap: 12px;
+    padding: 8px 4px;
+  }
+
+  .cl-skeleton-gap {
+    height: 4px;
+  }
+
+  .cl-w-22 {
+    width: 22%;
+  }
+  .cl-w-38 {
+    width: 38%;
+  }
+  .cl-w-52 {
+    width: 52%;
+  }
+  .cl-w-64 {
+    width: 64%;
+  }
+  .cl-w-72 {
+    width: 72%;
+  }
+  .cl-w-88 {
+    width: 88%;
+  }
+  .cl-w-90 {
+    width: 90%;
+  }
+  .cl-w-91 {
+    width: 91%;
+  }
+  .cl-w-94 {
+    width: 94%;
+  }
+  .cl-w-96 {
+    width: 96%;
+  }
+  .cl-w-97 {
+    width: 97%;
+  }
+
+  .cl-note {
+    @apply text-muted;
+    margin: 0;
+    font-size: 12.5px;
+  }
+
+  /* Ready: chips, fields, notices */
+  .cl-chips {
+    @apply flex flex-wrap;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .cl-chip {
+    @apply inline-flex items-center bg-accent-soft text-accent-ink;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+
+  .cl-chip .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .cl-chip.is-count {
+    @apply bg-chip text-chip-ink;
+  }
+
+  .textarea.cl-letter {
+    min-height: 560px;
+    padding: 22px 24px;
+    border-radius: 12px;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .cl-copy-fallback {
+    @apply flex flex-col bg-accent-soft text-accent-ink;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-control);
+  }
+
+  .cl-copy-fallback-text {
+    margin: 0;
+    font-size: 13.5px;
+  }
+
+  .textarea.cl-copy-fallback-box {
+    min-height: 120px;
+    font-size: 13px;
+  }
+
+  .cl-warning {
+    @apply flex items-center bg-warning-soft;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-warning-line);
+    border-radius: var(--radius-control);
+    font-size: 12.5px;
+  }
+
+  .cl-warning .icon {
+    @apply text-amber-ink;
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+
+  /* Compact match summary */
+  .cl-summary {
+    @apply flex flex-wrap items-center;
+    gap: 18px;
+    padding: 20px 24px;
+  }
+
+  .cl-summary-text {
+    @apply flex flex-col items-start;
+    flex: 1 1 260px;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .cl-summary-title {
+    font-weight: 600;
+  }
+
+  .cl-summary-details {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  @media (max-width: 639px) {
+    .cl-banner,
+    .cl-panel,
+    .cl-summary {
+      padding: 18px;
+    }
+
+    .cl-banner-action,
+    .cl-actions,
+    .cl-actions .btn {
+      flex: 1 1 auto;
+    }
+
+    .textarea.cl-letter {
+      min-height: 480px;
+      padding: 16px;
+      font-size: 14.5px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cl-step-spinner {
+      animation-duration: 2s;
+    }
+  }
+}

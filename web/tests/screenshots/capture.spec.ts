@@ -4,11 +4,13 @@ import path from 'node:path'
 import {
   ACCOUNT_PASSWORD,
   apiError,
+  coverLetterErrors,
   deferred,
   mockAccount,
   mockApi,
   mockApiKeys,
   mockCVStore,
+  mockCoverLetter,
   mockJobSearchesApi,
   mockQuickMatch,
   mockResults,
@@ -16,9 +18,13 @@ import {
   sampleApiKeys,
   sampleCV,
   sampleCVs,
+  sampleCoverLetter,
   sampleJobDescription,
+  sampleMatch,
   sampleResults,
   sampleSearches,
+  sampleStrongJobDescription,
+  sampleStrongMatch,
   sampleSuggestions,
   signedIn,
   unscoredResults,
@@ -706,4 +712,76 @@ test('mobile settings, errors and delete dialog', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete account' }).click()
   await expect(page.getByRole('dialog', { name: 'Delete your account?' })).toBeVisible()
   await shoot(page, 'mobile-settings-delete-dialog', false)
+})
+
+// Cover letters from a quick match
+
+/** Scores a job (strong unless weak is set) and waits for the result. */
+async function scoreForLetter(page: Page, weak = false) {
+  await signedIn(page)
+  await mockApi(page, { cvs: [sampleCV] })
+  await mockQuickMatch(page, {
+    reply: { status: 200, body: weak ? sampleMatch : sampleStrongMatch },
+  })
+  await page.goto('/quick-match')
+  await page
+    .getByLabel('Job description')
+    .fill(weak ? sampleJobDescription : sampleStrongJobDescription)
+  await page.getByRole('button', { name: 'Score this job' }).click()
+  await expect(page.getByTestId('qm-result')).toBeVisible()
+}
+
+const letterBox = (page: Page) =>
+  page.getByRole('textbox', { name: 'Letter (edit freely before copying)' })
+
+test('cover letter: strong match banner', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await scoreForLetter(page)
+  await expect(page.getByTestId('cl-banner')).toBeVisible()
+  await shoot(page, 'cover-letter-strong-banner')
+})
+
+test('cover letter: below 80, a secondary button', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await scoreForLetter(page, true)
+  await expect(page.getByTestId('cl-write')).toBeVisible()
+  await shoot(page, 'cover-letter-below-80')
+})
+
+test('cover letter: writing and ready', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.setViewportSize(desktop)
+  // A fake clock, so the writing state can show "9 s" and "Copied" stays.
+  await page.clock.install()
+  const hold = deferred()
+  await mockCoverLetter(page, { gate: hold.promise })
+  await scoreForLetter(page)
+  await page.getByRole('button', { name: 'Write cover letter' }).click()
+  await page.clock.runFor(9_000)
+  await expect(page.getByRole('button', { name: 'Writing… 9 s' })).toBeVisible()
+  await shoot(page, 'cover-letter-writing')
+
+  hold.release()
+  await expect(letterBox(page)).toHaveValue(sampleCoverLetter.letter)
+  await page.getByRole('button', { name: 'Copy' }).click()
+  await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible()
+  await shoot(page, 'cover-letter-ready')
+})
+
+test('cover letter: failed quality checks', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await mockCoverLetter(page, { replies: [coverLetterErrors.failed] })
+  await scoreForLetter(page)
+  await page.getByRole('button', { name: 'Write cover letter' }).click()
+  await expect(page.getByTestId('cl-error')).toBeVisible()
+  await shoot(page, 'cover-letter-error')
+})
+
+test('mobile cover letter: ready', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await mockCoverLetter(page)
+  await scoreForLetter(page)
+  await page.getByRole('button', { name: 'Write cover letter' }).click()
+  await expect(letterBox(page)).toHaveValue(sampleCoverLetter.letter)
+  await shoot(page, 'mobile-cover-letter-ready')
 })

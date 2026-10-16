@@ -1,8 +1,9 @@
 /*
  * score.css — 0-100 scores (ScoreRing): a conic-gradient ring with the
- * number in the middle, in a large (result header) and small (recent list)
- * size. The .score-high / .score-mid / .score-low bands also colour the
- * breakdown bars in match-result.css.
+ * number in the middle, in a large (result header), medium (match summary
+ * under a cover letter) and small (recent list) size. The .score-high /
+ * .score-mid / .score-low bands also colour the breakdown bars in
+ * match-result.css.
  */
 @layer components {
   .score-ring {
@@ -31,6 +32,18 @@
     height: 68px;
     font-family: var(--font-display);
     font-size: 26px;
+  }
+
+  .score-ring-md {
+    width: 56px;
+    height: 56px;
+  }
+
+  .score-ring-md .score-ring-value {
+    width: 44px;
+    height: 44px;
+    font-family: var(--font-display);
+    font-size: 18px;
   }
 
   .score-ring-sm {

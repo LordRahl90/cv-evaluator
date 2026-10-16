@@ -77,3 +77,9 @@
   --color-code-ink: #d7e7e2;
   --color-danger-hover: #8f1e18;
 }
+
+/* Cover letters: the "not saved" notice and the progress step in flight. */
+@theme {
+  --color-warning-soft: #fcf8ef;
+  --color-warning-line: #eedfbf;
+}
