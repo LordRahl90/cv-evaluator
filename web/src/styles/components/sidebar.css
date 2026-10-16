@@ -1,0 +1,103 @@
+/*
+ * sidebar.css — the app navigation (AppShell). From 768px up it is the
+ * white left sidebar from the mockups; below that it becomes a top bar
+ * with the account menu and a menu button that opens the same links as a
+ * drop-down panel.
+ */
+@layer components {
+  .sidebar {
+    @apply bg-surface;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--color-line);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .sidebar-top {
+    @apply flex items-center justify-between;
+    padding: 10px 12px 10px 16px;
+  }
+
+  .sidebar-brand-link,
+  .sidebar-brand-link:hover {
+    @apply text-ink;
+    border-radius: var(--radius-nav);
+  }
+
+  .sidebar-top-actions {
+    @apply flex items-center;
+    gap: 4px;
+  }
+
+  .sidebar-toggle .icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .sidebar-menu {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 12px 14px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .sidebar.is-open .sidebar-menu {
+    display: flex;
+  }
+
+  .sidebar-nav {
+    @apply flex flex-col;
+    gap: 2px;
+    padding-top: 8px;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-2.5 text-ink-soft;
+    padding: 10px;
+    border-radius: var(--radius-nav);
+    font-weight: 500;
+  }
+
+  .nav-item:hover {
+    @apply bg-nav-hover text-ink;
+  }
+
+  .nav-item.is-active,
+  .nav-item.is-active:hover {
+    @apply bg-accent-soft text-accent-ink;
+  }
+
+  @media (min-width: 768px) {
+    .sidebar {
+      @apply flex flex-col;
+      width: 220px;
+      height: 100vh;
+      flex: none;
+      padding: 20px 12px;
+      border-bottom: 0;
+      border-right: 1px solid var(--color-line);
+    }
+
+    .sidebar-top {
+      padding: 4px 10px 20px;
+    }
+
+    .sidebar-toggle {
+      display: none;
+    }
+
+    .sidebar-menu,
+    .sidebar.is-open .sidebar-menu {
+      display: flex;
+      flex: 1;
+      padding: 0;
+      border-top: 0;
+    }
+
+    .sidebar-nav {
+      padding-top: 0;
+    }
+  }
+}

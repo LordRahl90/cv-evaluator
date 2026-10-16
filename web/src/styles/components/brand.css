@@ -1,0 +1,39 @@
+/*
+ * brand.css — the "CV Evaluator" logo lockup (BrandMark): a rounded "CV"
+ * mark plus the name, in a light (sidebar) and a dark (auth panel) tone.
+ */
+@layer components {
+  .brand {
+    @apply flex items-center gap-2.5 font-bold;
+    font-family: var(--font-display);
+  }
+
+  .brand-mark {
+    @apply flex items-center justify-center font-bold;
+    border-radius: var(--radius-nav);
+  }
+
+  .brand-light {
+    @apply text-ink;
+    font-size: 17px;
+  }
+
+  .brand-light .brand-mark {
+    @apply bg-accent text-white;
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .brand-dark {
+    @apply text-white;
+    font-size: 18px;
+  }
+
+  .brand-dark .brand-mark {
+    @apply bg-panel-mark text-panel;
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+  }
+}

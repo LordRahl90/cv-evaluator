@@ -1,0 +1,85 @@
+/*
+ * app.css — the signed-in shell (AppShell), the slim top bar with the account
+ * menu, and what every page inside it shares: the main column, the centred
+ * content width and the page header (title, subtitle, actions).
+ */
+@layer components {
+  .app {
+    @apply flex flex-col;
+    min-height: 100vh;
+  }
+
+  .app-body {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+
+  /* Slim bar above the page holding the account menu (wider screens only;
+     on phones the menu sits in the sidebar's top bar). */
+  .topbar {
+    display: none;
+  }
+
+  .main {
+    box-sizing: border-box;
+    flex: 1;
+    min-width: 0;
+    padding: 24px 16px 40px;
+  }
+
+  .page-stack {
+    @apply flex flex-col;
+    max-width: 1040px;
+    margin: 0 auto;
+    gap: 24px;
+  }
+
+  .page-head {
+    @apply flex flex-wrap items-end justify-between;
+    gap: 16px;
+  }
+
+  .page-head-text {
+    @apply flex min-w-0 flex-col;
+    gap: 4px;
+  }
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .page-sub {
+    @apply text-muted;
+    margin: 0;
+  }
+
+  .page-actions {
+    @apply flex flex-wrap;
+    gap: 10px;
+  }
+
+  @media (min-width: 768px) {
+    .app {
+      flex-direction: row;
+    }
+
+    .topbar {
+      @apply flex items-center justify-end bg-canvas;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      min-height: 60px;
+      padding: 0 32px;
+      border-bottom: 1px solid var(--color-line);
+    }
+
+    .main {
+      padding: 32px 40px 48px;
+    }
+
+    .page-title {
+      font-size: 28px;
+    }
+  }
+}

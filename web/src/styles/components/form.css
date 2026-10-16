@@ -1,0 +1,74 @@
+/*
+ * form.css — form fields (TextField): label row, text input, hint and
+ * inline error, plus .field-row for two fields side by side.
+ */
+@layer components {
+  .field {
+    @apply flex flex-col;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .field-label-row {
+    @apply flex items-baseline justify-between gap-3;
+  }
+
+  .field-label {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .field-optional {
+    @apply text-muted;
+    font-weight: 400;
+  }
+
+  .field-aside-link {
+    font-size: 13px;
+  }
+
+  .input {
+    @apply bg-surface text-ink;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+    font: inherit;
+  }
+
+  .input:focus {
+    @apply border-accent;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
+  }
+
+  .field.has-error .input {
+    @apply border-danger;
+  }
+
+  .field.has-error .input:focus {
+    box-shadow: 0 0 0 3px var(--color-danger-soft);
+  }
+
+  .field-hint,
+  .field-error {
+    margin: 0;
+    font-size: 12.5px;
+  }
+
+  .field-hint {
+    @apply text-muted;
+  }
+
+  .field-error {
+    @apply text-danger;
+    font-weight: 500;
+  }
+
+  .field-row {
+    @apply grid gap-3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

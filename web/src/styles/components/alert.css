@@ -1,0 +1,29 @@
+/*
+ * alert.css — inline messages (AlertMessage): .alert-error for failed
+ * requests, .alert-info for neutral notices such as an ended session.
+ */
+@layer components {
+  .alert {
+    @apply flex items-start gap-2.5;
+    padding: 12px 14px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-size: 13.5px;
+  }
+
+  .alert .icon {
+    margin-top: 1px;
+  }
+
+  .alert-body {
+    min-width: 0;
+  }
+
+  .alert-error {
+    @apply bg-danger-soft border-danger-line text-danger;
+  }
+
+  .alert-info {
+    @apply bg-accent-soft text-accent-ink;
+  }
+}

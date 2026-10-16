@@ -1,0 +1,26 @@
+/*
+ * main.css — entry stylesheet, imported once from src/main.ts.
+ * Pulls in Tailwind, the design tokens, base element styles, then one file
+ * per component and per page. Components use the semantic classes defined
+ * in these files; .vue files carry no CSS of their own.
+ */
+@import 'tailwindcss';
+
+@import './tokens.css';
+@import './base.css';
+
+@import './components/icon.css';
+@import './components/brand.css';
+@import './components/button.css';
+@import './components/form.css';
+@import './components/alert.css';
+@import './components/card.css';
+@import './components/badge.css';
+@import './components/skeleton.css';
+@import './components/sidebar.css';
+@import './components/user-menu.css';
+@import './components/empty-state.css';
+
+@import './pages/auth.css';
+@import './pages/app.css';
+@import './pages/dashboard.css';

@@ -1,0 +1,196 @@
+/*
+ * dashboard.css — the overview page: the "Get set up" checklist with its
+ * progress bar, the matches and search activity columns, the Quick match
+ * promo and the error card.
+ */
+@layer components {
+  /* Setup checklist */
+  .setup-head {
+    @apply flex flex-wrap items-center justify-between gap-3;
+    padding: 20px 24px 4px;
+  }
+
+  .setup-progress-wrap {
+    padding: 0 24px 4px;
+  }
+
+  .progress {
+    display: block;
+    width: 100%;
+    height: 6px;
+    margin: 12px 0 8px;
+    border: 0;
+    border-radius: 999px;
+    overflow: hidden;
+    appearance: none;
+    background: var(--color-chip);
+  }
+
+  .progress::-webkit-progress-bar {
+    background: var(--color-chip);
+    border-radius: 999px;
+  }
+
+  .progress::-webkit-progress-value {
+    background: var(--color-accent);
+    border-radius: 999px;
+  }
+
+  .progress::-moz-progress-bar {
+    background: var(--color-accent);
+    border-radius: 999px;
+  }
+
+  .checklist {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .check {
+    @apply flex flex-wrap items-center;
+    gap: 16px;
+    padding: 20px 24px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .check:first-child {
+    border-top: 0;
+  }
+
+  .check-num {
+    @apply flex items-center justify-center text-muted;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border: 1.5px solid var(--color-line-strong);
+    border-radius: 999px;
+    box-sizing: border-box;
+    font-weight: 600;
+  }
+
+  .check-num.is-done {
+    @apply border-accent bg-accent text-white;
+  }
+
+  .check-num .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* When the action wraps under the text on phones, line it up with it. */
+  @media (max-width: 639px) {
+    .check .btn {
+      margin-left: 48px;
+    }
+  }
+
+  .check-body {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+
+  .check-title {
+    font-weight: 600;
+  }
+
+  .check-text {
+    @apply text-muted;
+  }
+
+  /* Matches + search activity */
+  .overview-columns {
+    @apply flex flex-wrap items-start;
+    gap: 16px;
+  }
+
+  .overview-matches {
+    flex: 2 1 480px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .overview-activity {
+    flex: 1 1 280px;
+    min-width: 0;
+  }
+
+  .activity-list {
+    @apply flex flex-col;
+    margin: 0;
+    padding: 0 20px 8px;
+    list-style: none;
+  }
+
+  .activity-item {
+    @apply flex flex-col;
+    gap: 4px;
+    padding: 14px 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .activity-row {
+    @apply flex items-center justify-between;
+    gap: 8px;
+  }
+
+  .activity-row-paused {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .activity-name {
+    min-width: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .activity-detail {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  /* Quick match promo */
+  .promo {
+    @apply flex flex-wrap items-center;
+    gap: 20px;
+    padding: 24px;
+  }
+
+  .promo-icon {
+    @apply flex items-center justify-center bg-amber-soft text-amber-ink;
+    width: 48px;
+    height: 48px;
+    flex: none;
+    border-radius: var(--radius-card);
+  }
+
+  .promo-icon .icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .promo-body {
+    flex: 1 1 260px;
+    min-width: 0;
+  }
+
+  .promo-title {
+    font-weight: 600;
+  }
+
+  .promo-text {
+    @apply text-muted;
+  }
+
+  /* Load error */
+  .error-card {
+    @apply flex flex-col items-start;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .error-card .alert {
+    align-self: stretch;
+  }
+}

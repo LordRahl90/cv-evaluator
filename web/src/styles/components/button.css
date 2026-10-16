@@ -1,0 +1,83 @@
+/*
+ * button.css — buttons and button-styled links: .btn with .btn-primary or
+ * .btn-secondary, the busy state with its .spinner, and .icon-btn for
+ * icon-only buttons.
+ */
+@layer components {
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 font-semibold whitespace-nowrap;
+    box-sizing: border-box;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+    font: inherit;
+    font-weight: 600;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .btn .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .btn-secondary {
+    @apply bg-surface text-ink;
+  }
+
+  .btn-secondary:hover {
+    @apply bg-surface-hover text-ink;
+  }
+
+  .btn-primary {
+    @apply border-accent bg-accent text-white;
+  }
+
+  .btn-primary:hover {
+    @apply border-accent-hover bg-accent-hover text-white;
+  }
+
+  .btn:disabled {
+    cursor: default;
+  }
+
+  .btn.is-busy {
+    opacity: 0.85;
+  }
+
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: spin 700ms linear infinite;
+  }
+
+  .icon-btn {
+    @apply inline-flex cursor-pointer items-center justify-center bg-transparent text-muted;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 0;
+    border-radius: var(--radius-nav);
+  }
+
+  .icon-btn:hover {
+    @apply bg-nav-hover text-ink;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spinner {
+      animation-duration: 2s;
+    }
+  }
+}

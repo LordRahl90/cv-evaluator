@@ -1,0 +1,208 @@
+/*
+ * auth.css — sign in, create account and the guest placeholder pages
+ * (AuthLayout): the dark green pitch panel beside the form. Two columns from
+ * 900px; on narrower screens the panel stacks above the form and drops its
+ * supporting points so the form stays near the top.
+ */
+@layer components {
+  .auth {
+    @apply grid;
+    min-height: 100vh;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-panel {
+    @apply flex flex-col bg-panel text-panel-ink;
+    box-sizing: border-box;
+    gap: 24px;
+    padding: 24px 20px 28px;
+  }
+
+  .auth-panel-body {
+    @apply flex flex-col;
+    gap: 40px;
+  }
+
+  .auth-pitch {
+    @apply flex flex-col;
+    gap: 16px;
+    max-width: 460px;
+  }
+
+  .auth-title {
+    @apply text-white;
+    font-size: 28px;
+    line-height: 1.12;
+    font-weight: 600;
+  }
+
+  .auth-title-sm {
+    font-size: 26px;
+    line-height: 1.15;
+  }
+
+  .auth-lede {
+    @apply text-panel-muted;
+    margin: 0;
+    font-size: 15px;
+  }
+
+  .auth-points,
+  .auth-step-list {
+    @apply flex flex-col;
+    gap: 20px;
+    max-width: 460px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .auth-points {
+    display: none;
+  }
+
+  .auth-point,
+  .auth-step {
+    @apply flex items-start;
+    gap: 14px;
+  }
+
+  .auth-point-icon {
+    @apply flex items-center justify-center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border-radius: var(--radius-control);
+    background: rgb(255 255 255 / 0.12);
+  }
+
+  .auth-point-title {
+    @apply text-white;
+    font-weight: 600;
+  }
+
+  .auth-point-text {
+    @apply text-panel-muted;
+  }
+
+  .auth-steps {
+    @apply flex flex-col;
+    gap: 28px;
+    max-width: 440px;
+  }
+
+  .auth-step-list {
+    gap: 28px;
+  }
+
+  .auth-step-n {
+    @apply flex items-center justify-center text-panel-step;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border: 1px solid var(--color-panel-mark);
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .auth-main {
+    @apply flex items-center justify-center;
+    box-sizing: border-box;
+    padding: 32px 16px 48px;
+  }
+
+  .auth-form {
+    @apply flex flex-col;
+    width: 100%;
+    max-width: 380px;
+    gap: 20px;
+  }
+
+  .auth-form-wide {
+    max-width: 400px;
+    gap: 18px;
+  }
+
+  .auth-form .btn {
+    min-height: 44px;
+    padding: 0 18px;
+  }
+
+  .auth-form-title {
+    font-size: 28px;
+    font-weight: 600;
+  }
+
+  .auth-form-sub {
+    @apply text-muted;
+    margin: 6px 0 0;
+  }
+
+  .auth-switch {
+    @apply text-center text-muted;
+    margin: 0;
+  }
+
+  .auth-guest {
+    @apply text-center text-muted;
+    padding-top: 18px;
+    border-top: 1px solid var(--color-line);
+  }
+
+  /* Phones: hide the long step list on sign-up too; the headline stays. */
+  @media (max-width: 639px) {
+    .auth-step-list {
+      display: none;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .auth-panel {
+      padding: 40px;
+    }
+
+    .auth-title {
+      font-size: 34px;
+    }
+
+    .auth-points {
+      display: flex;
+    }
+  }
+
+  @media (min-width: 900px) {
+    .auth {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .auth-panel {
+      gap: 40px;
+      padding: 56px;
+    }
+
+    /* Centre the pitch vertically, as in the mockup. */
+    .auth-panel-body {
+      flex: 1;
+      justify-content: center;
+    }
+
+    .auth-title {
+      font-size: 40px;
+      line-height: 1.1;
+    }
+
+    .auth-title-sm {
+      font-size: 34px;
+      line-height: 1.15;
+    }
+
+    .auth-lede {
+      font-size: 16px;
+    }
+
+    .auth-main {
+      padding: 48px 24px;
+    }
+  }
+}

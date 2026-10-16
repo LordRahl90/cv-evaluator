@@ -1,0 +1,39 @@
+/*
+ * base.css — element defaults: page background, body type, headings, links,
+ * and the focus ring. (.sr-only comes from Tailwind's utilities.)
+ */
+@layer base {
+  html,
+  body {
+    @apply bg-canvas text-ink;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    margin: 0;
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  a {
+    @apply text-accent no-underline;
+  }
+
+  a:hover {
+    @apply text-accent-ink;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
