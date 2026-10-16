@@ -16,7 +16,10 @@
 package apierror
 
 import (
+	"math"
 	"net/http"
+	"strconv"
+	"time"
 
 	"cv-evaluator/internal/telemetry"
 
@@ -32,6 +35,8 @@ const (
 	TypeAuthentication = "authentication_error"
 	// TypeAPI is an unexpected failure on our side.
 	TypeAPI = "api_error"
+	// TypeRateLimit means the caller sent too many requests too quickly.
+	TypeRateLimit = "rate_limit_error"
 )
 
 // Error codes shared across handlers. Handlers may define additional codes.
@@ -48,6 +53,7 @@ const (
 	CodePhoneAlreadyUsed   = "phone_already_used"
 	CodeInternal           = "internal_error"
 	CodeTimeout            = "timeout"
+	CodeRateLimited        = "rate_limited"
 )
 
 // Error is the body of the "error" object.
@@ -142,4 +148,12 @@ func recordErrors(c *gin.Context, errs []error) {
 	for _, err := range errs {
 		telemetry.RecordError(c.Request.Context(), err)
 	}
+}
+
+// TooManyRequests writes a 429 rate_limit_error with a Retry-After header
+// (whole seconds, rounded up, at least 1).
+func TooManyRequests(c *gin.Context, message string, retryAfter time.Duration) {
+	seconds := max(1, int(math.Ceil(retryAfter.Seconds())))
+	c.Header("Retry-After", strconv.Itoa(seconds))
+	Write(c, http.StatusTooManyRequests, Error{Type: TypeRateLimit, Code: CodeRateLimited, Message: message})
 }

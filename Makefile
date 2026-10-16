@@ -30,4 +30,7 @@ seed-cv:
 	@go run ./cmd/seed $(ARGS)
 
 eval-prompt:
-	@go test -tags eval -run TestPromptEval -count=1 -v ./internal/services/matcher/
+	@go test -tags eval -run 'TestPromptEval|TestCoverLetterEval' -count=1 -v ./internal/services/matcher/ ./internal/services/coverletter/
+
+eval-cover-letter:
+	@go test -tags eval -run TestCoverLetterEval -count=1 -v ./internal/services/coverletter/

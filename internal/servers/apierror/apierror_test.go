@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,23 @@ func render(t *testing.T, fn func(c *gin.Context)) (*httptest.ResponseRecorder, 
 	var body map[string]map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	return w, body
+}
+
+func TestTooManyRequests(t *testing.T) {
+	w, body := render(t, func(c *gin.Context) {
+		TooManyRequests(c, "Slow down.", 1500*time.Millisecond)
+	})
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Equal(t, "2", w.Header().Get("Retry-After"), "rounded up to whole seconds")
+	assert.Equal(t, map[string]any{
+		"type":    TypeRateLimit,
+		"code":    CodeRateLimited,
+		"message": "Slow down.",
+	}, body["error"])
+
+	w, _ = render(t, func(c *gin.Context) { TooManyRequests(c, "Slow down.", 0) })
+	assert.Equal(t, "1", w.Header().Get("Retry-After"))
 }
 
 func TestBadRequest(t *testing.T) {

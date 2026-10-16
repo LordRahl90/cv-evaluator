@@ -56,6 +56,11 @@ const ICONS = {
     ['circle', { cx: 12, cy: 19, r: 1 }],
   ],
   pencil: [['path', { d: 'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4' }]],
+  pen: [['path', { d: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z' }]],
+  mail: [
+    ['path', { d: 'M4 4h16v16H4z' }],
+    ['path', { d: 'M4 7l8 6 8-6' }],
+  ],
   trash: [['path', { d: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3' }]],
   chevronLeft: [['path', { d: 'm15 6-6 6 6 6' }]],
   download: [['path', { d: 'M12 4v12M7 11l5 5 5-5M4 20h16' }]],

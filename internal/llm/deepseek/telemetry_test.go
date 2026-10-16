@@ -45,7 +45,7 @@ func TestNewClient_RecordsChatCompletions(t *testing.T) {
 	assert.Equal(t, "deepseek chat_completion", spans[0].Name())
 
 	// The HTTP call nests under the client's own spans.
-	call := p.Span(t, "deepseek.Service.callLLM")
+	call := p.Span(t, "deepseek.Service.complete")
 	telemetrytest.RequireChild(t, call, spans[0])
 	telemetrytest.RequireChild(t, p.Span(t, "deepseek.Service.CleanupCV"), call)
 	assert.Equal(t, "cv_cleanup", telemetrytest.KeyValues(call.Attributes())["llm.task"])

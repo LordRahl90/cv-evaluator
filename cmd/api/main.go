@@ -23,6 +23,7 @@ import (
 	accounthttp "cv-evaluator/internal/servers/account"
 	apikeyhttp "cv-evaluator/internal/servers/apikeys"
 	authhttp "cv-evaluator/internal/servers/auth"
+	coverletterhttp "cv-evaluator/internal/servers/coverletter"
 	"cv-evaluator/internal/servers/cv"
 	jobsearchhttp "cv-evaluator/internal/servers/jobsearches"
 	"cv-evaluator/internal/servers/match"
@@ -31,6 +32,7 @@ import (
 	resulthttp "cv-evaluator/internal/servers/results"
 	accountsvc "cv-evaluator/internal/services/account"
 	apikeysvc "cv-evaluator/internal/services/apikeys"
+	coverlettersvc "cv-evaluator/internal/services/coverletter"
 	jobsearchsvc "cv-evaluator/internal/services/jobsearches"
 	"cv-evaluator/internal/services/matcher"
 	portalsvc "cv-evaluator/internal/services/portalsuggestions"
@@ -115,6 +117,9 @@ func run() error {
 	apikeyhttp.New(router, apiKeyService, jwtSecret, authOpts...)
 	cv.New(router, usersService, jwtSecret, authOpts...)
 	match.New(router, matchService, jwtSecret, authOpts...)
+	// Cover letters are written from the newest CV and signed with the
+	// profile's name; the per-user rate limit is in memory (per process).
+	coverletterhttp.New(router, coverlettersvc.New(matchService, usersService, deepseekLLM), jwtSecret, authOpts...)
 
 	// Job searches run against every supported portal; users can suggest more.
 	// Pass providers.WithTransport(rt) to Default to instrument scraper requests.
