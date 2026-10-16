@@ -144,6 +144,15 @@ function handleSignOut() {
         </div>
         <div v-else class="user-menu-header-email">Loading your profile…</div>
       </div>
+      <RouterLink
+        to="/settings"
+        role="menuitem"
+        class="user-menu-item"
+        tabindex="-1"
+        @click="closeMenu({ restoreFocus: false })"
+      >
+        <AppIcon name="sliders" />Settings
+      </RouterLink>
       <button
         type="button"
         role="menuitem"
