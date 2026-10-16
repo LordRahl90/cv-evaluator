@@ -7,6 +7,7 @@ import (
 
 	"cv-evaluator/internal/servers/middleware"
 	"cv-evaluator/internal/services/matcher"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
@@ -134,6 +135,7 @@ func handleServiceError(c *gin.Context, err error) {
 	default:
 		statusCode = http.StatusInternalServerError
 	}
+	telemetry.RecordError(c.Request.Context(), err) // the 5xx path handles the error
 	c.JSON(statusCode, errorResponse(err.Error()))
 }
 

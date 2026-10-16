@@ -10,6 +10,7 @@ import (
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/servers/middleware"
 	"cv-evaluator/internal/services/users"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
@@ -181,8 +182,10 @@ func handleServiceError(c *gin.Context, err error) {
 	case errors.Is(err, users.ErrCVNotFound):
 		c.JSON(http.StatusNotFound, errorResponse(err.Error()))
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		telemetry.RecordError(c.Request.Context(), err)
 		c.JSON(http.StatusGatewayTimeout, errorResponse(err.Error()))
 	default:
+		telemetry.RecordError(c.Request.Context(), err)
 		c.JSON(http.StatusInternalServerError, errorResponse(err.Error()))
 	}
 }

@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -20,7 +21,7 @@ func TestMain(m *testing.M) {
 func TestService_Extract(t *testing.T) {
 	filename := "./testdata/dummy-resume.pdf"
 
-	res, err := Extract(filename)
+	res, err := Extract(context.Background(), filename)
 	require.NoError(t, err)
 
 	fmt.Printf("\n\nRes is: %s\n\n", res)
@@ -35,7 +36,7 @@ func TestService_ExtractFromFIle(t *testing.T) {
 		require.NoError(t, file.Close())
 	}()
 
-	res, err := ExtractFromFile(file)
+	res, err := ExtractFromFile(context.Background(), file)
 	require.NoError(t, err)
 
 	fmt.Printf("\n\nRes is: %s\n\n", res)

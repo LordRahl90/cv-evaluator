@@ -16,6 +16,7 @@ import (
 
 	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/oklog/ulid/v2"
@@ -75,7 +76,9 @@ func NewWithAuth(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMServi
 	}
 }
 
-func (s *Service) Create(ctx context.Context, req SignupRequest) (*User, error) {
+func (s *Service) Create(ctx context.Context, req SignupRequest) (_ *User, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.Create")
+	defer end(&err)
 	newUser, err := s.createUser(ctx, req)
 	if err != nil {
 		return nil, err
@@ -90,12 +93,15 @@ func (s *Service) Create(ctx context.Context, req SignupRequest) (*User, error) 
 	}, nil
 }
 
-func (s *Service) Signup(ctx context.Context, req SignupRequest) (*AuthResponse, error) {
+func (s *Service) Signup(ctx context.Context, req SignupRequest) (_ *AuthResponse, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.Signup")
+	defer end(&err)
 	newUser, err := s.createUser(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
+	telemetry.SetAttributes(ctx, telemetry.ID(telemetry.AttrUserID, newUser.ID))
 	token, err := s.generateToken(newUser.ID)
 	if err != nil {
 		return nil, err
@@ -104,14 +110,16 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (*AuthResponse,
 	return &AuthResponse{Token: token, User: s.profileFromModel(newUser)}, nil
 }
 
-func (s *Service) Signin(ctx context.Context, req SigninRequest) (*AuthResponse, error) {
+func (s *Service) Signin(ctx context.Context, req SigninRequest) (_ *AuthResponse, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.Signin")
+	defer end(&err)
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	if email == "" || req.Password == "" {
 		return nil, ErrInvalidCredentials
 	}
 
 	var existing models.User
-	err := s.db.WithContext(ctx).Where("email = ?", email).First(&existing).Error
+	err = s.db.WithContext(ctx).Where("email = ?", email).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrInvalidCredentials
 	}
@@ -123,6 +131,7 @@ func (s *Service) Signin(ctx context.Context, req SigninRequest) (*AuthResponse,
 		return nil, ErrInvalidCredentials
 	}
 
+	telemetry.SetAttributes(ctx, telemetry.ID(telemetry.AttrUserID, existing.ID))
 	token, err := s.generateToken(existing.ID)
 	if err != nil {
 		return nil, err
@@ -131,7 +140,9 @@ func (s *Service) Signin(ctx context.Context, req SigninRequest) (*AuthResponse,
 	return &AuthResponse{Token: token, User: s.profileFromModel(&existing)}, nil
 }
 
-func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, error) {
+func (s *Service) Profile(ctx context.Context, req ProfileRequest) (_ *Profile, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.Profile")
+	defer end(&err)
 	userID, err := s.parseTokenUserID(req.Token)
 	if err != nil {
 		return nil, err
@@ -146,9 +157,11 @@ func (s *Service) Profile(ctx context.Context, req ProfileRequest) (*Profile, er
 
 // GetProfile returns the profile of an already-authenticated user, e.g. one
 // resolved by the auth middleware from a JWT or an API key.
-func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (*Profile, error) {
+func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (_ *Profile, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.GetProfile", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var existing models.User
-	err := s.db.WithContext(ctx).Where("id = ?", userID).First(&existing).Error
+	err = s.db.WithContext(ctx).Where("id = ?", userID).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrUserNotFound
 	}
@@ -160,7 +173,9 @@ func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (*Profile, e
 	return &profile, nil
 }
 
-func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) error {
+func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) (err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.UploadCV", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	if cv == nil {
 		return errors.New("cv file is required")
 	}
@@ -193,7 +208,9 @@ func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.
 	return s.ProcessCV(ctx, userID, tmp)
 }
 
-func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.CV, error) {
+func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) (_ []models.CV, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.ListUserCVs", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var cvs []models.CV
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).
@@ -204,9 +221,11 @@ func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.C
 	return cvs, nil
 }
 
-func (s *Service) GetCV(ctx context.Context, userID, cvID ulid.ULID) (*models.CV, error) {
+func (s *Service) GetCV(ctx context.Context, userID, cvID ulid.ULID) (_ *models.CV, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.GetCV", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrCVID, cvID))
+	defer end(&err)
 	var cv models.CV
-	err := s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", cvID, userID).
 		First(&cv).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -218,7 +237,9 @@ func (s *Service) GetCV(ctx context.Context, userID, cvID ulid.ULID) (*models.CV
 	return &cv, nil
 }
 
-func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
+func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) (err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.DeleteCV", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrCVID, cvID))
+	defer end(&err)
 	result := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", cvID, userID).
 		Delete(&models.CV{})
@@ -231,8 +252,10 @@ func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
 	return nil
 }
 
-func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) error {
-	cvContent, err := extractor.ExtractFromFile(cv)
+func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) (err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.ProcessCV", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
+	cvContent, err := extractor.ExtractFromFile(ctx, cv)
 	if err != nil {
 		return err
 	}
@@ -255,6 +278,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 	if err := s.db.WithContext(ctx).Create(cvModel).Error; err != nil {
 		return err
 	}
+	telemetry.SetAttributes(ctx, telemetry.ID(telemetry.AttrCVID, cvModel.ID))
 
 	// we clean it up to generate different sections
 	sections, err := s.chatLLM.CleanupCV(ctx, cvContent)
@@ -299,6 +323,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 		slog.DebugContext(ctx, "Section embedding created", "heading", heading, "embedding", sectionEmbedding)
 	}
 
+	telemetry.SetAttributes(ctx, telemetry.Count("cv.sections", len(sectionEmbeddings)))
 	return s.db.WithContext(ctx).Create(&sectionEmbeddings).Error
 }
 

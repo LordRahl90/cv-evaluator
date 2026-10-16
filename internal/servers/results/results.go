@@ -422,10 +422,10 @@ func handleServiceError(c *gin.Context, err error) {
 	case errors.Is(err, resultsvc.ErrEvaluationInProgress):
 		apierror.Conflict(c, CodeEvaluationInProgress, "The result is already queued for or undergoing evaluation.", "")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		apierror.GatewayTimeout(c)
+		apierror.GatewayTimeout(c, err)
 	default:
 		slog.ErrorContext(c.Request.Context(), "results handler", "error", err)
-		apierror.InternalServerError(c)
+		apierror.InternalServerError(c, err)
 	}
 }
 

@@ -33,6 +33,9 @@ type Database struct {
 	Name     string
 	User     string
 	Password string
+	// TraceStatements is DB_TRACE_STATEMENTS: when true, database spans carry
+	// the SQL text (with placeholders, never values) as db.statement.
+	TraceStatements bool
 }
 
 // DSN returns the Postgres connection string for these settings.
@@ -106,6 +109,8 @@ func Load(opts ...Option) (*Config, error) {
 			Name:     env("DB_NAME"),
 			User:     env("DB_USER"),
 			Password: env("DB_PASSWORD"),
+
+			TraceStatements: strings.EqualFold(env("DB_TRACE_STATEMENTS"), "true"),
 		},
 		OllamaBaseURL:   strings.TrimRight(env("OLLAMA_BASE_URL"), "/"),
 		DeepSeekAPIKey:  env("DEEPSEEK_API_KEY"),

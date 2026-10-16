@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"cv-evaluator/internal/servers/apierror"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/oklog/ulid/v2"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -137,6 +138,7 @@ func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 
 		c.Set(UserIDKey, userID)
 		c.Set(AuthMethodKey, AuthMethodJWT)
+		setAuthAttributes(c, AuthMethodJWT, userID)
 		c.Next()
 	}
 }
@@ -153,7 +155,7 @@ func validateSession(c *gin.Context, v SessionValidator, userID ulid.ULID, issue
 		return false
 	}
 	slog.ErrorContext(c.Request.Context(), "validate session", "error", err)
-	apierror.Abort(c, http.StatusInternalServerError, apierror.Internal())
+	apierror.AbortInternal(c, err)
 	return false
 }
 
@@ -172,7 +174,7 @@ func authenticateAPIKey(c *gin.Context, verifier APIKeyVerifier, rawKey string) 
 			return
 		}
 		slog.ErrorContext(c.Request.Context(), "verify api key", "error", err)
-		apierror.Abort(c, http.StatusInternalServerError, apierror.Internal())
+		apierror.AbortInternal(c, err)
 		return
 	}
 	if userID == (ulid.ULID{}) {
@@ -182,7 +184,16 @@ func authenticateAPIKey(c *gin.Context, verifier APIKeyVerifier, rawKey string) 
 
 	c.Set(UserIDKey, userID)
 	c.Set(AuthMethodKey, AuthMethodAPIKey)
+	setAuthAttributes(c, AuthMethodAPIKey, userID)
 	c.Next()
+}
+
+// setAuthAttributes labels the request span with how the request
+// authenticated and as whom (ids only, never the credential).
+func setAuthAttributes(c *gin.Context, method string, userID ulid.ULID) {
+	telemetry.SetAttributes(c.Request.Context(),
+		attribute.String(telemetry.AttrAuthMethod, method),
+		telemetry.ID(telemetry.AttrUserID, userID))
 }
 
 // UserID returns the authenticated user ULID stored by Authenticate.

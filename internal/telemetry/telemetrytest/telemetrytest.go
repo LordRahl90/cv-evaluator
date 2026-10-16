@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Providers gives access to what was recorded while installed.
@@ -83,4 +84,57 @@ func KeyValues(kvs []attribute.KeyValue) map[string]string {
 		out[string(kv.Key)] = kv.Value.String()
 	}
 	return out
+}
+
+// SpansOfKind returns the ended spans of the given kind, in end order.
+func (p *Providers) SpansOfKind(kind trace.SpanKind) []sdktrace.ReadOnlySpan {
+	var out []sdktrace.ReadOnlySpan
+	for _, s := range p.Spans() {
+		if s.SpanKind() == kind {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Span returns the first ended span named name, failing the test when there
+// is none.
+func (p *Providers) Span(t testing.TB, name string) sdktrace.ReadOnlySpan {
+	t.Helper()
+	for _, s := range p.Spans() {
+		if s.Name() == name {
+			return s
+		}
+	}
+	require.FailNow(t, "span not recorded", "%s; recorded: %v", name, p.Names())
+	return nil
+}
+
+// Names returns the names of the ended spans, in end order.
+func (p *Providers) Names() []string {
+	spans := p.Spans()
+	out := make([]string, 0, len(spans))
+	for _, s := range spans {
+		out = append(out, s.Name())
+	}
+	return out
+}
+
+// RequireChild fails the test unless child's parent is parent.
+func RequireChild(t testing.TB, parent, child sdktrace.ReadOnlySpan) {
+	t.Helper()
+	require.Equal(t, parent.SpanContext().SpanID(), child.Parent().SpanID(),
+		"%q must be a child of %q", child.Name(), parent.Name())
+	require.Equal(t, parent.SpanContext().TraceID(), child.SpanContext().TraceID())
+}
+
+// Exceptions counts the exception events on span.
+func Exceptions(span sdktrace.ReadOnlySpan) int {
+	n := 0
+	for _, e := range span.Events() {
+		if e.Name == "exception" {
+			n++
+		}
+	}
+	return n
 }

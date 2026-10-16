@@ -238,10 +238,10 @@ func handleServiceError(c *gin.Context, err error) {
 	case errors.Is(err, users.ErrPhoneAlreadyUsed):
 		apierror.Conflict(c, apierror.CodePhoneAlreadyUsed, "An account with this phone number already exists.", "phone")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		apierror.GatewayTimeout(c)
+		apierror.GatewayTimeout(c, err)
 	default:
 		slog.ErrorContext(c.Request.Context(), "auth handler", "error", err)
-		apierror.InternalServerError(c)
+		apierror.InternalServerError(c, err)
 	}
 }
 

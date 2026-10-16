@@ -26,7 +26,9 @@ func New(client *http.Client, baseURL string) *Service {
 	}
 }
 
-func (s *Service) CleanupCV(ctx context.Context, content string) (string, error) {
+func (s *Service) CleanupCV(ctx context.Context, content string) (_ string, err error) {
+	ctx, end := telemetry.StartOrigin(ctx, "ollama.Service.CleanupCV")
+	defer end(&err)
 	promptName := "cv-cleanup.txt"
 	b, err := s.loadPrompt(promptName)
 	if err != nil {
@@ -54,7 +56,9 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 	return response.Response, nil
 }
 
-func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float32, error) {
+func (s *Service) CreateEmbedding(ctx context.Context, content string) (_ []float32, err error) {
+	ctx, end := telemetry.StartOrigin(ctx, "ollama.Service.CreateEmbedding")
+	defer end(&err)
 	slog.DebugContext(ctx, "Creating embedding with Ollama", "content", content)
 	req := Request{
 		Model:  "nomic-embed-text",

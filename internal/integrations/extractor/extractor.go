@@ -8,9 +8,15 @@ import (
 	"os"
 
 	"github.com/ledongthuc/pdf"
+
+	"cv-evaluator/internal/telemetry"
 )
 
-func Extract(fileName string) (string, error) {
+// Extract returns the plain text of the PDF at fileName.
+func Extract(ctx context.Context, fileName string) (_ string, err error) {
+	_, end := telemetry.StartOrigin(ctx, "extractor.Extract")
+	defer end(&err)
+
 	f, r, err := pdf.Open(fileName)
 	if err != nil {
 		return "", err
@@ -30,7 +36,11 @@ func Extract(fileName string) (string, error) {
 	return buf.String(), nil
 }
 
-func ExtractFromFile(file *os.File) (string, error) {
+// ExtractFromFile returns the plain text of the PDF in file.
+func ExtractFromFile(ctx context.Context, file *os.File) (_ string, err error) {
+	_, end := telemetry.StartOrigin(ctx, "extractor.ExtractFromFile")
+	defer end(&err)
+
 	fStat, err := file.Stat()
 	if err != nil {
 		return "", err

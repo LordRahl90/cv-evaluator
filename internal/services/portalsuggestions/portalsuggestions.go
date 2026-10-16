@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/oklog/ulid/v2"
@@ -74,7 +75,9 @@ func New(db *gorm.DB, supportedWebsites ...string) *Service {
 
 // Create records a suggestion from userID. If the caller already suggested
 // the same URL, it returns the existing suggestion and ErrAlreadySuggested.
-func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (*models.PortalSuggestion, error) {
+func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (_ *models.PortalSuggestion, err error) {
+	ctx, end := telemetry.Start(ctx, "portalsuggestions.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	rec, err := s.build(userID, p)
 	if err != nil {
 		return nil, err
@@ -102,7 +105,9 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 }
 
 // List returns the caller's suggestions, newest first.
-func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]models.PortalSuggestion, error) {
+func (s *Service) List(ctx context.Context, userID ulid.ULID) (_ []models.PortalSuggestion, err error) {
+	ctx, end := telemetry.Start(ctx, "portalsuggestions.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var recs []models.PortalSuggestion
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).

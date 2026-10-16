@@ -11,6 +11,7 @@ import (
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/llm/prompts"
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -53,7 +54,9 @@ func New(db *gorm.DB, jobMatchLLM JobMatchLLMService) *Service {
 // MatchByJobID matches the user's CV sections against a stored job, looked
 // up by the provider's job id. Jobs are global, so the lookup is not scoped
 // to the user; if several providers share the id, the oldest job wins.
-func (s *Service) MatchByJobID(ctx context.Context, userID ulid.ULID, jobID string) (*Response, error) {
+func (s *Service) MatchByJobID(ctx context.Context, userID ulid.ULID, jobID string) (_ *Response, err error) {
+	ctx, end := telemetry.Start(ctx, "matcher.Service.MatchByJobID", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	slog.DebugContext(ctx, "matching user CV with job description", "user_id", userID, "job_id", jobID)
 
 	var job models.Job
@@ -72,12 +75,16 @@ func (s *Service) MatchByJobID(ctx context.Context, userID ulid.ULID, jobID stri
 // embedding when there is one, so an embedded job is never embedded again.
 // It returns the decoded response and the raw LLM output (also on a decode
 // failure, so the caller can keep it for debugging).
-func (s *Service) MatchJob(ctx context.Context, cvID ulid.ULID, job *models.Job) (*Response, string, error) {
+func (s *Service) MatchJob(ctx context.Context, cvID ulid.ULID, job *models.Job) (_ *Response, _ string, err error) {
+	ctx, end := telemetry.Start(ctx, "matcher.Service.MatchJob", telemetry.ID(telemetry.AttrCVID, cvID), telemetry.ID(telemetry.AttrJobID, job.ID))
+	defer end(&err)
 	slog.DebugContext(ctx, "matching CV with stored job", "cv_id", cvID, "job_id", job.ID)
 	return s.match(ctx, sectionScope{cvID: cvID}, job)
 }
 
-func (s *Service) MatchByJobDescription(ctx context.Context, userID ulid.ULID, jobDescription string) (*Response, error) {
+func (s *Service) MatchByJobDescription(ctx context.Context, userID ulid.ULID, jobDescription string) (_ *Response, err error) {
+	ctx, end := telemetry.Start(ctx, "matcher.Service.MatchByJobDescription", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	slog.DebugContext(ctx, "matching user CV with job description", "user_id", userID)
 
 	resp, _, err := s.match(ctx, sectionScope{userID: userID}, &models.Job{Detail: jobDescription})
@@ -106,7 +113,10 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 // The full CV goes to the LLM: a CV has only a handful of sections, so
 // retrieving the closest ones barely filtered anything and could drop
 // education or the title.
-func (s *Service) evaluate(ctx context.Context, cvText string, job *models.Job) (*Response, string, error) {
+func (s *Service) evaluate(ctx context.Context, cvText string, job *models.Job) (_ *Response, _ string, err error) {
+	// The LLM call and decoding its answer are where match errors originate.
+	ctx, end := telemetry.StartOrigin(ctx, "matcher.Service.evaluate")
+	defer end(&err)
 	matchInput := &entities.MatchInput{
 		JobDescription: prompts.StripTags(job.Detail),
 		JobLocation:    prompts.StripTags(job.Location),
@@ -123,12 +133,15 @@ func (s *Service) evaluate(ctx context.Context, cvText string, job *models.Job) 
 	if err != nil {
 		return nil, raw, err
 	}
+	telemetry.SetAttributes(ctx, telemetry.Count("criteria.count", len(response.Breakdown)))
 	return response, raw, nil
 }
 
 // cvText returns the CV's full extracted text: the given CV's for a CV
 // scope, otherwise the user's newest. It returns ErrNoCV when there is none.
-func (s *Service) cvText(ctx context.Context, scope sectionScope) (string, error) {
+func (s *Service) cvText(ctx context.Context, scope sectionScope) (_ string, err error) {
+	ctx, end := telemetry.Start(ctx, "matcher.Service.cvText")
+	defer end(&err)
 	query := s.db.WithContext(ctx).Model(&models.CV{})
 	if scope.cvID != (ulid.ULID{}) {
 		query = query.Where("id = ?", scope.cvID)

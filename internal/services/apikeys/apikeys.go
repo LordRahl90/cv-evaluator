@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -72,7 +73,9 @@ func New(db *gorm.DB) *Service {
 
 // Create issues a new key for userID. The returned Secret is not stored and
 // cannot be retrieved again.
-func (s *Service) Create(ctx context.Context, userID ulid.ULID, name string) (*CreatedKey, error) {
+func (s *Service) Create(ctx context.Context, userID ulid.ULID, name string) (_ *CreatedKey, err error) {
+	ctx, end := telemetry.Start(ctx, "apikeys.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, ErrNameRequired
@@ -100,7 +103,9 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, name string) (*C
 }
 
 // List returns the caller's active keys, newest first.
-func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]Key, error) {
+func (s *Service) List(ctx context.Context, userID ulid.ULID) (_ []Key, err error) {
+	ctx, end := telemetry.Start(ctx, "apikeys.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var records []models.APIKey
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).
@@ -118,7 +123,9 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]Key, error) {
 
 // Delete revokes one of the caller's keys. Keys owned by other users are
 // reported as ErrNotFound so their existence is not disclosed.
-func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) error {
+func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) (err error) {
+	ctx, end := telemetry.Start(ctx, "apikeys.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrAPIKeyID, keyID))
+	defer end(&err)
 	result := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", keyID, userID).
 		Delete(&models.APIKey{})
@@ -134,13 +141,15 @@ func (s *Service) Delete(ctx context.Context, userID, keyID ulid.ULID) error {
 // Verify resolves a raw key to its owner. It returns ErrInvalidKey for
 // unknown, malformed or revoked keys, and for keys whose owner was deleted.
 // On success it records last_used_at (at most once per minute per key).
-func (s *Service) Verify(ctx context.Context, rawKey string) (ulid.ULID, error) {
+func (s *Service) Verify(ctx context.Context, rawKey string) (_ ulid.ULID, err error) {
+	ctx, end := telemetry.Start(ctx, "apikeys.Service.Verify")
+	defer end(&err)
 	if !strings.HasPrefix(rawKey, KeyPrefix) || len(rawKey) != len(KeyPrefix)+secretLength {
 		return ulid.ULID{}, ErrInvalidKey
 	}
 
 	var record models.APIKey
-	err := s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).
 		Select("api_keys.*").
 		Joins("JOIN users ON users.id = api_keys.user_id AND users.deleted_at IS NULL").
 		Where("api_keys.key_hash = ?", hashKey(rawKey)).
@@ -152,6 +161,7 @@ func (s *Service) Verify(ctx context.Context, rawKey string) (ulid.ULID, error) 
 		return ulid.ULID{}, fmt.Errorf("verify api key: %w", err)
 	}
 
+	telemetry.SetAttributes(ctx, telemetry.ID(telemetry.AttrAPIKeyID, record.ID), telemetry.ID(telemetry.AttrUserID, record.UserID))
 	now := s.now()
 	if err := s.db.WithContext(ctx).
 		Model(&models.APIKey{}).

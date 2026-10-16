@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/gocolly/colly"
 )
@@ -116,7 +117,9 @@ func (s *Service) transport() http.RoundTripper {
 }
 
 // SearchJobs scrapes up to MaxPages result pages starting at SearchLinkPage.
-func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
+func (s *Service) SearchJobs(ctx context.Context) (_ []entities.JobPost, err error) {
+	ctx, end := telemetry.StartOrigin(ctx, "jobindex.Service.SearchJobs")
+	defer end(&err)
 	startURL := strings.TrimSpace(s.SearchLinkPage)
 	if startURL == "" {
 		return nil, ErrSearchURLRequired
@@ -144,7 +147,7 @@ func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
-	c.WithTransport(s.transport())
+	c.WithTransport(telemetry.WithParentSpan(ctx, s.transport()))
 
 	seenPages := map[string]struct{}{}
 	seenJobs := map[string]struct{}{}
@@ -309,10 +312,13 @@ func (s *Service) SearchJobs(ctx context.Context) ([]entities.JobPost, error) {
 		return nil, err
 	}
 
+	telemetry.SetAttributes(ctx, telemetry.Count("postings", len(jobPosts)))
 	return jobPosts, nil
 }
 
-func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
+func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (_ *entities.JobDetails, err error) {
+	ctx, end := telemetry.StartOrigin(ctx, "jobindex.Service.GetJobDetails")
+	defer end(&err)
 	if job == nil {
 		return nil, errors.New("job is required")
 	}
@@ -339,7 +345,7 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 		colly.AllowedDomains(allowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
 	)
-	c.WithTransport(s.transport())
+	c.WithTransport(telemetry.WithParentSpan(ctx, s.transport()))
 
 	details := &entities.JobDetails{
 		ID:       strings.TrimSpace(job.ID),

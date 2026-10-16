@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -84,7 +85,9 @@ func New(db *gorm.DB) *Service {
 
 // Create saves a new search for userID. An enabled search is due
 // immediately, so its first run happens on the scheduler's next tick.
-func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (*models.JobSearch, error) {
+func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) (_ *models.JobSearch, err error) {
+	ctx, end := telemetry.Start(ctx, "jobsearches.Service.Create", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	rec := &models.JobSearch{
 		UserID:    userID,
 		Name:      strings.TrimSpace(p.Name),
@@ -111,7 +114,9 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 }
 
 // List returns the caller's searches, newest first.
-func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]models.JobSearch, error) {
+func (s *Service) List(ctx context.Context, userID ulid.ULID) (_ []models.JobSearch, err error) {
+	ctx, end := telemetry.Start(ctx, "jobsearches.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var recs []models.JobSearch
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ?", userID).
@@ -123,9 +128,11 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID) ([]models.JobSearc
 }
 
 // Get returns one of the caller's searches.
-func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*models.JobSearch, error) {
+func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (_ *models.JobSearch, err error) {
+	ctx, end := telemetry.Start(ctx, "jobsearches.Service.Get", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer end(&err)
 	var rec models.JobSearch
-	err := s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", id, userID).
 		Take(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -140,7 +147,9 @@ func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*models.JobSea
 // Update applies the non-nil fields of p. Enabling a search makes it due
 // immediately, disabling it clears NextRunAt, and changing the frequency of
 // a search that has run before reschedules it from its last run.
-func (s *Service) Update(ctx context.Context, userID, id ulid.ULID, p UpdateParams) (*models.JobSearch, error) {
+func (s *Service) Update(ctx context.Context, userID, id ulid.ULID, p UpdateParams) (_ *models.JobSearch, err error) {
+	ctx, end := telemetry.Start(ctx, "jobsearches.Service.Update", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer end(&err)
 	rec, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -182,7 +191,9 @@ func (s *Service) Update(ctx context.Context, userID, id ulid.ULID, p UpdatePara
 }
 
 // Delete soft-deletes one of the caller's searches.
-func (s *Service) Delete(ctx context.Context, userID, id ulid.ULID) error {
+func (s *Service) Delete(ctx context.Context, userID, id ulid.ULID) (err error) {
+	ctx, end := telemetry.Start(ctx, "jobsearches.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer end(&err)
 	res := s.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", id, userID).
 		Delete(&models.JobSearch{})
@@ -197,7 +208,9 @@ func (s *Service) Delete(ctx context.Context, userID, id ulid.ULID) error {
 
 // RunNow makes an enabled search due now, so the scheduler runs it on its
 // next tick. It returns ErrDisabled for a disabled search.
-func (s *Service) RunNow(ctx context.Context, userID, id ulid.ULID) (*models.JobSearch, error) {
+func (s *Service) RunNow(ctx context.Context, userID, id ulid.ULID) (_ *models.JobSearch, err error) {
+	ctx, end := telemetry.Start(ctx, "jobsearches.Service.RunNow", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrJobSearchID, id))
+	defer end(&err)
 	rec, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err

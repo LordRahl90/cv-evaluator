@@ -373,7 +373,7 @@ Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per com
 
 ## Observability
 
-`cmd/api` and `cmd/seed` set up OpenTelemetry at startup (`internal/telemetry`). Traces and metrics are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no-op providers are used, so local runs and tests need nothing running.
+`cmd/api`, `cmd/worker` and `cmd/seed` set up OpenTelemetry at startup (`internal/telemetry`). Traces and metrics are exported over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise no-op providers are used, so local runs and tests need nothing running.
 
 | Setting | Default | Notes |
 |---|---|---|
@@ -381,6 +381,7 @@ Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per com
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | Only `http/protobuf` is supported. |
 | `SERVICE_VERSION` | `dev` | Reported as `service.version`. |
 | `OTEL_SDK_DISABLED` | `false` | `true` turns export off even with an endpoint set. |
+| `DB_TRACE_STATEMENTS` | `false` | `true` adds each statement's SQL, with placeholders and never values, as `db.statement` on database spans. |
 
 The exporters also honour the other standard variables, such as `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, `OTEL_METRIC_EXPORT_INTERVAL` and `OTEL_RESOURCE_ATTRIBUTES`. The resource carries `service.name=cv-evaluator`, `service.version` and `deployment.environment(.name)` from `ENVIRONMENT`.
 
@@ -390,6 +391,60 @@ What is recorded:
 - **`cv_evaluator.background_run.duration`** (histogram, seconds), attributes `run.kind` and `run.outcome` (`success`|`error`), with a span `background_run <kind>`. Use `telemetry.StartRun(ctx, kind)`, or `telemetry.RunObserver{}` where an observer hook (`RunStarted`/`RunFinished`) is expected. `cmd/seed` records `seed.process_cv`.
 - **`cv_evaluator.external_request.duration`** (histogram, seconds), attributes `peer.service`, `operation`, `outcome` (and `llm.task` for DeepSeek), with a client span `<peer.service> <operation>`. Ollama (`embedding`, `cv_cleanup`) and DeepSeek (`chat_completion`, `llm.task=cv_cleanup|job_match`) are instrumented. HTTP clients use `telemetry.NewHTTPClient(peer, client)` with `telemetry.WithOperation(ctx, op)`; other SDK calls use `telemetry.TrackExternal(ctx, peer, op)`. `telemetry.NewJobBoardTransport(nil)` is one transport for the scrapers that labels `peer.service` (`linkedin`, `jobindex`) from the host and `operation` (`search`, `details`) from the path.
 
+### Traces
+
+A trace shows the whole execution path of a request or a background step, not just the HTTP span and the outbound calls:
+
+```text
+POST /cv/                                  server span (otelgin), auth.method, user.id
+├── users.Service.ValidateSession          auth middleware: session check for a JWT
+│   └── gorm.query users
+└── users.Service.UploadCV
+    └── users.Service.ProcessCV            cv.id, cv.sections
+        ├── extractor.ExtractFromFile
+        ├── ollama.Service.CreateEmbedding
+        │   └── ollama embedding           client span (HTTP)
+        ├── gorm.create cvs
+        ├── deepseek.Service.CleanupCV
+        │   └── deepseek.Service.callLLM
+        │       └── deepseek chat_completion
+        ├── ollama.Service.CreateEmbedding  (one per CV section)
+        └── gorm.create section_embeddings
+
+pipeline.Pipeline.EvaluateOne              search_result.id, user.id, attempt
+├── pipeline.claimResult
+├── background_run evaluate_job
+│   ├── gorm.query jobs
+│   ├── pipeline.LatestCVSelector.SelectCV
+│   │   └── gorm.query cvs
+│   └── matcher.Service.MatchJob           cv.id, job.id
+│       └── matcher.Service.evaluate       criteria.count
+│           └── deepseek.Service.JobMatch → callLLM → deepseek chat_completion
+└── pipeline.Pipeline.writeEvaluation      status, evaluation.id
+    └── gorm.query search_results, gorm.create evaluations, ...
+```
+
+The scheduler tick is `background_run schedule_tick` → `sources.Store.DueSearches`, then per search `pipeline.Pipeline.runSearch` → `sources.Store.ClaimRun`, one `background_run run_search` per portal (`provider`) → `pipeline.RateLimiter.Wait`, `sources.Fetcher.Search` → `providers.LinkedIn.Search` → `linkedin.Service.SearchJobs` → `linkedin search` (scraper HTTP spans nest here even though colly drops the context, see `telemetry.WithParentSpan`), `pipeline.Pipeline.storePostings`, and finally `sources.Store.MarkRun`.
+
+Where the spans come from:
+
+- **Zero-code layers**: `otelgin` (a server span per request), the GORM plugin `telemetry.NewGormPlugin`, registered in `db.Open` (a client span per statement named `gorm.<operation> <table>`, with `db.system=postgresql`, `db.operation`, `db.sql.table`, `db.rows_affected`; never values), the instrumented HTTP transports for DeepSeek, Ollama and the scrapers, and the pipeline's `RunObserver` (`background_run <kind>` per step).
+- **Two lines per meaningful function**: exported service methods, pipeline steps and their helpers, sources, providers and scrapers, CV extraction and the LLM clients start a span named `<package>.<Type>.<Method>` (or `<package>.<func>`):
+
+  ```go
+  func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) (err error) {
+  	ctx, end := telemetry.Start(ctx, "users.Service.DeleteCV", telemetry.ID(telemetry.AttrCVID, cvID))
+  	defer end(&err)
+  	...
+  ```
+
+  The named `err` result only captures the error; callers are unaffected. Trivial getters, pure helpers and tight loops get no span; a per-row loop gets one span with counts as attributes.
+- Pipeline steps poll: `EmbedOne` and `EvaluateOne` claim a row first and only then start their span, back-dated to the claim (`telemetry.StartClaimed`), so idle polls produce no traces. For the same reason the GORM plugin does not start a new trace for a statement run outside one (migrations, idle claims) unless `WithRootDBSpans(true)` is set.
+
+Attributes are ids and counts only (`user.id`, `cv.id`, `job_search.id`, `job.id`, `search_result.id`, `provider`, `attempt`, `status`, row counts). Never names, emails, CV text, job descriptions, prompts, LLM output, passwords, tokens or API keys.
+
+Errors: a failing function's span gets status Error with a short label (the error's Go type, or `canceled`/`deadline_exceeded`), never the message. The error itself is recorded as one `exception` event per trace: where it originates (the failing SQL statement, an outbound HTTP or LLM call, decoding an LLM response, extracting a CV or scraping a page, via `telemetry.StartOrigin`) or where it is handled and turned into an outcome (the HTTP 5xx path in `apierror`, a job or result scheduled for retry or marked failed, via `telemetry.RecordError`). A portal search attempt that is retried is recorded on the portal span with `telemetry.RecordRetry`, which leaves the status alone so a retry that succeeds does not turn the span red. An error recorded at its origin is marked (`telemetry.MarkRecorded`) so the handlers above it only set the status.
+
 ### Viewing locally
 
 `docker compose up -d` starts `otel-lgtm`, a single Grafana container that receives traces and metrics. Point the app at it:
@@ -398,7 +453,7 @@ What is recorded:
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 make start
 ```
 
-Open Grafana at <http://localhost:3000>: traces are under Explore → Tempo (service `cv-evaluator`), and the histograms under Explore → Prometheus as `cv_evaluator_background_run_duration_seconds` and `cv_evaluator_external_request_duration_seconds`.
+Open Grafana at <http://localhost:3000>: traces are under Explore → Tempo (service `cv-evaluator`; search by span name such as `pipeline.Pipeline.EvaluateOne`, or paste a `trace_id` from the request log), and the histograms under Explore → Prometheus as `cv_evaluator_background_run_duration_seconds` and `cv_evaluator_external_request_duration_seconds`.
 
 In a deployed environment, set `OTEL_EXPORTER_OTLP_ENDPOINT` (and `OTEL_EXPORTER_OTLP_HEADERS` for the API key) to your hosted OpenTelemetry provider instead; nothing else changes.
 

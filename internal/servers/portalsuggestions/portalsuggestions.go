@@ -137,10 +137,10 @@ func handleServiceError(c *gin.Context, existing *models.PortalSuggestion, err e
 	case errors.Is(err, portalsvc.ErrAlreadySupported):
 		apierror.Conflict(c, CodePortalAlreadySupported, "This portal is already searched. See GET /providers.", "url")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		apierror.GatewayTimeout(c)
+		apierror.GatewayTimeout(c, err)
 	default:
 		slog.ErrorContext(c.Request.Context(), "portal suggestions handler", "error", err)
-		apierror.InternalServerError(c)
+		apierror.InternalServerError(c, err)
 	}
 }
 

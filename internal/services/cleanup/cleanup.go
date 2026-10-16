@@ -3,6 +3,7 @@ package cleanup
 import (
 	"context"
 	"cv-evaluator/internal/integrations/extractor"
+	"cv-evaluator/internal/telemetry"
 )
 
 type LLMClient interface {
@@ -23,11 +24,13 @@ func New(llmClient LLMClient) *Service {
 	}
 }
 
-func (s *Service) CleanupCV(ctx context.Context, fileName string) (string, error) {
+func (s *Service) CleanupCV(ctx context.Context, fileName string) (_ string, err error) {
+	ctx, end := telemetry.Start(ctx, "cleanup.Service.CleanupCV")
+	defer end(&err)
 	// first we extract
 	// then we call the llm
 	// then we return the result
-	extractResult, err := extractor.Extract(fileName)
+	extractResult, err := extractor.Extract(ctx, fileName)
 	if err != nil {
 		return "", err
 	}

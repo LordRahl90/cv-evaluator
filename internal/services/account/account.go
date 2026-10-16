@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
@@ -54,9 +55,11 @@ type Deleted struct {
 // before deleting anything: a worker that got its lock first finishes and
 // its rows are then seen and deleted here; one that comes later finds the
 // row gone and writes nothing.
-func (s *Service) Delete(ctx context.Context, userID ulid.ULID) ([]Deleted, error) {
+func (s *Service) Delete(ctx context.Context, userID ulid.ULID) (_ []Deleted, err error) {
+	ctx, end := telemetry.Start(ctx, "account.Service.Delete", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var report []Deleted
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		report = nil
 		lock := clause.Locking{Strength: "UPDATE"}
 

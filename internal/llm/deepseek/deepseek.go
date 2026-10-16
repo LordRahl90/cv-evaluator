@@ -55,7 +55,9 @@ func New(client Client) *Service {
 	}
 }
 
-func (s *Service) CleanupCV(ctx context.Context, content string) (string, error) {
+func (s *Service) CleanupCV(ctx context.Context, content string) (_ string, err error) {
+	ctx, end := telemetry.Start(ctx, "deepseek.Service.CleanupCV")
+	defer end(&err)
 	slog.DebugContext(ctx, "Cleaning up CV content with DeepSeek LLM", "content_length", len(content))
 	promptContent, err := s.loadPrompt("cv-cleanup.txt")
 	if err != nil {
@@ -65,7 +67,9 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 	return s.callLLM(ctx, taskCVCleanup, cvCleanupTemperature, string(promptContent), prompts.TagCV(content))
 }
 
-func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput) (string, error) {
+func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput) (_ string, err error) {
+	ctx, end := telemetry.Start(ctx, "deepseek.Service.JobMatch")
+	defer end(&err)
 	slog.DebugContext(ctx, "Matching CV with job description using DeepSeek LLM", "job_description_length", len(matchInput.JobDescription))
 
 	system, user, err := s.buildPrompt(matchInput)
@@ -79,7 +83,9 @@ func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput)
 // callLLM sends one chat completion: the instructions as the system message
 // and the data as the user message. task labels the request (llm.task) in
 // the telemetry recorded by the client built with NewClient.
-func (s *Service) callLLM(ctx context.Context, task string, temperature float32, system, user string) (string, error) {
+func (s *Service) callLLM(ctx context.Context, task string, temperature float32, system, user string) (_ string, err error) {
+	ctx, end := telemetry.StartOrigin(ctx, "deepseek.Service.callLLM", attribute.String(telemetry.AttrLLMTask, task))
+	defer end(&err)
 	ctx = telemetry.WithOperation(ctx, telemetry.OpChatCompletion, attribute.String(telemetry.AttrLLMTask, task))
 
 	req := &deepseek.ChatCompletionRequest{

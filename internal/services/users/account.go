@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/crypto/bcrypt"
@@ -38,9 +39,11 @@ type UpdateProfileRequest struct {
 // It returns ErrEmailAlreadyUsed or ErrPhoneAlreadyUsed when another
 // account has the new email or phone, and ErrUserNotFound when the user
 // does not exist.
-func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req UpdateProfileRequest) (*Profile, error) {
+func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req UpdateProfileRequest) (_ *Profile, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.UpdateProfile", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var updated models.User
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", userID).Take(&updated).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -113,7 +116,9 @@ func (s *Service) taken(tx *gorm.DB, userID ulid.ULID, column, value string) (bo
 // It returns ErrIncorrectPassword when current is wrong and ErrUserNotFound
 // when the user does not exist. Password rules are the caller's job, as
 // they are for Signup.
-func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current, next string) (*AuthResponse, error) {
+func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current, next string) (_ *AuthResponse, err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.ChangePassword", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
@@ -154,9 +159,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID ulid.ULID, current,
 // VerifyPassword checks password against the user's. It returns
 // ErrIncorrectPassword when it does not match and ErrUserNotFound when the
 // user does not exist.
-func (s *Service) VerifyPassword(ctx context.Context, userID ulid.ULID, password string) error {
+func (s *Service) VerifyPassword(ctx context.Context, userID ulid.ULID, password string) (err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.VerifyPassword", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var user models.User
-	err := s.db.WithContext(ctx).Select("id", "password").Where("id = ?", userID).Take(&user).Error
+	err = s.db.WithContext(ctx).Select("id", "password").Where("id = ?", userID).Take(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrUserNotFound
 	}
@@ -175,9 +182,11 @@ func (s *Service) VerifyPassword(ctx context.Context, userID ulid.ULID, password
 //
 // JWT times have one-second precision, so a token issued in the same second
 // as a password change, but before it, is still accepted.
-func (s *Service) ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error {
+func (s *Service) ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) (err error) {
+	ctx, end := telemetry.Start(ctx, "users.Service.ValidateSession", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	var user models.User
-	err := s.db.WithContext(ctx).Select("id", "password_changed_at").Where("id = ?", userID).Take(&user).Error
+	err = s.db.WithContext(ctx).Select("id", "password_changed_at").Where("id = ?", userID).Take(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrUserNotFound
 	}

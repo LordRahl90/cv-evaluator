@@ -14,8 +14,10 @@ import (
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/matcher"
 	jobstorage "cv-evaluator/internal/storage/jobs"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/pgvector/pgvector-go"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
@@ -316,7 +318,9 @@ func (p *Pipeline) tick(ctx context.Context) (int, error) {
 }
 
 // runSearch claims and runs one search. It reports whether it ran it.
-func (p *Pipeline) runSearch(ctx context.Context, search *Search, providers []string) (bool, error) {
+func (p *Pipeline) runSearch(ctx context.Context, search *Search, providers []string) (_ bool, err error) {
+	ctx, end := telemetry.Start(ctx, "pipeline.Pipeline.runSearch", telemetry.ID(telemetry.AttrJobSearchID, search.ID), telemetry.ID(telemetry.AttrUserID, search.UserID))
+	defer end(&err)
 	if !search.Enabled {
 		return false, nil
 	}
@@ -356,6 +360,7 @@ func (p *Pipeline) runSearch(ctx context.Context, search *Search, providers []st
 // stores what it finds: each posting as a global job and a search result.
 func (p *Pipeline) runPortal(ctx context.Context, search *Search, provider string) error {
 	return observe(ctx, p.cfg.Observer, KindRunSearch, func(ctx context.Context) error {
+		telemetry.SetAttributes(ctx, attribute.String(telemetry.AttrProvider, provider), telemetry.ID(telemetry.AttrJobSearchID, search.ID))
 		criteria := Criteria{Query: search.Query, Location: search.Location, MaxPages: p.cfg.MaxPages}
 
 		var (
@@ -367,6 +372,8 @@ func (p *Pipeline) runPortal(ctx context.Context, search *Search, provider strin
 			if err == nil {
 				break
 			}
+			// Handled here: retried, then logged and skipped by runSearch.
+			telemetry.RecordRetry(ctx, err, attempt)
 			if attempt >= p.cfg.PortalAttempts || ctx.Err() != nil {
 				return fmt.Errorf("search %s after %d attempts: %w", provider, attempt, err)
 			}
@@ -375,28 +382,41 @@ func (p *Pipeline) runPortal(ctx context.Context, search *Search, provider strin
 			}
 		}
 
-		var created int
-		for i := range posts {
-			post := &posts[i]
-			if strings.TrimSpace(post.ID) == "" {
-				continue
-			}
-			post.Provider = provider
-			job, isNew, err := p.jobs.Upsert(ctx, post.ToModel())
-			if err != nil {
-				return err
-			}
-			if isNew {
-				created++
-			}
-			if err := upsertSearchResult(p.db.WithContext(ctx), search, job.ID); err != nil {
-				return err
-			}
+		created, err := p.storePostings(ctx, search, provider, posts)
+		if err != nil {
+			return err
 		}
 		slog.InfoContext(ctx, "portal searched", "search_id", search.ID.String(), "provider", provider,
 			"postings", len(posts), "new_jobs", created)
 		return nil
 	})
+}
+
+// storePostings stores each posting a portal returned as a global job and
+// a search result, and returns how many jobs were new.
+func (p *Pipeline) storePostings(ctx context.Context, search *Search, provider string, posts []entities.JobPost) (_ int, err error) {
+	ctx, end := telemetry.Start(ctx, "pipeline.Pipeline.storePostings", telemetry.Count("postings", len(posts)))
+	defer end(&err)
+	var created int
+	for i := range posts {
+		post := &posts[i]
+		if strings.TrimSpace(post.ID) == "" {
+			continue
+		}
+		post.Provider = provider
+		job, isNew, err := p.jobs.Upsert(ctx, post.ToModel())
+		if err != nil {
+			return created, err
+		}
+		if isNew {
+			created++
+		}
+		if err := upsertSearchResult(p.db.WithContext(ctx), search, job.ID); err != nil {
+			return created, err
+		}
+	}
+	telemetry.SetAttributes(ctx, telemetry.Count("jobs.created", created))
+	return created, nil
 }
 
 // --- jobs ------------------------------------------------------------------
@@ -416,11 +436,14 @@ func writeCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 // is missing and embeds it, then writes the outcome. It reports whether
 // there was a job to handle.
 func (p *Pipeline) EmbedOne(ctx context.Context) (bool, error) {
-	now := p.now()
+	now, claimStart := p.now(), time.Now()
 	job, err := claimJob(p.db.WithContext(ctx), now, now.Add(-p.cfg.StaleTimeout))
 	if err != nil || job == nil {
 		return false, err
 	}
+	ctx, end := telemetry.StartClaimed(ctx, "pipeline.Pipeline.EmbedOne", claimStart, "pipeline.claimJob",
+		telemetry.ID(telemetry.AttrJobID, job.ID), attribute.String(telemetry.AttrProvider, job.Provider), telemetry.Count(telemetry.AttrAttempt, job.Attempts))
+	defer end(nil)
 
 	var embedding []float32
 	fetched := false
@@ -470,6 +493,8 @@ func (p *Pipeline) EmbedOne(ctx context.Context) (bool, error) {
 		updates["status"] = ready
 		updates["attempts"] = job.Attempts - 1
 	default:
+		// Handled here: the job is retried later or marked failed.
+		telemetry.RecordError(ctx, stepErr)
 		p.applyFailure(updates, "status", ready, models.JobStatusFailed, job.Attempts, stepErr)
 		slog.WarnContext(ctx, "job step failed", "job_id", job.ID.String(), "provider", job.Provider,
 			"attempt", job.Attempts, "error", stepErr)
@@ -512,11 +537,14 @@ type evaluationOutcome struct {
 // It reports whether there was a result to handle. If the result was
 // deleted meanwhile (the user deleted their account), nothing is written.
 func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
-	now := p.now()
+	now, claimStart := p.now(), time.Now()
 	result, err := claimResult(p.db.WithContext(ctx), now, now.Add(-p.cfg.StaleTimeout))
 	if err != nil || result == nil {
 		return false, err
 	}
+	ctx, end := telemetry.StartClaimed(ctx, "pipeline.Pipeline.EvaluateOne", claimStart, "pipeline.claimResult",
+		telemetry.ID(telemetry.AttrResultID, result.ID), telemetry.ID(telemetry.AttrUserID, result.UserID), telemetry.Count(telemetry.AttrAttempt, result.Attempts))
+	defer end(nil)
 	log := slog.With("search_result_id", result.ID.String())
 
 	var out evaluationOutcome
@@ -558,36 +586,14 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 		updates["next_attempt_at"] = nil
 		updates["last_error"] = ""
 	default:
+		// Handled here: the result is retried later or marked failed.
+		telemetry.RecordError(ctx, stepErr)
 		p.applyFailure(updates, "evaluation_status", models.EvaluationPending, models.EvaluationFailed,
 			result.Attempts, stepErr)
 		log.WarnContext(ctx, "evaluation failed", "attempt", result.Attempts, "error", stepErr)
 	}
 
-	gone := false
-	err = p.db.WithContext(wctx).Transaction(func(tx *gorm.DB) error {
-		exists, err := lockSearchResult(tx, result.ID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			gone = true
-			return nil
-		}
-		if out.cv != nil && (out.resp != nil || out.matchErr != nil) {
-			eval := p.evaluationRow(result, &out)
-			if err := saveEvaluation(tx, eval, breakdown(out.resp)); err != nil {
-				return err
-			}
-			// The evaluation just written is the result's current one; its
-			// score is copied only when it completed.
-			updates["evaluation_id"] = eval.ID
-			updates["overall_score"] = nil
-			if eval.Status == models.StatusCompleted {
-				updates["overall_score"] = eval.OverallScore
-			}
-		}
-		return tx.Model(&models.SearchResult{}).Where("id = ?", result.ID).Updates(updates).Error
-	})
+	gone, err := p.writeEvaluation(wctx, result, &out, updates)
 	if err != nil {
 		return true, fmt.Errorf("record search result %s: %w", result.ID, err)
 	}
@@ -599,6 +605,44 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 		log.InfoContext(ctx, "job evaluated", "cv_id", out.cv.ID.String(), "overall_score", out.resp.OverallScore)
 	}
 	return true, nil
+}
+
+// writeEvaluation writes the outcome of evaluating result in one short
+// transaction: the evaluation and its scores (when there is one) and the
+// result's new state. It reports gone, writing nothing, when the result was
+// deleted meanwhile.
+func (p *Pipeline) writeEvaluation(ctx context.Context, result *models.SearchResult, out *evaluationOutcome, updates map[string]any) (gone bool, err error) {
+	ctx, end := telemetry.Start(ctx, "pipeline.Pipeline.writeEvaluation", telemetry.ID(telemetry.AttrResultID, result.ID))
+	defer end(&err)
+	if status, ok := updates["evaluation_status"].(string); ok {
+		telemetry.SetAttributes(ctx, attribute.String(telemetry.AttrStatus, status))
+	}
+	err = p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		exists, err := lockSearchResult(tx, result.ID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			gone = true
+			return nil
+		}
+		if out.cv != nil && (out.resp != nil || out.matchErr != nil) {
+			eval := p.evaluationRow(result, out)
+			if err := saveEvaluation(tx, eval, breakdown(out.resp)); err != nil {
+				return err
+			}
+			telemetry.SetAttributes(ctx, telemetry.ID("evaluation.id", eval.ID), telemetry.Count("criteria.count", len(breakdown(out.resp))))
+			// The evaluation just written is the result's current one; its
+			// score is copied only when it completed.
+			updates["evaluation_id"] = eval.ID
+			updates["overall_score"] = nil
+			if eval.Status == models.StatusCompleted {
+				updates["overall_score"] = eval.OverallScore
+			}
+		}
+		return tx.Model(&models.SearchResult{}).Where("id = ?", result.ID).Updates(updates).Error
+	})
+	return gone, err
 }
 
 func breakdown(resp *matcher.Response) []matcher.CriterionScore {

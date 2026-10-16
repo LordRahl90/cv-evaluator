@@ -10,7 +10,9 @@ import (
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
 	jobstorage "cv-evaluator/internal/storage/jobs"
+	"cv-evaluator/internal/telemetry"
 
+	"go.opentelemetry.io/otel/attribute"
 	"gorm.io/gorm"
 )
 
@@ -38,7 +40,9 @@ func New(db *gorm.DB, embeddingLLMService EmbeddingLLMService) *Service {
 // ProcessJob stores the posting if it is new and embeds it if it is not
 // embedded yet. Calling it again for the same posting is a no-op once the
 // job is embedded, so a posting is never embedded twice.
-func (s *Service) ProcessJob(ctx context.Context, job *entities.JobPost) (*models.Job, error) {
+func (s *Service) ProcessJob(ctx context.Context, job *entities.JobPost) (_ *models.Job, err error) {
+	ctx, end := telemetry.Start(ctx, "jobs.Service.ProcessJob", attribute.String(telemetry.AttrProvider, job.Provider))
+	defer end(&err)
 	stored, created, err := s.store.Upsert(ctx, job.ToModel())
 	if err != nil {
 		return nil, err
@@ -63,7 +67,9 @@ func (s *Service) ProcessJob(ctx context.Context, job *entities.JobPost) (*model
 
 // Embed embeds the job's description and stores the vector. It does nothing
 // when the job is already embedded.
-func (s *Service) Embed(ctx context.Context, job *models.Job) error {
+func (s *Service) Embed(ctx context.Context, job *models.Job) (err error) {
+	ctx, end := telemetry.Start(ctx, "jobs.Service.Embed", telemetry.ID(telemetry.AttrJobID, job.ID))
+	defer end(&err)
 	if job.IsEmbedded() {
 		return nil
 	}
@@ -89,7 +95,9 @@ func (s *Service) Embed(ctx context.Context, job *models.Job) error {
 
 // IsJobProcessed returns the stored job when the posting exists and is
 // already embedded, or nil when it still needs processing.
-func (s *Service) IsJobProcessed(ctx context.Context, provider, jobID string) (*models.Job, error) {
+func (s *Service) IsJobProcessed(ctx context.Context, provider, jobID string) (_ *models.Job, err error) {
+	ctx, end := telemetry.Start(ctx, "jobs.Service.IsJobProcessed", attribute.String(telemetry.AttrProvider, provider))
+	defer end(&err)
 	job, err := s.store.FindByProviderAndJobID(ctx, provider, jobID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil

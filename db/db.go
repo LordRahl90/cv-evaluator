@@ -4,14 +4,23 @@ import (
 	"os"
 
 	"cv-evaluator/internal/config"
+	"cv-evaluator/internal/telemetry"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-// Open connects to Postgres with the given settings.
+// Open connects to Postgres with the given settings. Every statement is
+// traced (see telemetry.NewGormPlugin).
 func Open(cfg config.Database) (*gorm.DB, error) {
-	return gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Use(telemetry.NewGormPlugin(telemetry.WithDBStatement(cfg.TraceStatements))); err != nil {
+		return nil, err
+	}
+	return db, nil
 }
 
 // SetupDatabase connects to Postgres using the DB_* environment variables.

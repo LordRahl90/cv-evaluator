@@ -17,8 +17,10 @@ import (
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/matcher"
+	"cv-evaluator/internal/telemetry"
 
 	"github.com/oklog/ulid/v2"
+	"go.opentelemetry.io/otel/attribute"
 	"gorm.io/gorm"
 )
 
@@ -262,7 +264,9 @@ type listRow struct {
 }
 
 // List returns a page of userID's results.
-func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (*Page, error) {
+func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (_ *Page, err error) {
+	ctx, end := telemetry.Start(ctx, "results.Service.List", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	if err := normalize(&p); err != nil {
 		return nil, err
 	}
@@ -499,7 +503,9 @@ type detailRow struct {
 }
 
 // Get returns one of userID's results with its full job and evaluation.
-func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*Detail, error) {
+func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (_ *Detail, err error) {
+	ctx, end := telemetry.Start(ctx, "results.Service.Get", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrResultID, id))
+	defer end(&err)
 	var rows []detailRow
 	if err := s.visible(ctx, userID).
 		Select(`sr.id, sr.status, sr.evaluation_status, sr.created_at, sr.updated_at, sr.evaluation_id, sr.overall_score,
@@ -608,7 +614,9 @@ func nonNil(l models.StringList) []string {
 }
 
 // UpdateStatus sets one of userID's results' status and returns the result.
-func (s *Service) UpdateStatus(ctx context.Context, userID, id ulid.ULID, status string) (*Detail, error) {
+func (s *Service) UpdateStatus(ctx context.Context, userID, id ulid.ULID, status string) (_ *Detail, err error) {
+	ctx, end := telemetry.Start(ctx, "results.Service.UpdateStatus", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrResultID, id), attribute.String(telemetry.AttrStatus, status))
+	defer end(&err)
 	statuses, err := oneOf("status", []string{status}, models.SearchResultStatuses)
 	if err != nil {
 		return nil, err
@@ -633,7 +641,9 @@ func (s *Service) UpdateStatus(ctx context.Context, userID, id ulid.ULID, status
 // one replaces it. A result already waiting for its next attempt is made due
 // now. It returns ErrEvaluationInProgress while the result is being
 // evaluated or is already due.
-func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (*Detail, error) {
+func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (_ *Detail, err error) {
+	ctx, end := telemetry.Start(ctx, "results.Service.ReEvaluate", telemetry.ID(telemetry.AttrUserID, userID), telemetry.ID(telemetry.AttrResultID, id))
+	defer end(&err)
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
 	}
@@ -661,7 +671,9 @@ func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (*Detail
 }
 
 // Summary counts userID's results.
-func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (*Summary, error) {
+func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (_ *Summary, err error) {
+	ctx, end := telemetry.Start(ctx, "results.Service.Summary", telemetry.ID(telemetry.AttrUserID, userID))
+	defer end(&err)
 	weekStart := s.now().Add(-7 * 24 * time.Hour)
 
 	var totals struct {

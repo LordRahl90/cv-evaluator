@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestService_RecordsExternalRequests(t *testing.T) {
@@ -41,8 +42,10 @@ func TestService_RecordsExternalRequests(t *testing.T) {
 	}
 	assert.Equal(t, map[string]string{"embedding": "success", "cv_cleanup": "success"}, got)
 
-	spans := p.Spans()
+	spans := p.SpansOfKind(trace.SpanKindClient)
 	require.Len(t, spans, 2)
 	assert.Equal(t, "ollama embedding", spans[0].Name())
 	assert.Equal(t, "ollama cv_cleanup", spans[1].Name())
+	telemetrytest.RequireChild(t, p.Span(t, "ollama.Service.CreateEmbedding"), spans[0])
+	telemetrytest.RequireChild(t, p.Span(t, "ollama.Service.CleanupCV"), spans[1])
 }
