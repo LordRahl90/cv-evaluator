@@ -261,6 +261,27 @@ curl -X POST localhost:8080/job-searches \
 
 Portals are implemented in `internal/providers` on top of the scrapers in `internal/scraper`. Each provider builds its search URL from the query and location.
 
+### Results
+
+A result is a job one of the user's searches found, with its current evaluation against their CV (scored in the background by the worker). Results of deleted searches are not shown. Routes are in `internal/servers/results`, logic in `internal/services/results`.
+
+| Method | Path                          | Description                                                       |
+|--------|-------------------------------|-------------------------------------------------------------------|
+| GET    | `/results`                    | The user's results across searches, a page at a time             |
+| GET    | `/job-searches/:id/results`   | The same for one search (404 if it isn't the user's)             |
+| GET    | `/results/summary`            | Dashboard counts: new this week, strong matches (80+), by status, by search |
+| GET    | `/results/:id`                | One result with the job description and the full evaluation      |
+| PATCH  | `/results/:id`                | Set the user's triage `status`: `new`, `saved`, `applied`, `dismissed` |
+| POST   | `/results/:id/re-evaluate`    | Queue it for evaluation again, returns 202; 409 if already queued or running |
+
+The lists take `min_score`, `status` and `evaluation_status` (repeat them or separate values with commas), `since` (RFC 3339), `criterion` with `min_criterion_score` (e.g. `criterion=skills&min_criterion_score=80`), `sort` (`score`, the default: best first and unscored last; or `newest`) and cursor pagination with `limit` (default 20, at most 100) and `starting_after` (the last `id` of the previous page). The response is `{"object":"list","data":[...],"has_more":...,"total_count":...}`. Each listed result has its search, the job (without its description) and, once it has a completed evaluation, `overall_score` and its top three missing skills. A single result adds the description and the evaluation's breakdown (in the criteria order), strengths, missing skills, summary, requirements (`null` for evaluations made before requirements were asked for), CV, model and prompt version.
+
+```bash
+curl "localhost:8080/results?min_score=70&status=new,saved&limit=10" -H "Authorization: Bearer $API_KEY"
+```
+
+So that filtering and sorting by score never scans evaluations, `search_results` keeps a pointer to its current evaluation (`evaluation_id`) and a copy of that evaluation's `overall_score` (null unless it completed). The worker sets both when it writes an evaluation, and migration backfills them for results evaluated before the columns existed. The composite indexes on `(user_id, overall_score DESC NULLS LAST, id DESC)`, `(job_search_id, overall_score DESC NULLS LAST, id DESC)`, `(user_id, created_at DESC, id DESC)` and `(user_id, status)` serve the two sort orders, per user and per search, and the counts.
+
 ## Background worker
 
 `cmd/worker` (`make worker`) runs saved job searches on a schedule with no manual steps. It reads the same settings as the API through `internal/config`, opens the database, runs the migrations, then starts the scheduler and the embed and evaluate goroutines. On `SIGINT`/`SIGTERM` it stops claiming new work and gives in-flight steps `WORKER_SHUTDOWN_GRACE` to finish. Anything cut short is released and picked up again later.

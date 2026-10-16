@@ -251,3 +251,15 @@ func TestDecodeResponse_NoCapWhenMustHavesAreMet(t *testing.T) {
 	assert.Equal(t, 88, resp.OverallScore)
 	assert.Len(t, resp.Requirements, 3)
 }
+
+func TestDecodeRequirements(t *testing.T) {
+	got := DecodeRequirements(`{"requirements":[
+		{"requirement":" Go ","importance":"MUST","met":"yes","evidence":"6 years"},
+		{"requirement":"Rust","importance":"critical","met":"no","evidence":""}
+	],"overall_score":88}`)
+	assert.Equal(t, []Requirement{{Requirement: "Go", Importance: "must", Met: "yes", Evidence: "6 years"}}, got)
+
+	assert.Nil(t, DecodeRequirements(`{"overall_score":77}`), "older responses have no requirements")
+	assert.Nil(t, DecodeRequirements(`garbage`))
+	assert.Nil(t, DecodeRequirements(``))
+}

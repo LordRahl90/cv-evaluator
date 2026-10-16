@@ -564,8 +564,16 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 
 	err = p.db.WithContext(wctx).Transaction(func(tx *gorm.DB) error {
 		if out.cv != nil && (out.resp != nil || out.matchErr != nil) {
-			if err := saveEvaluation(tx, p.evaluationRow(result, &out), breakdown(out.resp)); err != nil {
+			eval := p.evaluationRow(result, &out)
+			if err := saveEvaluation(tx, eval, breakdown(out.resp)); err != nil {
 				return err
+			}
+			// The evaluation just written is the result's current one; its
+			// score is copied only when it completed.
+			updates["evaluation_id"] = eval.ID
+			updates["overall_score"] = nil
+			if eval.Status == models.StatusCompleted {
+				updates["overall_score"] = eval.OverallScore
 			}
 		}
 		return tx.Model(&models.SearchResult{}).Where("id = ?", result.ID).Updates(updates).Error
