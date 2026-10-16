@@ -2,6 +2,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import { apiError, deferred, mockApi, sampleCV, sampleSearches, signedIn } from '../support/mockApi'
+import { mockApiKeys, sampleApiKeys } from '../support/mockApi'
 
 const OUT = process.env.SCREENSHOT_DIR ?? 'screenshots'
 const desktop = { width: 1280, height: 860 }
@@ -97,4 +98,110 @@ test('mobile dashboard', async ({ page }) => {
   await page.getByRole('button', { name: 'Account menu' }).click()
   await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   await shoot(page, 'mobile-user-menu', false)
+})
+
+// ---- API keys and settings ------------------------------------------------
+
+test('api keys, empty', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  await mockApiKeys(page)
+  await page.goto('/api-keys')
+  await expect(page.getByRole('heading', { name: 'No API keys yet' })).toBeVisible()
+  await shoot(page, 'api-keys-empty')
+})
+
+test('api keys, loading', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  const hold = deferred()
+  await mockApiKeys(page, { gate: hold.promise })
+  await page.goto('/api-keys')
+  await expect(page.getByTestId('api-keys-skeleton')).toBeVisible()
+  await shoot(page, 'api-keys-loading', false)
+  hold.release()
+})
+
+test('api keys, create dialog, new secret and list', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  await mockApiKeys(page, { keys: sampleApiKeys() })
+  await page.goto('/api-keys')
+  await expect(page.getByRole('row', { name: /Zapier/ })).toBeVisible()
+  await shoot(page, 'api-keys-list')
+
+  await page.getByRole('button', { name: 'Create API key' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create API key' })
+  await dialog.getByLabel('Name').fill('Nightly export script')
+  await shoot(page, 'api-keys-create-dialog', false)
+
+  await dialog.getByRole('button', { name: 'Create key' }).click()
+  await expect(page.getByTestId('new-key-banner')).toBeVisible()
+  await page.getByRole('button', { name: 'Copy' }).click()
+  await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible()
+  await shoot(page, 'api-keys-new-secret')
+
+  await page.getByRole('button', { name: 'Revoke Zapier' }).click()
+  await expect(page.getByRole('dialog', { name: 'Revoke "Zapier"?' })).toBeVisible()
+  await shoot(page, 'api-keys-revoke-confirm', false)
+})
+
+test('settings', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page, {
+    user: {
+      object: 'user',
+      id: '01JA2B3C4D5E6F7G8H9J0K1M2N',
+      first_name: 'Jane',
+      last_name: 'Doe',
+      email: 'jane.doe@example.com',
+      phone: '+1 555 0100',
+    },
+  })
+  await page.goto('/settings')
+  await expect(page.getByTestId('profile-email')).toBeVisible()
+  await shoot(page, 'settings')
+  await page.getByRole('button', { name: 'Account menu' }).click()
+  await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
+  await shoot(page, 'settings-user-menu', false)
+})
+
+test('settings, loading', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  const hold = deferred()
+  await mockApi(page, { gate: hold.promise })
+  await page.goto('/settings')
+  await expect(page.getByTestId('profile-skeleton').first()).toBeVisible()
+  await shoot(page, 'settings-loading', false)
+  hold.release()
+})
+
+test('mobile api keys and settings', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await signedIn(page)
+  await mockApi(page)
+  await mockApiKeys(page)
+  await page.goto('/api-keys')
+  await expect(page.getByRole('heading', { name: 'No API keys yet' })).toBeVisible()
+  await shoot(page, 'mobile-api-keys-empty')
+
+  await page.getByRole('button', { name: 'Create API key' }).click()
+  await page
+    .getByRole('dialog', { name: 'Create API key' })
+    .getByLabel('Name')
+    .fill('Nightly export script')
+  await shoot(page, 'mobile-api-keys-create-dialog', false)
+  await page.getByRole('button', { name: 'Create key' }).click()
+  await expect(page.getByTestId('new-key-banner')).toBeVisible()
+  await shoot(page, 'mobile-api-keys-new-secret')
+
+  await page.goto('/settings')
+  await expect(page.getByTestId('profile-email')).toBeVisible()
+  await shoot(page, 'mobile-settings')
 })

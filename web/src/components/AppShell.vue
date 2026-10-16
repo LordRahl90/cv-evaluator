@@ -22,7 +22,7 @@ const nav: NavItem[] = [
   { to: '/matches', label: 'Matches', icon: 'star' },
   { to: '/cvs', label: 'CVs', icon: 'file' },
   { to: '/quick-match', label: 'Quick match', icon: 'bolt' },
-  { to: '/keys', label: 'API keys', icon: 'key' },
+  { to: '/api-keys', label: 'API keys', icon: 'key' },
   { to: '/settings', label: 'Settings', icon: 'sliders' },
 ]
 
