@@ -1,0 +1,16 @@
+/*
+ * code-block.css — dark monospace block for example requests (e.g. the
+ * curl example on the API keys page). Long lines scroll inside the block.
+ */
+@layer components {
+  .code-block {
+    @apply bg-code text-code-ink;
+    margin: 0;
+    padding: 18px 20px;
+    border-radius: 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+}

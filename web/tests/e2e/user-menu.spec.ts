@@ -5,6 +5,7 @@ import { TOKEN_KEY, mockApi, signedIn } from '../support/mockApi'
 const trigger = (page: Page) => page.getByRole('button', { name: 'Account menu' })
 const menu = (page: Page) => page.getByRole('menu', { name: 'Account' })
 const signOutItem = (page: Page) => page.getByRole('menuitem', { name: 'Sign out' })
+const settingsItem = (page: Page) => page.getByRole('menuitem', { name: 'Settings' })
 
 test.beforeEach(async ({ page }) => {
   await signedIn(page)
@@ -37,7 +38,7 @@ test('opens on click with the email, and closes on a second click', async ({ pag
   await expect(menu(page)).toBeVisible()
   await expect(menu(page)).toContainText('Jane Doe')
   await expect(menu(page)).toContainText('jane.doe@example.com')
-  await expect(signOutItem(page)).toBeFocused()
+  await expect(settingsItem(page)).toBeFocused()
 
   await trigger(page).click()
   await expect(menu(page)).toBeHidden()
@@ -65,10 +66,12 @@ test('works from the keyboard', async ({ page }) => {
   await trigger(page).focus()
   await page.keyboard.press('Enter')
   await expect(menu(page)).toBeVisible()
-  await expect(signOutItem(page)).toBeFocused()
+  await expect(settingsItem(page)).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(trigger(page)).toBeFocused()
 
+  await page.keyboard.press('ArrowDown')
+  await expect(settingsItem(page)).toBeFocused()
   await page.keyboard.press('ArrowDown')
   await expect(signOutItem(page)).toBeFocused()
   await page.keyboard.press('Enter')

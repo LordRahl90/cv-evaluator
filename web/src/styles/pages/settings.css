@@ -1,0 +1,75 @@
+/*
+ * settings.css — the settings page: a narrower column than other pages and
+ * the read-only profile card (label/value grid, its loading placeholders,
+ * the load error and the "not editable yet" note).
+ */
+@layer components {
+  .settings-stack {
+    max-width: 820px;
+  }
+
+  .settings-section {
+    @apply flex flex-col;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .profile-grid {
+    @apply grid;
+    gap: 18px 14px;
+    margin: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Two by two from tablet width up, as in the mockup. */
+  @media (min-width: 640px) {
+    .profile-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .profile-item {
+    @apply flex min-w-0 flex-col;
+    gap: 6px;
+  }
+
+  .profile-label {
+    @apply text-muted;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .profile-value {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .profile-value.is-empty {
+    @apply text-faint;
+    font-weight: 400;
+  }
+
+  .profile-skeleton-value {
+    width: 70%;
+    height: 20px;
+  }
+
+  .settings-error {
+    @apply flex flex-col items-start;
+    gap: 16px;
+  }
+
+  .settings-error .alert {
+    align-self: stretch;
+  }
+
+  .settings-note {
+    @apply text-muted;
+    margin: 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-divider);
+    font-size: 13px;
+  }
+}

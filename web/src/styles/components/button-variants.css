@@ -1,0 +1,33 @@
+/*
+ * button-variants.css — extra button styles on top of button.css: .btn-sm
+ * for compact buttons in table rows, .btn-danger (solid red, the confirm
+ * button of a destructive action) and .btn-danger-outline (white with red
+ * text, e.g. "Revoke" in a list).
+ */
+@layer components {
+  .btn-sm {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .btn-danger {
+    @apply border-danger bg-danger text-white;
+  }
+
+  .btn-danger:hover {
+    @apply border-danger-hover bg-danger-hover text-white;
+  }
+
+  .btn-danger-outline {
+    @apply border-danger-line bg-surface text-danger;
+  }
+
+  .btn-danger-outline:hover {
+    @apply bg-danger-soft text-danger;
+  }
+
+  .btn:disabled:not(.is-busy) {
+    opacity: 0.6;
+  }
+}
