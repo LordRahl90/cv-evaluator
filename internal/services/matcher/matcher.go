@@ -192,6 +192,23 @@ func decodeResponse(raw string) (*Response, error) {
 	return response, nil
 }
 
+// DecodeRequirements returns the requirements in a stored raw LLM response,
+// cleaned as decodeResponse cleans them. It returns nil when raw is not a
+// JSON object or has no requirements, as responses from before requirements
+// were asked for do not.
+func DecodeRequirements(raw string) []Requirement {
+	var response struct {
+		Requirements []Requirement `json:"requirements"`
+	}
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&response); err != nil {
+		return nil
+	}
+	if reqs := cleanRequirements(response.Requirements); len(reqs) > 0 {
+		return reqs
+	}
+	return nil
+}
+
 // cleanList trims the items, drops empty ones and keeps at most
 // maxListItems.
 func cleanList(in []string) []string {
