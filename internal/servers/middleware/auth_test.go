@@ -157,3 +157,18 @@ func TestExtractBearer(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticate_IgnoresNilOptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	require.NotPanics(t, func() { r.Use(Authenticate(testSecret, nil, nil)) })
+	r.GET("/ping", func(c *gin.Context) {
+		id, _ := c.Get(UserIDKey)
+		c.JSON(http.StatusOK, gin.H{"user_id": id})
+	})
+
+	userID := ulid.Make()
+	w := performRequest(r, "Bearer "+makeToken(t, userID.String(), time.Hour))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), userID.String())
+}

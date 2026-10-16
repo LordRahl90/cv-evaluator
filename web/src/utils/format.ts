@@ -71,3 +71,22 @@ export function greeting(now: Date = new Date()): string {
   if (hour < 18) return 'Good afternoon'
   return 'Good evening'
 }
+
+// Spelled out rather than Intl: some ICU versions write "Sept" for en-GB.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "12 Oct 2026", in local time */
+export function formatDate(value: DateInput): string {
+  const date = new Date(value)
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`
+}
+
+/** "just now" for the last minute, otherwise as formatRelative. */
+export function formatAgo(value: DateInput, now: number = Date.now()): string {
+  return now - new Date(value).getTime() < 60_000 ? 'just now' : formatRelative(value, now)
+}
+
+/** "12 Oct 2026, 08:00" */
+export function formatDateTime(value: DateInput): string {
+  return `${formatDate(value)}, ${timeFormat.format(new Date(value))}`
+}

@@ -6,9 +6,14 @@ import {
   deferred,
   mockApi,
   mockApiKeys,
+  mockCVStore,
   mockJobSearchesApi,
+  mockQuickMatch,
+  pdfFile,
   sampleApiKeys,
   sampleCV,
+  sampleCVs,
+  sampleJobDescription,
   sampleSearches,
   sampleSuggestions,
   signedIn,
@@ -286,6 +291,110 @@ test('mobile job searches list and form', async ({ page }) => {
 })
 
 // ---- API keys and settings ------------------------------------------------
+// CVs and Quick match
+
+test('cvs empty', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  await mockCVStore(page)
+  await page.goto('/cvs')
+  await expect(page.getByTestId('cv-drop-zone')).toBeVisible()
+  await shoot(page, 'cvs-empty')
+  await page.getByTestId('cv-file-input').setInputFiles({
+    name: 'cv.docx',
+    mimeType: 'application/msword',
+    buffer: Buffer.from('x'),
+  })
+  await expect(page.getByTestId('cv-upload-error')).toBeVisible()
+  await shoot(page, 'cvs-validation-error')
+})
+
+test('cvs uploading', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  const hold = deferred()
+  await mockCVStore(page, { uploadGate: hold.promise })
+  await page.goto('/cvs')
+  await page.getByTestId('cv-file-input').setInputFiles(pdfFile())
+  await expect(page.getByTestId('cv-upload-progress')).toBeVisible()
+  await shoot(page, 'cvs-uploading')
+  hold.release()
+  await expect(page.getByTestId('cv-upload-success')).toBeVisible()
+  await shoot(page, 'cvs-uploaded')
+})
+
+test('cvs list and delete dialog', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  await mockCVStore(page, { cvs: sampleCVs() })
+  await page.goto('/cvs')
+  await expect(page.getByRole('region', { name: 'All CVs' })).toBeVisible()
+  await shoot(page, 'cvs-list')
+  await page.getByRole('button', { name: 'Delete CV from 12 Oct 2026' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await shoot(page, 'cvs-delete-dialog', false)
+})
+
+test('quick match form, scoring and result', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page, { cvs: [sampleCV] })
+  const hold = deferred()
+  await mockQuickMatch(page, { gate: hold.promise })
+  await page.goto('/quick-match')
+  await expect(page.getByLabel('Job description')).toBeVisible()
+  await shoot(page, 'quick-match-empty')
+  await page.getByLabel('Job description').fill(sampleJobDescription)
+  await page.getByRole('button', { name: 'Score this job' }).click()
+  await expect(page.getByTestId('qm-scoring')).toBeVisible()
+  await shoot(page, 'quick-match-scoring')
+  hold.release()
+  await expect(page.getByTestId('qm-result')).toBeVisible()
+  await shoot(page, 'quick-match-result')
+})
+
+test('quick match without a CV', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  await mockApi(page)
+  await page.goto('/quick-match')
+  await expect(page.getByTestId('qm-no-cv')).toBeVisible()
+  await shoot(page, 'quick-match-no-cv')
+})
+
+test('mobile cvs and quick match', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await signedIn(page)
+  await mockApi(page, { cvs: [sampleCV] })
+  await mockCVStore(page, { cvs: sampleCVs() })
+  await mockQuickMatch(page)
+  await page.goto('/cvs')
+  await expect(page.getByRole('region', { name: 'All CVs' })).toBeVisible()
+  await shoot(page, 'mobile-cvs-list')
+  await page.getByRole('button', { name: 'Delete CV from 12 Oct 2026' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await shoot(page, 'mobile-cvs-delete-dialog', false)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+
+  await page.goto('/quick-match')
+  await page.getByLabel('Job description').fill(sampleJobDescription)
+  await page.getByRole('button', { name: 'Score this job' }).click()
+  await expect(page.getByTestId('qm-result')).toBeVisible()
+  await shoot(page, 'mobile-quick-match-result')
+})
+
+test('mobile cvs empty', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await signedIn(page)
+  await mockApi(page)
+  await mockCVStore(page)
+  await page.goto('/cvs')
+  await expect(page.getByTestId('cv-drop-zone')).toBeVisible()
+  await shoot(page, 'mobile-cvs-empty')
+})
 
 test('api keys, empty', async ({ page }) => {
   await page.setViewportSize(desktop)

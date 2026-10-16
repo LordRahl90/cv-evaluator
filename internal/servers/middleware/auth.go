@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"cv-evaluator/internal/servers/apierror"
 
@@ -47,11 +48,32 @@ func (f APIKeyVerifierFunc) VerifyAPIKey(ctx context.Context, rawKey string) (ul
 	return f(ctx, rawKey)
 }
 
+// SessionValidator decides whether a validly signed session token (JWT)
+// is still acceptable, for example because the user has since changed
+// their password or deleted their account.
+//
+// Implementations must return an error wrapping ErrInvalidToken when the
+// session should be rejected; the middleware answers those with 401. Any
+// other error is treated as an internal failure (500). issuedAt is the
+// token's iat claim, or the zero time when it has none.
+type SessionValidator interface {
+	ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error
+}
+
+// SessionValidatorFunc adapts a plain function to SessionValidator.
+type SessionValidatorFunc func(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error
+
+// ValidateSession calls f.
+func (f SessionValidatorFunc) ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error {
+	return f(ctx, userID, issuedAt)
+}
+
 // Option configures Authenticate.
 type Option func(*authConfig)
 
 type authConfig struct {
-	apiKeys APIKeyVerifier
+	apiKeys  APIKeyVerifier
+	sessions SessionValidator
 }
 
 // WithAPIKeyVerifier enables API key authentication. Bearer credentials that
@@ -63,18 +85,32 @@ func WithAPIKeyVerifier(v APIKeyVerifier) Option {
 	}
 }
 
+// WithSessionValidator makes every accepted JWT pass v as well, after its
+// signature and expiry have been checked. API keys are not passed to v.
+// A nil validator accepts every validly signed, unexpired JWT.
+func WithSessionValidator(v SessionValidator) Option {
+	return func(cfg *authConfig) {
+		cfg.sessions = v
+	}
+}
+
 // Authenticate returns a gin middleware that validates the Bearer credential
 // and stores the authenticated user ID under UserIDKey (and the method under
 // AuthMethodKey) in the gin context.
 //
 // By default only HS256 JWTs signed with jwtSecret are accepted. Pass
-// WithAPIKeyVerifier to also accept personal API keys (sk_...).
+// WithAPIKeyVerifier to also accept personal API keys (sk_...), and
+// WithSessionValidator to reject JWTs that are signed but revoked.
 // Requests without valid credentials are rejected with 401 Unauthorized and
 // an apierror body.
 func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 	cfg := authConfig{}
 	for _, opt := range opts {
-		opt(&cfg)
+		// A nil option (e.g. a nil value passed where an API key verifier
+		// used to go) is ignored rather than called.
+		if opt != nil {
+			opt(&cfg)
+		}
 	}
 
 	return func(c *gin.Context) {
@@ -90,9 +126,12 @@ func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 			return
 		}
 
-		userID, err := parseUserID(credential, jwtSecret)
+		userID, issuedAt, err := parseUserID(credential, jwtSecret)
 		if err != nil {
 			apierror.Unauthorized(c, apierror.CodeInvalidToken, "The session token is invalid or has expired.")
+			return
+		}
+		if cfg.sessions != nil && !validateSession(c, cfg.sessions, userID, issuedAt) {
 			return
 		}
 
@@ -100,6 +139,22 @@ func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 		c.Set(AuthMethodKey, AuthMethodJWT)
 		c.Next()
 	}
+}
+
+// validateSession runs v and, when it rejects the session, aborts the
+// request and reports false.
+func validateSession(c *gin.Context, v SessionValidator, userID ulid.ULID, issuedAt time.Time) bool {
+	err := v.ValidateSession(c.Request.Context(), userID, issuedAt)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ErrInvalidToken) {
+		apierror.Unauthorized(c, apierror.CodeInvalidToken, "The session is no longer valid. Sign in again.")
+		return false
+	}
+	slog.ErrorContext(c.Request.Context(), "validate session", "error", err)
+	apierror.Abort(c, http.StatusInternalServerError, apierror.Internal())
+	return false
 }
 
 func authenticateAPIKey(c *gin.Context, verifier APIKeyVerifier, rawKey string) {
@@ -164,8 +219,9 @@ func extractBearer(header string) (string, error) {
 	return strings.TrimSpace(parts[1]), nil
 }
 
-// parseUserID validates the JWT and returns the subject claim as a ULID.
-func parseUserID(rawToken string, secret []byte) (ulid.ULID, error) {
+// parseUserID validates the JWT and returns the subject claim as a ULID
+// and the issued-at claim (zero when absent).
+func parseUserID(rawToken string, secret []byte) (ulid.ULID, time.Time, error) {
 	claims := &jwt.RegisteredClaims{}
 
 	token, err := jwt.ParseWithClaims(rawToken, claims, func(token *jwt.Token) (interface{}, error) {
@@ -175,13 +231,17 @@ func parseUserID(rawToken string, secret []byte) (ulid.ULID, error) {
 		return secret, nil
 	})
 	if err != nil || !token.Valid {
-		return ulid.ULID{}, ErrInvalidToken
+		return ulid.ULID{}, time.Time{}, ErrInvalidToken
 	}
 
 	id, err := ulid.ParseStrict(claims.Subject)
 	if err != nil || id == (ulid.ULID{}) {
-		return ulid.ULID{}, ErrInvalidToken
+		return ulid.ULID{}, time.Time{}, ErrInvalidToken
 	}
 
-	return id, nil
+	var issuedAt time.Time
+	if claims.IssuedAt != nil {
+		issuedAt = claims.IssuedAt.Time
+	}
+	return id, issuedAt, nil
 }

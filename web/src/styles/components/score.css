@@ -1,0 +1,61 @@
+/*
+ * score.css — 0-100 scores (ScoreRing): a conic-gradient ring with the
+ * number in the middle, in a large (result header) and small (recent list)
+ * size. The .score-high / .score-mid / .score-low bands also colour the
+ * breakdown bars in match-result.css.
+ */
+@layer components {
+  .score-ring {
+    --score-color: var(--color-accent);
+    --score-ink: var(--color-accent);
+    @apply flex items-center justify-center;
+    flex: none;
+    border-radius: 999px;
+    background: conic-gradient(var(--score-color) 0 var(--score), var(--color-score-track) 0);
+  }
+
+  .score-ring-value {
+    @apply flex items-center justify-center bg-surface;
+    border-radius: 999px;
+    color: var(--score-ink);
+    font-weight: 700;
+  }
+
+  .score-ring-lg {
+    width: 84px;
+    height: 84px;
+  }
+
+  .score-ring-lg .score-ring-value {
+    width: 68px;
+    height: 68px;
+    font-family: var(--font-display);
+    font-size: 26px;
+  }
+
+  .score-ring-sm {
+    width: 40px;
+    height: 40px;
+  }
+
+  .score-ring-sm .score-ring-value {
+    width: 31px;
+    height: 31px;
+    font-size: 12px;
+  }
+
+  .score-high {
+    --score-color: var(--color-accent);
+    --score-ink: var(--color-accent);
+  }
+
+  .score-mid {
+    --score-color: var(--color-score-mid);
+    --score-ink: var(--color-score-mid-ink);
+  }
+
+  .score-low {
+    --score-color: var(--color-score-low);
+    --score-ink: var(--color-score-low-ink);
+  }
+}

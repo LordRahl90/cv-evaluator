@@ -56,7 +56,7 @@ func newTestRouter(svc Service, apiKeyUser ulid.ULID) *gin.Engine {
 		}
 		return apiKeyUser, nil
 	})
-	New(r, svc, testJWTSecret, verifier)
+	New(r, svc, testJWTSecret, middleware.WithAPIKeyVerifier(verifier))
 	return r
 }
 
