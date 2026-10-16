@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cv-evaluator/internal/servers/auth"
+	"cv-evaluator/internal/servers/middleware"
 	apikeysvc "cv-evaluator/internal/services/apikeys"
 	"cv-evaluator/internal/services/users"
 	"cv-evaluator/internal/testutil/postgres"
@@ -31,8 +32,8 @@ func TestEndToEnd_SignupKeyLifecycle(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	auth.New(r, usersSvc, []byte(secret), verifier)
-	New(r, keysSvc, []byte(secret), verifier)
+	auth.New(r, usersSvc, []byte(secret), middleware.WithAPIKeyVerifier(verifier))
+	New(r, keysSvc, []byte(secret), middleware.WithAPIKeyVerifier(verifier))
 
 	// Sign up.
 	w := doRequest(r, http.MethodPost, "/auth/signup", "", `{"email":"e2e@example.com","password":"password123"}`)

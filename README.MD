@@ -72,7 +72,8 @@ internal/
   llm/prompts/            embedded prompt files
   scraper/linkedin/       LinkedIn search and job detail scraping
   scraper/jobindex/       Jobindex.dk scraper (not yet used by any command)
-  services/users/         signup/signin/profile (JWT + bcrypt) and CV upload/list/get/delete/process
+  services/users/         signup/signin/profile/password (JWT + bcrypt) and CV upload/list/get/delete/process
+  services/account/       account export and permanent deletion of everything a user owns
   services/jobs/          job ingest; each posting is stored and embedded once
   pipeline/               background search, embed and evaluate handlers and scheduler
   services/matcher/       retrieval, scoring and LLM match composition
@@ -81,7 +82,8 @@ internal/
   servers/                Gin server: tracing, recovery, request logging, /healthz, graceful shutdown
   servers/cv/             CV HTTP handlers
   servers/match/          match HTTP handlers
-  servers/middleware/     Bearer JWT auth middleware
+  servers/account/        account management handlers (PATCH/DELETE /me, password, export)
+  servers/middleware/     Bearer JWT / API key auth middleware, with optional session validation
   telemetry/              OpenTelemetry setup, run and external request metrics
   telemetry/telemetrytest/ in-memory providers for asserting spans and metrics in tests
   testutil/postgres/      pgvector testcontainer helper
@@ -236,6 +238,29 @@ Match routes (`internal/servers/match`), authenticated the same way:
 | POST   | `/match/job-link`         | Not implemented (501)                        |
 
 Accounts and API keys: `POST /auth/signup`, `POST /auth/signin`, `GET /me`, and `POST`/`GET /api-keys`, `DELETE /api-keys/:id`. The full reference, with request and response examples, is in [`api/openapi.yaml`](api/openapi.yaml).
+
+### Account management
+
+Routes in `internal/servers/account`, authenticated with a session token or API key and always scoped to the caller:
+
+| Method | Path           | Body                                     | Response |
+|--------|----------------|------------------------------------------|----------|
+| PATCH  | `/me`          | any of `first_name`, `last_name`, `email`, `phone` | 200, the user. Same trimming and email rules as signup; `409 email_already_used` / `phone_already_used` |
+| POST   | `/me/password` | `current_password`, `new_password`        | 200, a fresh session (`token`). `400 incorrect_password` when the current password is wrong |
+| GET    | `/me/export`   |                                          | 200, a JSON download (`cv-evaluator-export.json`) of everything stored about the user |
+| DELETE | `/me`          | `password`                               | 204. `400 incorrect_password`, `404` if the account is already gone |
+
+- **Password changes end other sessions.** `users.password_changed_at` is set on every change, and the auth middleware (`middleware.WithSessionValidator`, wired in `cmd/api`) rejects JWTs whose `iat` is before it with `401 invalid_token`. The response carries a fresh token so the current client stays signed in. JWT times are whole seconds, so a token issued in the same second as the change is still accepted. **API keys are not affected**; revoke them separately with `DELETE /api-keys/:id`.
+- **Deletion is permanent.** It asks for the password even with an API key, then in one transaction hard-deletes (soft-deleted rows included) evaluation scores, evaluations, search results, job searches, CV sections, CVs, API keys, portal suggestions and the user, in that order. Job postings are shared and are kept. An audit line (`account deleted`, with the user id and row counts, no personal data) is logged.
+- **The worker cannot resurrect a deleted account.** Deletion first locks the user's job searches and search results. A worker writing results takes a share lock on the job search and skips the insert when it is gone; one finishing an evaluation locks the search result and drops the outcome when it is gone. Whichever comes second sees the other's work.
+- **The export** contains the profile, CVs (extracted text and sections), job searches, results with their job and evaluations (scores, strengths, missing skills, summary), API key metadata and portal suggestions, deleted and revoked items included. It never contains the password hash, API key secrets or hashes, embedding vectors or raw LLM output.
+
+```bash
+curl -X POST localhost:8080/me/password \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"current_password":"old-password","new_password":"a-new-password"}'
+curl -OJ localhost:8080/me/export -H "Authorization: Bearer $TOKEN"
+```
 
 ### Job searches
 
