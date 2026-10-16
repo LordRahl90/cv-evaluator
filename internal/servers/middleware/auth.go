@@ -106,7 +106,11 @@ func WithSessionValidator(v SessionValidator) Option {
 func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 	cfg := authConfig{}
 	for _, opt := range opts {
-		opt(&cfg)
+		// A nil option (e.g. a nil value passed where an API key verifier
+		// used to go) is ignored rather than called.
+		if opt != nil {
+			opt(&cfg)
+		}
 	}
 
 	return func(c *gin.Context) {
