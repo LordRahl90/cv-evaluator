@@ -509,7 +509,8 @@ type evaluationOutcome struct {
 // waits for evaluation (a short statement, see claimResult), then with no
 // transaction held evaluates it against the user's CV, then writes the
 // evaluation, its scores and the result's state in one short transaction.
-// It reports whether there was a result to handle.
+// It reports whether there was a result to handle. If the result was
+// deleted meanwhile (the user deleted their account), nothing is written.
 func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 	now := p.now()
 	result, err := claimResult(p.db.WithContext(ctx), now, now.Add(-p.cfg.StaleTimeout))
@@ -562,7 +563,16 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 		log.WarnContext(ctx, "evaluation failed", "attempt", result.Attempts, "error", stepErr)
 	}
 
+	gone := false
 	err = p.db.WithContext(wctx).Transaction(func(tx *gorm.DB) error {
+		exists, err := lockSearchResult(tx, result.ID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			gone = true
+			return nil
+		}
 		if out.cv != nil && (out.resp != nil || out.matchErr != nil) {
 			if err := saveEvaluation(tx, p.evaluationRow(result, &out), breakdown(out.resp)); err != nil {
 				return err
@@ -572,6 +582,10 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 	})
 	if err != nil {
 		return true, fmt.Errorf("record search result %s: %w", result.ID, err)
+	}
+	if gone {
+		log.InfoContext(ctx, "search result deleted while it was evaluated; outcome dropped")
+		return true, nil
 	}
 	if out.resp != nil {
 		log.InfoContext(ctx, "job evaluated", "cv_id", out.cv.ID.String(), "overall_score", out.resp.OverallScore)

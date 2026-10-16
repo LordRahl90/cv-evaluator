@@ -20,6 +20,7 @@ import (
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/providers"
 	"cv-evaluator/internal/servers"
+	accounthttp "cv-evaluator/internal/servers/account"
 	apikeyhttp "cv-evaluator/internal/servers/apikeys"
 	authhttp "cv-evaluator/internal/servers/auth"
 	"cv-evaluator/internal/servers/cv"
@@ -27,6 +28,7 @@ import (
 	"cv-evaluator/internal/servers/match"
 	"cv-evaluator/internal/servers/middleware"
 	portalhttp "cv-evaluator/internal/servers/portalsuggestions"
+	accountsvc "cv-evaluator/internal/services/account"
 	apikeysvc "cv-evaluator/internal/services/apikeys"
 	jobsearchsvc "cv-evaluator/internal/services/jobsearches"
 	"cv-evaluator/internal/services/matcher"
@@ -99,17 +101,24 @@ func run() error {
 	})
 	router := server.Router()
 	jwtSecret := []byte(cfg.JWTSecret)
-	acceptAPIKeys := middleware.WithAPIKeyVerifier(apiKeyVerifier)
-	authhttp.New(router, usersService, jwtSecret, apiKeyVerifier)
-	apikeyhttp.New(router, apiKeyService, jwtSecret, apiKeyVerifier)
-	cv.New(router, usersService, jwtSecret, acceptAPIKeys)
-	match.New(router, matchService, jwtSecret, acceptAPIKeys)
+	// Every authenticated route accepts API keys as well as JWTs, and rejects
+	// JWTs issued before the user's last password change (or for a deleted
+	// user). API keys stay valid across password changes.
+	authOpts := []middleware.Option{
+		middleware.WithAPIKeyVerifier(apiKeyVerifier),
+		middleware.WithSessionValidator(authhttp.NewSessionValidator(usersService)),
+	}
+	authhttp.New(router, usersService, jwtSecret, authOpts...)
+	accounthttp.New(router, usersService, accountsvc.New(dbase), jwtSecret, authOpts...)
+	apikeyhttp.New(router, apiKeyService, jwtSecret, authOpts...)
+	cv.New(router, usersService, jwtSecret, authOpts...)
+	match.New(router, matchService, jwtSecret, authOpts...)
 
 	// Job searches run against every supported portal; users can suggest more.
 	// Pass providers.WithTransport(rt) to Default to instrument scraper requests.
 	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
-	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, apiKeyVerifier)
-	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, apiKeyVerifier)
+	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, authOpts...)
+	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, authOpts...)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

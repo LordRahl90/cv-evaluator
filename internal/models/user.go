@@ -7,6 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// User is an account. PasswordChangedAt is when the password was last
+// changed (nil if never): session tokens issued before it are rejected.
 type User struct {
 	ID        ulid.ULID `gorm:"type:bytea;primaryKey"`
 	CreatedAt time.Time
@@ -18,6 +20,8 @@ type User struct {
 	Email     string
 	Phone     string
 	Password  string
+
+	PasswordChangedAt *time.Time
 }
 
 func (u *User) BeforeCreate(*gorm.DB) error {
