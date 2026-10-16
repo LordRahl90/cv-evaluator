@@ -20,6 +20,12 @@
 @import './components/sidebar.css';
 @import './components/user-menu.css';
 @import './components/empty-state.css';
+@import './components/button-extras.css';
+@import './components/switch.css';
+@import './components/segmented.css';
+@import './components/checkbox.css';
+@import './components/action-menu.css';
+@import './components/portal-logo.css';
 @import './components/confirm-dialog.css';
 @import './components/upload.css';
 @import './components/score.css';
@@ -32,6 +38,10 @@
 @import './pages/auth.css';
 @import './pages/app.css';
 @import './pages/dashboard.css';
+
+/* Job searches */
+@import './pages/job-searches.css';
+@import './pages/job-search-form.css';
 
 /* CVs and Quick match */
 @import './pages/cvs.css';

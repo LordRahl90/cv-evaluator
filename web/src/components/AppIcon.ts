@@ -48,8 +48,17 @@ const ICONS = {
   chevronDown: [['path', { d: 'm6 9 6 6 6-6' }]],
   arrowLeft: [['path', { d: 'M19 12H5M11 6l-6 6 6 6' }]],
   refresh: [['path', { d: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7' }]],
-  download: [['path', { d: 'M12 4v12M7 11l5 5 5-5M4 20h16' }]],
+  // Job searches
+  rerun: [['path', { d: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4' }]],
+  more: [
+    ['circle', { cx: 12, cy: 5, r: 1 }],
+    ['circle', { cx: 12, cy: 12, r: 1 }],
+    ['circle', { cx: 12, cy: 19, r: 1 }],
+  ],
+  pencil: [['path', { d: 'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4' }]],
   trash: [['path', { d: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3' }]],
+  chevronLeft: [['path', { d: 'm15 6-6 6 6 6' }]],
+  download: [['path', { d: 'M12 4v12M7 11l5 5 5-5M4 20h16' }]],
   partial: [
     ['circle', { cx: 12, cy: 12, r: 9 }],
     ['path', { d: 'M8 12h8' }],
