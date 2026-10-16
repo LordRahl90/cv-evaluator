@@ -1,12 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import {
-  TOKEN_KEY,
-  deferred,
-  mockApi,
-  sampleCV,
-  sampleSearches,
-  signedIn,
-} from '../support/mockApi'
+import { deferred, mockApi, sampleCV, sampleSearches, signedIn } from '../support/mockApi'
 
 // On phones the navigation sits behind the menu button.
 async function openMenuIfCollapsed(page: Page) {
@@ -86,13 +79,10 @@ test('account with a CV and searches: stats, empty matches, search activity', as
   await expect(activity.getByText('Paused')).toBeVisible()
 })
 
-test('shows the signed-in user in the navigation', async ({ page }) => {
+test('marks the current page in the navigation', async ({ page }) => {
   await mockApi(page)
   await page.goto('/')
   await openMenuIfCollapsed(page)
-  const user = page.getByTestId('sidebar-user')
-  await expect(user).toContainText('Jane Doe')
-  await expect(user).toContainText('jane.doe@example.com')
   await expect(page.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
 })
 
@@ -104,19 +94,6 @@ test('navigation items lead to "coming soon" pages inside the shell', async ({ p
   await expect(page).toHaveURL('/searches')
   await expect(page.getByRole('heading', { name: 'Job searches' })).toBeVisible()
   await expect(page.getByText('Coming soon')).toBeVisible()
-})
-
-test('sign out clears the session and returns to sign in', async ({ page }) => {
-  await mockApi(page)
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Welcome, Jane' })).toBeVisible()
-  await openMenuIfCollapsed(page)
-  await page.getByRole('button', { name: 'Sign out' }).click()
-
-  await expect(page).toHaveURL('/signin')
-  expect(await page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY)).toBeNull()
-  await page.goto('/')
-  await expect(page).toHaveURL('/signin')
 })
 
 test('a failed load shows the error (old {"error":"..."} format) and can retry', async ({

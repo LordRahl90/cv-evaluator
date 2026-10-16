@@ -1,7 +1,8 @@
 /*
  * sidebar.css — the app navigation (AppShell). From 768px up it is the
  * white left sidebar from the mockups; below that it becomes a top bar
- * with a menu button that opens the same links as a drop-down panel.
+ * with the account menu and a menu button that opens the same links as a
+ * drop-down panel.
  */
 @layer components {
   .sidebar {
@@ -22,6 +23,11 @@
   .sidebar-brand-link:hover {
     @apply text-ink;
     border-radius: var(--radius-nav);
+  }
+
+  .sidebar-top-actions {
+    @apply flex items-center;
+    gap: 4px;
   }
 
   .sidebar-toggle .icon {
@@ -63,59 +69,10 @@
     @apply bg-accent-soft text-accent-ink;
   }
 
-  .sidebar-foot {
-    @apply flex items-center gap-2.5;
-    margin-top: 12px;
-    padding: 14px 0 0 10px;
-    border-top: 1px solid var(--color-divider);
-  }
-
-  .avatar {
-    @apply flex items-center justify-center bg-avatar text-accent-ink;
-    width: 32px;
-    height: 32px;
-    flex: none;
-    border-radius: 999px;
-    font-weight: 600;
-    font-size: 12px;
-  }
-
-  .avatar.skeleton {
-    background-size: 200% 100%;
-  }
-
-  .sidebar-user {
-    @apply flex min-w-0 flex-1 flex-col;
-    gap: 4px;
-  }
-
-  .sidebar-user-name {
-    font-weight: 600;
-    line-height: 1.3;
-  }
-
-  .sidebar-user-name,
-  .sidebar-user-email {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .sidebar-user-email {
-    @apply text-muted;
-    font-size: 12.5px;
-    line-height: 1.3;
-  }
-
-  .sidebar-signout .icon {
-    width: 18px;
-    height: 18px;
-  }
-
   @media (min-width: 768px) {
     .sidebar {
       @apply flex flex-col;
-      width: 240px;
+      width: 220px;
       height: 100vh;
       flex: none;
       padding: 20px 12px;
@@ -141,10 +98,6 @@
 
     .sidebar-nav {
       padding-top: 0;
-    }
-
-    .sidebar-foot {
-      margin-top: auto;
     }
   }
 }

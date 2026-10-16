@@ -21,7 +21,7 @@ test('sign in and sign up fit a 375px screen', async ({ page }) => {
   await expectNoHorizontalScroll(page)
 })
 
-test('the overview fits a 375px screen, with the menu closed and open', async ({ page }) => {
+test('the overview fits a 375px screen, with the menus closed and open', async ({ page }) => {
   await signedIn(page)
   await mockApi(page, { cvs: [sampleCV], searches: sampleSearches() })
   await page.goto('/')
@@ -38,6 +38,16 @@ test('the overview fits a 375px screen, with the menu closed and open', async ({
     'true',
   )
   await expect(page.getByRole('link', { name: 'Job searches' })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  // The account menu shares the top bar and its drop-down stays on screen.
+  await page.getByRole('button', { name: 'Close menu' }).click()
+  await page.getByRole('button', { name: 'Account menu' }).click()
+  const panel = page.getByRole('menu', { name: 'Account' })
+  await expect(panel).toBeVisible()
+  const box = await panel.boundingBox()
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(375)
   await expectNoHorizontalScroll(page)
 })
 

@@ -1,12 +1,22 @@
 /*
- * app.css — the signed-in shell (AppShell) and what every page inside it
- * shares: the main column, the centred content width and the page header
- * (title, subtitle, actions).
+ * app.css — the signed-in shell (AppShell), the slim top bar with the account
+ * menu, and what every page inside it shares: the main column, the centred
+ * content width and the page header (title, subtitle, actions).
  */
 @layer components {
   .app {
     @apply flex flex-col;
     min-height: 100vh;
+  }
+
+  .app-body {
+    @apply flex min-w-0 flex-1 flex-col;
+  }
+
+  /* Slim bar above the page holding the account menu (wider screens only;
+     on phones the menu sits in the sidebar's top bar). */
+  .topbar {
+    display: none;
   }
 
   .main {
@@ -52,6 +62,16 @@
   @media (min-width: 768px) {
     .app {
       flex-direction: row;
+    }
+
+    .topbar {
+      @apply flex items-center justify-end bg-canvas;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      min-height: 60px;
+      padding: 0 32px;
+      border-bottom: 1px solid var(--color-line);
     }
 
     .main {

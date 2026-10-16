@@ -1,0 +1,121 @@
+/*
+ * user-menu.css — the account menu at the top right (UserMenu): the trigger
+ * (avatar, name, chevron) and the drop-down with the email and "Sign out".
+ * On phones the trigger shrinks to the avatar; the name is in the drop-down.
+ */
+@layer components {
+  .user-menu {
+    position: relative;
+    flex: none;
+  }
+
+  .avatar {
+    @apply flex items-center justify-center bg-avatar text-accent-ink;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 12px;
+  }
+
+  .user-menu-trigger {
+    @apply inline-flex cursor-pointer items-center gap-2.5 bg-transparent text-ink;
+    max-width: 260px;
+    min-height: 40px;
+    padding: 4px 8px 4px 4px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font: inherit;
+    font-weight: 600;
+  }
+
+  .user-menu-trigger:hover,
+  .user-menu.is-open .user-menu-trigger {
+    @apply bg-surface;
+    border-color: var(--color-line);
+  }
+
+  .user-menu-trigger > .icon {
+    @apply text-muted;
+    width: 16px;
+    height: 16px;
+    transition: transform 120ms ease;
+  }
+
+  .user-menu.is-open .user-menu-trigger > .icon {
+    transform: rotate(180deg);
+  }
+
+  .user-menu-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-menu-panel {
+    @apply bg-surface;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    width: 260px;
+    max-width: calc(100vw - 32px);
+    padding: 6px;
+    box-sizing: border-box;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow:
+      0 12px 32px rgb(23 25 30 / 0.12),
+      0 2px 6px rgb(23 25 30 / 0.06);
+  }
+
+  .user-menu-header {
+    padding: 10px 10px 12px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  .user-menu-header-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .user-menu-header-email {
+    @apply text-muted;
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+
+  .user-menu-item {
+    @apply flex w-full cursor-pointer items-center gap-2.5 bg-transparent text-ink-soft;
+    padding: 10px;
+    border: 0;
+    border-radius: var(--radius-nav);
+    font: inherit;
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .user-menu-item:hover,
+  .user-menu-item:focus-visible {
+    @apply bg-nav-hover text-ink;
+  }
+
+  /* Phones: avatar only, in the mobile top bar. */
+  .user-menu-mobile .user-menu-trigger {
+    padding: 2px;
+    gap: 4px;
+  }
+
+  .user-menu-mobile .user-menu-name {
+    display: none;
+  }
+
+  @media (min-width: 768px) {
+    .user-menu-mobile {
+      display: none;
+    }
+  }
+}
