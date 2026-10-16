@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"html/template"
 	"log/slog"
+	"text/template"
 
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/llm/prompts"

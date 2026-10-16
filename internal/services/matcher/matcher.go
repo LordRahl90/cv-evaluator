@@ -119,10 +119,18 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 		return nil, "", err
 	}
 
+	header, err := s.cvHeader(ctx, scope)
+	if err != nil {
+		return nil, "", err
+	}
+
 	matchInput := &entities.MatchInput{
 		JobDescription: job.Detail,
+		JobLocation:    job.Location,
+		CVHeader:       header,
 		RelevantCV:     s.buildCVContext(ctx, results),
-		Scores:         computeScores(results),
+		Hints:          similarityHints(results),
+		Criteria:       entities.EvaluationCriteria,
 	}
 
 	raw, err := s.jobMatchLLM.JobMatch(ctx, matchInput)
@@ -137,8 +145,38 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 	return response, raw, nil
 }
 
+// cvHeaderLength is how much of the start of the CV text goes into the
+// prompt as the CV header.
+const cvHeaderLength = 600
+
+// cvHeader returns the start of the CV's text, where contact details such
+// as the candidate's location usually are. For a user scope it uses the
+// user's newest CV. It is empty when there is no CV.
+func (s *Service) cvHeader(ctx context.Context, scope sectionScope) (string, error) {
+	query := s.db.WithContext(ctx).Model(&models.CV{}).Select("extracted_content")
+	if scope.cvID != (ulid.ULID{}) {
+		query = query.Where("id = ?", scope.cvID)
+	} else {
+		query = query.Where("user_id = ?", scope.userID).Order("created_at DESC")
+	}
+
+	var contents []string
+	if err := query.Limit(1).Pluck("extracted_content", &contents).Error; err != nil {
+		return "", fmt.Errorf("load CV header: %w", err)
+	}
+	if len(contents) == 0 {
+		return "", nil
+	}
+	header := strings.TrimSpace(contents[0])
+	if r := []rune(header); len(r) > cvHeaderLength {
+		header = string(r[:cvHeaderLength])
+	}
+	return header, nil
+}
+
 // decodeResponse parses the LLM's JSON answer. The decode error is wrapped
-// so callers can see why the response was rejected.
+// so callers can see why the response was rejected. Only known criteria are
+// kept, each once (the first wins), with scores clamped to 0-100.
 func decodeResponse(raw string) (*Response, error) {
 	var response *Response
 	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&response); err != nil {
@@ -147,32 +185,71 @@ func decodeResponse(raw string) (*Response, error) {
 	if response == nil {
 		return nil, errors.New("failed to decode LLM response: empty response")
 	}
+
+	response.OverallScore = clampScore(response.OverallScore)
+	kept := make([]CriterionScore, 0, len(response.Breakdown))
+	seen := map[string]bool{}
+	for _, s := range response.Breakdown {
+		s.Criterion = strings.ToLower(strings.TrimSpace(s.Criterion))
+		if !entities.IsEvaluationCriterion(s.Criterion) || seen[s.Criterion] {
+			continue
+		}
+		seen[s.Criterion] = true
+		s.Score = clampScore(s.Score)
+		s.Reason = strings.TrimSpace(s.Reason)
+		kept = append(kept, s)
+	}
+	response.Breakdown = kept
 	return response, nil
 }
 
-func computeScores(req []MatchResult) entities.Score {
-	var (
-		content = make(map[string]float64)
-		result  = entities.Score{}
-	)
+func clampScore(n int) int {
+	return max(0, min(100, n))
+}
 
-	for _, v := range req {
-		content[v.SectionHeading] = float64(v.Score)
+// hintSections are the CV sections reported as similarity hints, with the
+// label they are shown under. Labels say what was compared, so the LLM does
+// not mistake e.g. the title similarity for a seniority assessment.
+var hintSections = []struct{ heading, label string }{
+	{"skills", "Skills section similarity"},
+	{"experience", "Experience section similarity"},
+	{"education", "Education section similarity"},
+	{"summary", "Summary section similarity"},
+	{"title", "Title similarity"},
+}
+
+// similarityHints turns the closest CV sections into labelled hints: the
+// best similarity per section (0-100), then the weighted similarity across
+// sections using the section weights.
+func similarityHints(results []MatchResult) []entities.SimilarityHint {
+	best := map[string]float64{}
+	for _, r := range results {
+		heading := strings.ToLower(r.SectionHeading)
+		if s := float64(r.Score); s > best[heading] {
+			best[heading] = s
+		}
 	}
 
-	skills := content["skills"]
-	summary := content["summary"]
-	experience := content["experience"]
-	education := content["education"]
-	title := content["title"]
-
-	result.Skills = skills * breakDown["skills"]
-	result.Experience = experience * breakDown["experience"]
-	result.Domain = summary * breakDown["summary"]
-	result.Education = education * breakDown["education"]
-	result.Title = title * breakDown["title"]
-
-	return result
+	var (
+		hints              []entities.SimilarityHint
+		weighted, totalWts float64
+	)
+	for _, sec := range hintSections {
+		score, ok := best[sec.heading]
+		if !ok {
+			continue
+		}
+		hints = append(hints, entities.SimilarityHint{Label: sec.label, Score: score * 100})
+		weighted += score * breakDown[sec.heading]
+		totalWts += breakDown[sec.heading]
+	}
+	if totalWts > 0 {
+		hints = append(hints, entities.SimilarityHint{
+			Label: "Weighted similarity across sections",
+			Score: weighted / totalWts * 100,
+		})
+	}
+	return hints
 }
 
 func (s *Service) buildCVContext(ctx context.Context, input []MatchResult) string {
