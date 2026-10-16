@@ -48,6 +48,10 @@ const ICONS = {
   chevronDown: [['path', { d: 'm6 9 6 6 6-6' }]],
   arrowLeft: [['path', { d: 'M19 12H5M11 6l-6 6 6 6' }]],
   refresh: [['path', { d: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7' }]],
+  copy: [
+    ['path', { d: 'M11 9h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z' }],
+    ['path', { d: 'M5 15V5a1 1 0 0 1 1-1h10' }],
+  ],
 } satisfies Record<string, Shape[]>
 
 export type IconName = keyof typeof ICONS

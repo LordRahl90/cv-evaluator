@@ -471,3 +471,122 @@ export async function mockResults(page: Page, options: ResultsMockOptions = {}) 
   })
   return { listCalls, writes, results }
 }
+
+// ---- API keys (GET/POST /api-keys, DELETE /api-keys/:id) ----------------
+
+export interface MockApiKey {
+  object: 'api_key'
+  id: string
+  name: string
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/**
+ * A clearly fake secret, safe to show in screenshots. Joined at runtime so
+ * secret scanners don't mistake the literal for a real (Stripe-style) key.
+ */
+export const FAKE_SECRET = ['sk', 'live', 'EXAMPLE0nlyN0tARealKey000000000000000000'].join('_')
+
+export function sampleApiKeys(): MockApiKey[] {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
+  return [
+    {
+      object: 'api_key',
+      id: '01JA2B3C4D5E6F7G8H9J0KAK01',
+      name: 'Zapier',
+      prefix: 'sk_live_Hq2v',
+      created_at: '2026-10-02T09:00:00Z',
+      last_used_at: ago(12 * 60_000),
+    },
+    {
+      object: 'api_key',
+      id: '01JA2B3C4D5E6F7G8H9J0KAK02',
+      name: 'Laptop CLI',
+      prefix: 'sk_live_p0Lm',
+      created_at: '2026-09-18T09:00:00Z',
+      last_used_at: ago(9 * 86_400_000),
+    },
+  ]
+}
+
+export interface MockApiKeysOptions {
+  keys?: MockApiKey[]
+  /** Held until resolved, so tests can see the loading state. */
+  gate?: Promise<void>
+  /** Status for GET /api-keys (e.g. 500). */
+  listStatus?: number
+  /** Error answer for POST /api-keys instead of creating a key. */
+  createError?: { status: number; body: unknown }
+  /** Error answer for DELETE /api-keys/:id instead of revoking. */
+  revokeError?: { status: number; body: unknown }
+  /** Held until resolved before answering POST and DELETE. */
+  writeGate?: Promise<void>
+}
+
+/**
+ * A small in-memory API key store behind /api-keys. Returns the live list
+ * and the requests seen, so tests can assert on both.
+ */
+export async function mockApiKeys(page: Page, options: MockApiKeysOptions = {}) {
+  const keys = [...(options.keys ?? [])]
+  const created: { name: string }[] = []
+  const revoked: string[] = []
+
+  await page.route('**/api/api-keys', async (route) => {
+    const method = route.request().method()
+    if (method === 'GET') {
+      if (options.gate) await options.gate
+      if (options.listStatus && options.listStatus !== 200) {
+        return json(
+          route,
+          options.listStatus,
+          apiError('api_error', 'internal_error', 'Something went wrong on our side.'),
+        )
+      }
+      return json(route, 200, { object: 'list', data: keys })
+    }
+    if (method === 'POST') {
+      if (options.writeGate) await options.writeGate
+      const body = route.request().postDataJSON() as { name: string }
+      created.push(body)
+      if (options.createError) {
+        return json(route, options.createError.status, options.createError.body)
+      }
+      const key: MockApiKey = {
+        object: 'api_key',
+        id: `01JA2B3C4D5E6F7G8H9J0KNEW${created.length}`,
+        name: body.name,
+        prefix: FAKE_SECRET.slice(0, 12),
+        created_at: new Date().toISOString(),
+        last_used_at: null,
+      }
+      keys.unshift(key)
+      return json(route, 201, { ...key, secret: FAKE_SECRET })
+    }
+    return route.fallback()
+  })
+
+  await page.route('**/api/api-keys/*', async (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback()
+    if (options.writeGate) await options.writeGate
+    const id = decodeURIComponent(route.request().url().split('/').pop() ?? '')
+    revoked.push(id)
+    if (options.revokeError) {
+      return json(route, options.revokeError.status, options.revokeError.body)
+    }
+    const index = keys.findIndex((k) => k.id === id)
+    if (index === -1) {
+      return json(
+        route,
+        404,
+        apiError('invalid_request_error', 'resource_missing', 'No such API key.', 'id'),
+      )
+    }
+    keys.splice(index, 1)
+    return json(route, 200, { object: 'api_key', id, deleted: true })
+  })
+
+  return { keys, created, revoked }
+}

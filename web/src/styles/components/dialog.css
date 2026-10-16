@@ -1,0 +1,54 @@
+/*
+ * dialog.css — the modal dialog (ModalDialog): a centred white panel on a
+ * dimmed backdrop, its title, body text and the row of actions. Full width
+ * minus a 16px gutter on phones.
+ */
+@layer components {
+  .dialog {
+    @apply bg-surface text-ink;
+    box-sizing: border-box;
+    width: calc(100vw - 32px);
+    max-width: 460px;
+    /* Preflight zeroes margins; auto centres the modal in the viewport. */
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow:
+      0 24px 64px rgb(23 25 30 / 0.18),
+      0 4px 12px rgb(23 25 30 / 0.08);
+  }
+
+  .dialog::backdrop {
+    background: rgb(23 25 30 / 0.4);
+  }
+
+  .dialog-panel {
+    @apply flex flex-col;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .dialog-title {
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+
+  .dialog-form {
+    @apply flex flex-col;
+    gap: 16px;
+  }
+
+  .dialog-text {
+    @apply text-muted;
+    margin: 0;
+  }
+
+  .dialog-actions {
+    @apply flex flex-wrap justify-end;
+    gap: 10px;
+    padding-top: 4px;
+  }
+}

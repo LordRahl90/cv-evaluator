@@ -20,6 +20,10 @@
 @import './components/sidebar.css';
 @import './components/user-menu.css';
 @import './components/empty-state.css';
+@import './components/dialog.css';
+@import './components/button-variants.css';
+@import './components/data-table.css';
+@import './components/code-block.css';
 
 @import './pages/auth.css';
 @import './pages/app.css';
@@ -31,3 +35,7 @@
 @import './pages/matches.css';
 @import './pages/match-detail.css';
 @import './pages/dashboard-matches.css';
+
+/* API keys and settings */
+@import './pages/api-keys.css';
+@import './pages/settings.css';

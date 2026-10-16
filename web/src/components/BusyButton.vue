@@ -4,7 +4,7 @@ withDefaults(
     busy?: boolean
     busyLabel?: string
     type?: 'submit' | 'button'
-    variant?: 'primary' | 'secondary'
+    variant?: 'primary' | 'secondary' | 'danger'
   }>(),
   { busy: false, busyLabel: 'Working…', type: 'submit', variant: 'primary' },
 )
