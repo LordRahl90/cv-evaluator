@@ -1,6 +1,6 @@
 # CV Evaluator
 
-CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF CV, stores CV and job embeddings in PostgreSQL (`pgvector`), retrieves the most relevant CV sections by vector similarity, and asks an LLM (DeepSeek) to produce a structured JSON match result.
+CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF CV, stores CV and job embeddings in PostgreSQL (`pgvector`), and asks an LLM (DeepSeek) to evaluate the full CV against each job, producing a structured JSON result with evidence and per-criterion scores.
 
 ## Current status
 
@@ -10,38 +10,38 @@ CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF
 
 ## How it works
 
-1. **CV processing** (`users.Service.ProcessCV`): extracts text from the PDF, embeds the full CV, asks a chat LLM to split it into sections (`summary`, `experience`, `skills`, `education`, `title`), and stores an embedding per section.
+1. **CV processing** (`users.Service.ProcessCV`): extracts text from the PDF, embeds the full CV, asks a chat LLM to parse it into sections (`title`, `summary`, `skills`, `experience`, `education`, `certifications`, `languages`, `projects`), and stores an embedding per non-empty section.
 2. **Job ingest** (`jobs.Service.ProcessJob`): scrapes LinkedIn search results and job details, stores each posting once globally (unique on provider and job ID), and embeds its description once.
-3. **Matching** (`matcher.Service`): embeds the job description (or reuses a stored job's embedding), fetches the 10 closest CV sections by cosine distance, and sends DeepSeek the `jobmatch.tpl` prompt. The prompt includes the job description and listed location, the start of the CV (where the candidate's location usually is), the closest sections, and labelled similarity hints (for example "Title similarity").
+3. **Matching** (`matcher.Service`): sends DeepSeek the `jobmatch.tpl` prompt with the job description and the **full** CV text (a CV is short, so nothing is filtered out). The instructions, output schema and score scale go in the system message; the job (inside `<job_description>` tags) and the CV (inside `<cv>` tags) go in the user message, and the prompt treats tagged content as data, never instructions. Temperature is 0.2, so re-running a match gives stable scores. Job descriptions in other languages (for example Danish) are evaluated as written, with the output in English.
 
-The criteria the LLM scores are defined in one list, `entities.EvaluationCriteria`: skills, experience, seniority, domain, education and location. The prompt's response schema and instructions are generated from that list, and only those criteria are kept when parsing. To add a criterion, add it there and bump `pipeline.DefaultPromptVersion`.
+The criteria the LLM scores are defined in one list, `entities.EvaluationCriteria`: skills, experience, seniority, domain and education. Location is deliberately not scored: every search already filters by the location the user chose, and users may search far from where they live, so the prompt tells the LLM not to penalise it and only to mention it in the summary when the job needs on-site work or relocation. The prompt's response schema and instructions are generated from that list, and only those criteria are kept when parsing. To add a criterion, add it there and bump `pipeline.DefaultPromptVersion`.
 
-Section weights used for the weighted similarity hint:
-
-| Section    | Weight |
-|------------|--------|
-| skills     | 0.40   |
-| experience | 0.25   |
-| education  | 0.15   |
-| summary    | 0.10   |
-| title      | 0.10   |
+The LLM fills the response in order: first the job's **requirements** (must-have or nice-to-have, whether the CV meets each, and the CV evidence), then the per-criterion **breakdown**, then the **overall score**, so it reasons before it scores. Every score uses one scale: 90-100 meets every must-have and most nice-to-haves, 70-89 meets every must-have with some gaps, 50-69 misses one must-have or is at the wrong level, 0-49 misses several. A missing must-have caps the overall score at 69, which the matcher also enforces in code.
 
 The LLM response, which is also the `/match/*` response body, looks like this:
 
 ```json
 {
-  "overall_score": 78,
+  "requirements": [
+    {"requirement": "5+ years of Go", "importance": "must", "met": "yes", "evidence": "6 years building Go microservices"},
+    {"requirement": "Logistics domain", "importance": "nice", "met": "no", "evidence": ""}
+  ],
   "breakdown": [
     {"criterion": "skills", "score": 85, "reason": "Strong Go and Postgres"},
-    {"criterion": "location", "score": 90, "reason": "Hybrid role in the candidate's city"}
+    {"criterion": "domain", "score": 70, "reason": "Payments experience, new to logistics"}
   ],
-  "strengths": [],
-  "missing_skills": [],
-  "summary": ""
+  "overall_score": 78,
+  "strengths": ["6 years of production Go", "Kafka event pipelines"],
+  "missing_skills": ["Logistics domain"],
+  "summary": "You meet every must-have ..."
 }
 ```
 
-Scores are integers from 0 to 100. A criterion the LLM could not assess is left out of `breakdown`; it is never reported as 0. The background worker stores `overall_score` on `evaluations` and one `evaluation_scores` row per criterion, indexed on `(criterion, score)` for filtering.
+Scores are integers from 0 to 100. A criterion the LLM could not assess is left out of `breakdown`; it is never reported as 0. `strengths` and `missing_skills` hold at most 5 items each. Matching without a CV returns `422` on the `/match/*` routes. The background worker stores `overall_score` on `evaluations` and one `evaluation_scores` row per criterion, indexed on `(criterion, score)` for filtering.
+
+### Prompt evaluation
+
+`make eval-prompt` runs 11 fictional CV and job pairs against the real DeepSeek API and checks that each overall score lands in its expected band. The cases cover a strong fit, a wrong discipline, a junior candidate, a missing must-have, a Danish job description, a prompt-injection attempt, and a candidate whose only Go experience is side projects. It also reports how much scores vary between runs. Cases live in `internal/services/matcher/testdata/prompt_eval.json`; run it before and after changing a prompt. It needs `DEEPSEEK_API_KEY`, makes 33 requests (`EVAL_RUNS=3` per case) and is excluded from normal test runs and CI by the `eval` build tag.
 
 ## Models used
 

@@ -22,7 +22,7 @@ func TestMatchByJobDescription_Success(t *testing.T) {
 		OverallScore: 85,
 		Breakdown: []matcher.CriterionScore{
 			{Criterion: "skills", Score: 90, Reason: "Go and distributed systems"},
-			{Criterion: "location", Score: 70, Reason: "hybrid, same country"},
+			{Criterion: "domain", Score: 70, Reason: "fintech background"},
 		},
 		Strengths:     []string{"Go", "Distributed systems"},
 		MissingSkills: []string{"Kubernetes"},
@@ -148,4 +148,17 @@ func TestMatchRoutes_InvalidToken(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	svc.AssertNotCalled(t, "MatchByJobDescription")
+}
+
+func TestMatchByJobDescription_NoCV(t *testing.T) {
+	svc := new(MockJobMatcher)
+	userID := ulid.Make()
+	svc.On("MatchByJobDescription", mock.Anything, userID, "We are looking for a Go engineer").
+		Return(nil, matcher.ErrNoCV)
+
+	w := performRequest(newTestRouter(svc, userID), http.MethodPost, "/match/job-description",
+		`{"job_description":"We are looking for a Go engineer"}`)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	assert.JSONEq(t, `{"error":"upload a CV before matching"}`, w.Body.String())
 }

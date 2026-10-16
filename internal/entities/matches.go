@@ -17,12 +17,17 @@ type Criterion struct {
 // a criterion, add it here (and bump the matcher's prompt version).
 var EvaluationCriteria = []Criterion{
 	{
-		Name:     "skills",
-		Guidance: "How well the candidate's technical and soft skills cover the skills the job requires.",
+		Name: "skills",
+		Guidance: "How well the candidate's technical and soft skills cover the skills the job requires. " +
+			"A skill counts as shown when the CV demonstrates it in a role, a project or a certification; " +
+			"a bare list of skills is weaker evidence than using them.",
 	},
 	{
-		Name:     "experience",
-		Guidance: "How relevant and deep the candidate's work experience is for the job's responsibilities.",
+		Name: "experience",
+		Guidance: "How relevant and deep the candidate's work experience is for the job's responsibilities. " +
+			"Professional roles count fully. Side projects and open source support it but count for less, " +
+			"and never toward a stated number of years of professional experience: when they are the only " +
+			"evidence for such a requirement, mark it \"partial\", not \"yes\".",
 	},
 	{
 		Name: "seniority",
@@ -35,16 +40,17 @@ var EvaluationCriteria = []Criterion{
 	},
 	{
 		Name: "education",
-		Guidance: "Whether the candidate's degrees and certifications meet the job's education requirements. " +
-			"If the job states none, score by how well the education supports the role.",
-	},
-	{
-		Name: "location",
-		Guidance: "Compare the job's location and remote, hybrid or on-site policy with the candidate's " +
-			"location from the CV. Remote-friendly roles, or the same city or commuting area, score high; " +
-			"an on-site role in another country scores low. If the CV gives no location, leave this criterion out.",
+		Guidance: "Whether the candidate's degrees and certifications meet the job's education and " +
+			"qualification requirements. A certification the job names fully meets that requirement, and a " +
+			"relevant certification can stand in for formal education when the job allows equivalent " +
+			"experience. If the job states none, score by how well the education supports the role.",
 	},
 }
+
+// Location is deliberately not a criterion: every search already filters by
+// the location the user chose, and users may search far from where they
+// live, so scoring it would mostly repeat or contradict their own choice.
+// The job's listed location is still shown to the LLM as context.
 
 // IsEvaluationCriterion reports whether name is in EvaluationCriteria.
 func IsEvaluationCriterion(name string) bool {
@@ -56,25 +62,14 @@ func IsEvaluationCriterion(name string) bool {
 	return false
 }
 
-// SimilarityHint is an embedding-based similarity between the job
-// description and part of the CV, on a 0-100 scale.
-type SimilarityHint struct {
-	Label string
-	Score float64
-}
-
 // MatchInput is everything the match prompt is rendered from.
 type MatchInput struct {
 	JobDescription string
 	// JobLocation is the location the portal lists for the job, if any.
+	// It is context only; location is not scored.
 	JobLocation string
-	// CVHeader is the start of the CV text, where contact details such as
-	// the candidate's location usually are.
-	CVHeader string
-	// RelevantCV is the CV sections closest to the job description.
-	RelevantCV string
-	// Hints are embedding similarities, labelled by what they compare.
-	Hints []SimilarityHint
+	// CV is the candidate's full CV text.
+	CV string
 	// Criteria to score. Empty means EvaluationCriteria.
 	Criteria []Criterion
 }
@@ -87,18 +82,40 @@ func (in *MatchInput) CriteriaOrDefault() []Criterion {
 	return EvaluationCriteria
 }
 
+// Requirement importance and whether the CV meets it, as the LLM reports
+// them in the response's "requirements" list.
+const (
+	RequirementMust = "must"
+	RequirementNice = "nice"
+
+	RequirementMet     = "yes"
+	RequirementPartial = "partial"
+	RequirementNotMet  = "no"
+)
+
+type schemaRequirement struct {
+	Requirement string `json:"requirement"`
+	Importance  string `json:"importance"`
+	Met         string `json:"met"`
+	Evidence    string `json:"evidence"`
+}
+
 type schemaScore struct {
 	Criterion string `json:"criterion"`
 	Score     int    `json:"score"`
 	Reason    string `json:"reason"`
 }
 
+// responseSchema fields are in the order the LLM should fill them: the
+// requirements and their evidence first, then the scores that follow from
+// them, so the model reasons before it scores.
 type responseSchema struct {
-	OverallScore  int           `json:"overall_score"`
-	Breakdown     []schemaScore `json:"breakdown"`
-	Strengths     []string      `json:"strengths"`
-	MissingSkills []string      `json:"missing_skills"`
-	Summary       string        `json:"summary"`
+	Requirements  []schemaRequirement `json:"requirements"`
+	Breakdown     []schemaScore       `json:"breakdown"`
+	OverallScore  int                 `json:"overall_score"`
+	Strengths     []string            `json:"strengths"`
+	MissingSkills []string            `json:"missing_skills"`
+	Summary       string              `json:"summary"`
 }
 
 // ResponseSchema returns the JSON shape the LLM must answer with, with one
@@ -106,6 +123,10 @@ type responseSchema struct {
 func (in *MatchInput) ResponseSchema() string {
 	criteria := in.CriteriaOrDefault()
 	schema := responseSchema{
+		Requirements: []schemaRequirement{{
+			Importance: RequirementMust + "|" + RequirementNice,
+			Met:        RequirementMet + "|" + RequirementPartial + "|" + RequirementNotMet,
+		}},
 		Breakdown:     make([]schemaScore, len(criteria)),
 		Strengths:     []string{},
 		MissingSkills: []string{},

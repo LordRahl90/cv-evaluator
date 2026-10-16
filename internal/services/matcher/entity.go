@@ -1,27 +1,11 @@
 package matcher
 
-// MatchResult holds a CV section alongside its similarity score (0–1) and
-// raw cosine distance (0–2) relative to the query embedding.
-// Score = 1 - Distance; higher score means a closer match.
-type MatchResult struct {
-	SectionHeading string  `gorm:"column:section_heading" json:"section_heading"`
-	Content        string  `gorm:"column:section"         json:"content"`
-	Distance       float32 `gorm:"column:distance"        json:"distance"`
-	Score          float32 `gorm:"column:score"           json:"score"`
-}
-
-type CVContext struct {
-	Skills     []MatchResult
-	Experience []MatchResult
-	Education  []MatchResult
-	Title      []MatchResult
-	Summary    []MatchResult
-	Other      []MatchResult
-}
-
 // Response is the parsed LLM evaluation of a CV against a job.
 type Response struct {
-	OverallScore int `json:"overall_score"`
+	// Requirements are the job's requirements with whether the CV meets
+	// them and the evidence. The LLM lists them before scoring.
+	Requirements []Requirement `json:"requirements"`
+	OverallScore int           `json:"overall_score"`
 	// Breakdown has at most one score per known criterion (see
 	// entities.EvaluationCriteria), in the LLM's order. A criterion the
 	// LLM did not score is absent.
@@ -29,6 +13,17 @@ type Response struct {
 	Strengths     []string         `json:"strengths"`
 	MissingSkills []string         `json:"missing_skills"`
 	Summary       string           `json:"summary"`
+}
+
+// Requirement is one requirement of the job, how important it is
+// (entities.RequirementMust or RequirementNice), whether the CV meets it
+// (RequirementMet, RequirementPartial or RequirementNotMet) and the CV
+// evidence for it.
+type Requirement struct {
+	Requirement string `json:"requirement"`
+	Importance  string `json:"importance"`
+	Met         string `json:"met"`
+	Evidence    string `json:"evidence"`
 }
 
 // CriterionScore is one criterion's score (0-100) and the reason for it.

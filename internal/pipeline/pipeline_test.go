@@ -72,9 +72,9 @@ func TestPipeline_EndToEnd_IdempotentAcrossRuns(t *testing.T) {
 	var scores []models.EvaluationScore
 	require.NoError(t, testDB.Where("evaluation_id = ?", eval.ID).Order("criterion").Find(&scores).Error)
 	require.Len(t, scores, 2)
-	assert.Equal(t, "location", scores[0].Criterion)
+	assert.Equal(t, "domain", scores[0].Criterion)
 	assert.Equal(t, 90, scores[0].Score)
-	assert.Equal(t, "same city", scores[0].Reason)
+	assert.Equal(t, "logistics background", scores[0].Reason)
 	assert.Equal(t, "skills", scores[1].Criterion)
 
 	// Not due yet: nothing happens.

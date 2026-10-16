@@ -89,7 +89,7 @@ func run() error {
 	}
 
 	usersService := users.NewWithAuth(dbase, cleaner, ollamaLLM, cfg.JWTSecret, 0)
-	matchService := matcher.New(dbase, ollamaLLM, deepseekLLM)
+	matchService := matcher.New(dbase, deepseekLLM)
 	apiKeyService := apikeysvc.New(dbase)
 	apiKeyVerifier := apikeyhttp.NewVerifier(apiKeyService)
 

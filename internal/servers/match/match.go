@@ -126,6 +126,9 @@ func getUserID(c *gin.Context) (ulid.ULID, bool) {
 func handleServiceError(c *gin.Context, err error) {
 	var statusCode int
 	switch {
+	case errors.Is(err, matcher.ErrNoCV):
+		c.JSON(http.StatusUnprocessableEntity, errorResponse("upload a CV before matching"))
+		return
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		statusCode = http.StatusGatewayTimeout
 	default:

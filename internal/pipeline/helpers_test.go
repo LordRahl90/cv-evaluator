@@ -260,7 +260,7 @@ func defaultResponse() *matcher.Response {
 		OverallScore: 77,
 		Breakdown: []matcher.CriterionScore{
 			{Criterion: "skills", Score: 70, Reason: "Go"},
-			{Criterion: "location", Score: 90, Reason: "same city"},
+			{Criterion: "domain", Score: 90, Reason: "logistics background"},
 		},
 		Strengths:     []string{"go"},
 		MissingSkills: []string{"rust"},
