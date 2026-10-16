@@ -20,6 +20,8 @@ import (
 const (
 	taskCVCleanup = "cv_cleanup"
 	taskJobMatch  = "job_match"
+	// taskCoverLetter labels cover letter requests, retries included.
+	taskCoverLetter = "cover_letter"
 )
 
 // Sampling temperatures. Low values keep scores and parsing stable across
@@ -28,6 +30,9 @@ const (
 const (
 	jobMatchTemperature  float32 = 0.2
 	cvCleanupTemperature float32 = 0.1
+	// coverLetterTemperature is a little higher: the letter is prose, and
+	// the server-side checks catch anything that strays from the rules.
+	coverLetterTemperature float32 = 0.4
 )
 
 type Client interface {
@@ -76,10 +81,32 @@ func (s *Service) JobMatch(ctx context.Context, matchInput *entities.MatchInput)
 	return s.callLLM(ctx, taskJobMatch, jobMatchTemperature, system, user)
 }
 
+// CoverLetter writes a cover letter and returns the LLM's raw JSON answer
+// ({"subject": ..., "letter": ...}). When input.Revision is set, the
+// previous answer and the reasons it was rejected follow the first
+// exchange, so the LLM revises its own letter.
+func (s *Service) CoverLetter(ctx context.Context, input *entities.CoverLetterInput) (string, error) {
+	slog.DebugContext(ctx, "Writing a cover letter using DeepSeek LLM", "job_description_length", len(input.JobDescription), "revision", input.Revision != nil)
+
+	messages, err := s.buildCoverLetterMessages(input)
+	if err != nil {
+		return "", err
+	}
+	return s.complete(ctx, taskCoverLetter, coverLetterTemperature, messages)
+}
+
 // callLLM sends one chat completion: the instructions as the system message
 // and the data as the user message. task labels the request (llm.task) in
 // the telemetry recorded by the client built with NewClient.
 func (s *Service) callLLM(ctx context.Context, task string, temperature float32, system, user string) (string, error) {
+	return s.complete(ctx, task, temperature, []deepseek.ChatCompletionMessage{
+		{Role: deepseek.ChatMessageRoleSystem, Content: system},
+		{Role: deepseek.ChatMessageRoleUser, Content: user},
+	})
+}
+
+// complete sends messages as one JSON-mode chat completion.
+func (s *Service) complete(ctx context.Context, task string, temperature float32, messages []deepseek.ChatCompletionMessage) (string, error) {
 	ctx = telemetry.WithOperation(ctx, telemetry.OpChatCompletion, attribute.String(telemetry.AttrLLMTask, task))
 
 	req := &deepseek.ChatCompletionRequest{
@@ -88,10 +115,7 @@ func (s *Service) callLLM(ctx context.Context, task string, temperature float32,
 		ResponseFormat: &deepseek.ResponseFormat{
 			Type: "json_object",
 		},
-		Messages: []deepseek.ChatCompletionMessage{
-			{Role: deepseek.ChatMessageRoleSystem, Content: system},
-			{Role: deepseek.ChatMessageRoleUser, Content: user},
-		},
+		Messages: messages,
 	}
 
 	res, err := s.client.CreateChatCompletion(ctx, req)
@@ -112,21 +136,9 @@ func (s *Service) loadPrompt(fileName string) ([]byte, error) {
 // buildPrompt renders the match prompt's "system" (instructions and
 // output schema) and "user" (the job and CV) templates.
 func (s *Service) buildPrompt(input *entities.MatchInput) (system, user string, err error) {
-	promptContent, err := s.loadPrompt("jobmatch.tpl")
+	render, err := s.templateRenderer("jobmatch.tpl", input)
 	if err != nil {
 		return "", "", err
-	}
-	tmpl, err := template.New("jobmatch").Parse(string(promptContent))
-	if err != nil {
-		return "", "", err
-	}
-
-	render := func(name string) (string, error) {
-		var buf bytes.Buffer
-		if err := tmpl.ExecuteTemplate(&buf, name, input); err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(buf.String()), nil
 	}
 	if system, err = render("system"); err != nil {
 		return "", "", err
@@ -135,4 +147,58 @@ func (s *Service) buildPrompt(input *entities.MatchInput) (system, user string, 
 		return "", "", err
 	}
 	return system, user, nil
+}
+
+// buildCoverLetterMessages renders the cover letter prompt: the rules as
+// the system message and the candidate's name, job, CV and evaluation as
+// the user message. On a revision the previous answer follows as the
+// assistant's message, then the checks it failed as a second user message.
+func (s *Service) buildCoverLetterMessages(input *entities.CoverLetterInput) ([]deepseek.ChatCompletionMessage, error) {
+	render, err := s.templateRenderer("coverletter.tpl", input)
+	if err != nil {
+		return nil, err
+	}
+	system, err := render("system")
+	if err != nil {
+		return nil, err
+	}
+	user, err := render("user")
+	if err != nil {
+		return nil, err
+	}
+	messages := []deepseek.ChatCompletionMessage{
+		{Role: deepseek.ChatMessageRoleSystem, Content: system},
+		{Role: deepseek.ChatMessageRoleUser, Content: user},
+	}
+	if input.Revision == nil {
+		return messages, nil
+	}
+	feedback, err := render("revision")
+	if err != nil {
+		return nil, err
+	}
+	return append(messages,
+		deepseek.ChatCompletionMessage{Role: deepseek.ChatMessageRoleAssistant, Content: input.Revision.Previous},
+		deepseek.ChatCompletionMessage{Role: deepseek.ChatMessageRoleUser, Content: feedback},
+	), nil
+}
+
+// templateRenderer parses the prompt template fileName and returns a
+// function that renders one of its named templates with data, trimmed.
+func (s *Service) templateRenderer(fileName string, data any) (func(name string) (string, error), error) {
+	promptContent, err := s.loadPrompt(fileName)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := template.New(fileName).Parse(string(promptContent))
+	if err != nil {
+		return nil, err
+	}
+	return func(name string) (string, error) {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(buf.String()), nil
+	}, nil
 }

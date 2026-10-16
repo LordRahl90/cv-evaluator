@@ -197,6 +197,23 @@ func TestMatch_NoCVSkipsTheLLM(t *testing.T) {
 	assert.Empty(t, llm.inputs, "no LLM call without a CV")
 }
 
+func TestLatestCVText(t *testing.T) {
+	db := newMatcherTestDB(t)
+	svc := New(db, &fakeJobMatch{})
+	userID := ulid.Make()
+
+	_, err := svc.LatestCVText(t.Context(), userID)
+	require.ErrorIs(t, err, ErrNoCV)
+
+	seedCV(t, db, userID, ulid.Make(), "  Older CV  ")
+	seedCV(t, db, userID, ulid.Make(), "  Newest CV  ")
+	seedCV(t, db, ulid.Make(), ulid.Make(), "Someone else's CV")
+
+	text, err := svc.LatestCVText(t.Context(), userID)
+	require.NoError(t, err)
+	assert.Equal(t, "Newest CV", text)
+}
+
 func TestMatch_TruncatesLongCVsAndStripsPromptTags(t *testing.T) {
 	db := newMatcherTestDB(t)
 	llm := &fakeJobMatch{raw: validResponse}
