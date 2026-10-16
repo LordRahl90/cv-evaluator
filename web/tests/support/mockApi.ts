@@ -130,3 +130,184 @@ export function session(user: User = jane) {
 export function apiError(type: string, code: string, message: string, param?: string) {
   return { error: { type, code, message, ...(param ? { param } : {}) } }
 }
+
+// ---------------------------------------------------------------------------
+// Job searches, providers and portal suggestions (stateful). Register after
+// mockApi(): Playwright matches the most recently added route first.
+
+export const sampleProviders = [
+  {
+    object: 'provider',
+    name: 'jobindex',
+    display_name: 'Jobindex',
+    website: 'https://www.jobindex.dk',
+    coverage: 'Denmark',
+  },
+  {
+    object: 'provider',
+    name: 'linkedin',
+    display_name: 'LinkedIn',
+    website: 'https://www.linkedin.com/jobs',
+    coverage: 'Worldwide',
+  },
+]
+
+export function sampleSuggestions() {
+  return [
+    {
+      object: 'portal_suggestion',
+      id: '01JA2B3C4D5E6F7G8H9J0KPS01',
+      name: 'StepStone',
+      url: 'https://stepstone.de',
+      note: '',
+      status: 'planned',
+      created_at: hoursFromNow(-24 * 6),
+      updated_at: hoursFromNow(-24 * 2),
+    },
+    {
+      object: 'portal_suggestion',
+      id: '01JA2B3C4D5E6F7G8H9J0KPS02',
+      name: 'The Hub',
+      url: 'https://thehub.io',
+      note: '',
+      status: 'submitted',
+      created_at: hoursFromNow(-48),
+      updated_at: hoursFromNow(-48),
+    },
+  ]
+}
+
+export interface MockReply {
+  status: number
+  body: unknown
+}
+
+export interface JobSearchMockOptions {
+  searches?: JobSearch[]
+  providers?: unknown[]
+  suggestions?: unknown[]
+  /** Override any call: return a reply to send instead of the default. */
+  override?: (method: string, path: string, body: unknown) => MockReply | undefined
+  /** Held until resolved (GETs under /job-searches only), to show loading states. */
+  gate?: Promise<void>
+}
+
+export interface JobSearchMock {
+  searches: JobSearch[]
+  suggestions: unknown[]
+  /** Every non-GET call: method, path and JSON body. */
+  calls: { method: string; path: string; body: unknown }[]
+}
+
+let nextId = 100
+
+/** Mocks /job-searches(/:id(/run)), /providers and /portal-suggestions. */
+export async function mockJobSearchesApi(
+  page: Page,
+  options: JobSearchMockOptions = {},
+): Promise<JobSearchMock> {
+  const state: JobSearchMock = {
+    searches: [...(options.searches ?? [])],
+    suggestions: [...(options.suggestions ?? [])],
+    calls: [],
+  }
+  const providers = options.providers ?? sampleProviders
+  const notFound = apiError(
+    'invalid_request_error',
+    'resource_missing',
+    'No such job search.',
+    'id',
+  )
+
+  const handle = (method: string, path: string, body: unknown): MockReply => {
+    const overridden = options.override?.(method, path, body)
+    if (overridden) return overridden
+
+    if (path === '/providers') return { status: 200, body: { object: 'list', data: providers } }
+    if (path === '/portal-suggestions') {
+      if (method === 'GET')
+        return { status: 200, body: { object: 'list', data: state.suggestions } }
+      const req = body as { name?: string; url: string }
+      const now = new Date().toISOString()
+      const created = {
+        object: 'portal_suggestion',
+        id: `01JA2B3C4D5E6F7G8H9J0KP${nextId++}`,
+        name: req.name || req.url.replace(/^https?:\/\//, '').replace(/^www\./, ''),
+        url: req.url,
+        note: '',
+        status: 'submitted',
+        created_at: now,
+        updated_at: now,
+      }
+      state.suggestions.unshift(created)
+      return { status: 201, body: created }
+    }
+    if (path === '/job-searches') {
+      if (method === 'GET') return { status: 200, body: { object: 'list', data: state.searches } }
+      const req = body as Partial<JobSearch> & { query: string }
+      const enabled = req.enabled ?? true
+      const now = new Date().toISOString()
+      const created: JobSearch = {
+        object: 'job_search',
+        id: `01JA2B3C4D5E6F7G8H9J0KS${nextId++}`,
+        name: req.name || req.query,
+        query: req.query,
+        location: req.location ?? '',
+        frequency: req.frequency ?? 'daily',
+        enabled,
+        last_run_at: null,
+        next_run_at: enabled ? now : null,
+        created_at: now,
+        updated_at: now,
+      }
+      state.searches.unshift(created)
+      return { status: 201, body: created }
+    }
+
+    const match = path.match(/^\/job-searches\/([^/]+)(\/run)?$/)
+    const index = match ? state.searches.findIndex((s) => s.id === match[1]) : -1
+    if (!match || index < 0) return { status: 404, body: notFound }
+    const current = state.searches[index]
+
+    if (match[2]) {
+      if (!current.enabled) {
+        return {
+          status: 409,
+          body: apiError(
+            'invalid_request_error',
+            'job_search_disabled',
+            'The job search is disabled. Enable it before running it.',
+          ),
+        }
+      }
+      state.searches[index] = { ...current, next_run_at: new Date().toISOString() }
+      return { status: 202, body: state.searches[index] }
+    }
+    if (method === 'GET') return { status: 200, body: current }
+    if (method === 'DELETE') {
+      state.searches.splice(index, 1)
+      return { status: 200, body: { object: 'job_search', id: current.id, deleted: true } }
+    }
+    // PATCH
+    const patch = body as Partial<JobSearch>
+    const updated: JobSearch = { ...current, ...patch, updated_at: new Date().toISOString() }
+    if (!updated.name) updated.name = updated.query
+    if (patch.enabled === false) updated.next_run_at = null
+    if (patch.enabled === true && !current.enabled) updated.next_run_at = new Date().toISOString()
+    state.searches[index] = updated
+    return { status: 200, body: updated }
+  }
+
+  await page.route(/\/api\/(job-searches(\/.*)?|providers|portal-suggestions)$/, async (route) => {
+    const request = route.request()
+    const method = request.method()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    const body = request.postData() ? request.postDataJSON() : undefined
+    if (method !== 'GET') state.calls.push({ method, path, body })
+    if (method === 'GET' && options.gate && path.startsWith('/job-searches')) await options.gate
+    const reply = handle(method, path, body)
+    return json(route, reply.status, reply.body)
+  })
+
+  return state
+}

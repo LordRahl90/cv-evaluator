@@ -1,0 +1,18 @@
+/*
+ * checkbox.css — a native checkbox with its label on one line (.checkbox),
+ * tinted with the accent colour, e.g. "Run the first search right away".
+ */
+@layer components {
+  .checkbox {
+    @apply inline-flex cursor-pointer items-center gap-2.5;
+    min-height: 44px;
+  }
+
+  .checkbox-input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    flex: none;
+    accent-color: var(--color-accent);
+  }
+}

@@ -69,6 +69,36 @@
     @apply bg-nav-hover text-ink;
   }
 
+  /* Smaller buttons inside list rows (Run now, confirm/cancel). */
+  .btn-sm {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  /* Destructive confirmation, e.g. "Delete search". */
+  .btn-danger,
+  .btn-danger:hover {
+    @apply border-danger bg-danger text-white;
+  }
+
+  .btn-danger:hover {
+    filter: brightness(0.92);
+  }
+
+  /* A button that reads as an inline text link. */
+  .link-button {
+    @apply cursor-pointer bg-transparent text-accent;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    font-weight: 600;
+  }
+
+  .link-button:hover {
+    @apply text-accent-ink;
+  }
+
   @keyframes spin {
     to {
       transform: rotate(360deg);

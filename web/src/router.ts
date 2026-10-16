@@ -6,6 +6,8 @@ import SignUpView from './views/SignUpView.vue'
 import DashboardView from './views/DashboardView.vue'
 import ComingSoonView from './views/ComingSoonView.vue'
 import GuestComingSoonView from './views/GuestComingSoonView.vue'
+import JobSearchesView from './views/JobSearchesView.vue'
+import JobSearchFormView from './views/JobSearchFormView.vue'
 
 // Pages that are in the navigation but not built yet.
 const comingSoon = (path: string, name: string, title: string): RouteRecordRaw => ({
@@ -14,6 +16,28 @@ const comingSoon = (path: string, name: string, title: string): RouteRecordRaw =
   component: ComingSoonView,
   meta: { title },
 })
+
+// Job searches: the list (with portal suggestions) and the create/edit form.
+const jobSearchRoutes: RouteRecordRaw[] = [
+  {
+    path: 'searches',
+    name: 'searches',
+    component: JobSearchesView,
+    meta: { title: 'Job searches' },
+  },
+  {
+    path: 'searches/new',
+    name: 'search-new',
+    component: JobSearchFormView,
+    meta: { title: 'New search' },
+  },
+  {
+    path: 'searches/:id/edit',
+    name: 'search-edit',
+    component: JobSearchFormView,
+    meta: { title: 'Edit search' },
+  },
+]
 
 const routes: RouteRecordRaw[] = [
   {
@@ -46,8 +70,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       { path: '', name: 'overview', component: DashboardView, meta: { title: 'Overview' } },
-      comingSoon('searches', 'searches', 'Job searches'),
-      comingSoon('searches/new', 'search-new', 'New search'),
+      ...jobSearchRoutes,
       comingSoon('matches', 'matches', 'Matches'),
       comingSoon('cvs', 'cvs', 'CVs'),
       comingSoon('quick-match', 'quick-match', 'Quick match'),

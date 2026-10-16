@@ -321,6 +321,8 @@ npx playwright install chromium   # once
 npm run test:e2e     # Playwright, desktop and 375px mobile; the API is mocked
 ```
 
+Job searches (`/searches`, `/searches/new`, `/searches/:id/edit`) list, create, edit, pause, run and delete saved searches, show the portals every search runs on (`GET /providers`) and let users suggest new portals (`/portal-suggestions`). Playwright mocks the API per test with `web/tests/support/mockApi.ts` (`mockApi` for the shell and overview, `mockJobSearchesApi` for job searches, providers and portal suggestions).
+
 Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per component and page), not in `.vue` files. API calls go through `web/src/api`. CI for the web app is `.github/workflows/web.yaml`; it only runs when `web/` changes, and the Go workflows ignore `web/`.
 
 ## Observability

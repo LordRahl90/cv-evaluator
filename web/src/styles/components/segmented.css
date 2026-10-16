@@ -1,0 +1,47 @@
+/*
+ * segmented.css — the segmented choice (SegmentedControl), e.g. Hourly /
+ * Daily / Weekly: a grey rail of radio labels, the chosen one raised in
+ * white. The radios are visually hidden; focus shows on their label.
+ */
+@layer components {
+  .segmented {
+    @apply flex bg-nav-hover;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+  }
+
+  .segmented.has-error {
+    @apply border-danger;
+  }
+
+  .segmented-option {
+    @apply relative flex-1 cursor-pointer text-center text-muted;
+    padding: 9px 12px;
+    border-radius: var(--radius-nav);
+    font-weight: 600;
+  }
+
+  .segmented-option:hover {
+    @apply text-ink;
+  }
+
+  .segmented-option.is-on {
+    @apply bg-surface text-ink;
+    box-shadow: 0 1px 2px rgb(23 25 30 / 0.08);
+  }
+
+  .segmented-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+  }
+
+  .segmented-option:has(.segmented-input:focus-visible) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
