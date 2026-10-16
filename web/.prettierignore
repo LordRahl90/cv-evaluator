@@ -2,5 +2,5 @@ dist/
 node_modules/
 test-results/
 playwright-report/
-screenshots/
+/screenshots/
 package-lock.json
