@@ -12,9 +12,9 @@ CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF
 
 1. **CV processing** (`users.Service.ProcessCV`): extracts text from the PDF, embeds the full CV, asks a chat LLM to split it into sections (`summary`, `experience`, `skills`, `education`, `title`), and stores an embedding per section.
 2. **Job ingest** (`jobs.Service.ProcessJob`): scrapes LinkedIn search results and job details, stores each posting once globally (unique on provider and job ID), and embeds its description once.
-3. **Matching** (`matcher.Service`): embeds the job description (or reuses a stored job's embedding), fetches the 10 closest CV sections by cosine distance, and sends DeepSeek the `jobmatch.tpl` prompt. The prompt includes the job description and listed location, the start of the CV (where the candidate's location usually is), the closest sections, and labelled similarity hints (for example "Title similarity").
+3. **Matching** (`matcher.Service`): embeds the job description (or reuses a stored job's embedding), fetches the 10 closest CV sections by cosine distance, and sends DeepSeek the `jobmatch.tpl` prompt. The prompt includes the job description, the job's listed location as context, the closest CV sections, and labelled similarity hints (for example "Title similarity").
 
-The criteria the LLM scores are defined in one list, `entities.EvaluationCriteria`: skills, experience, seniority, domain, education and location. The prompt's response schema and instructions are generated from that list, and only those criteria are kept when parsing. To add a criterion, add it there and bump `pipeline.DefaultPromptVersion`.
+The criteria the LLM scores are defined in one list, `entities.EvaluationCriteria`: skills, experience, seniority, domain and education. Location is deliberately not scored: every search already filters by the location the user chose, and users may search far from where they live, so the prompt tells the LLM not to penalise it and only to mention it in the summary when the job needs on-site work or relocation. The prompt's response schema and instructions are generated from that list, and only those criteria are kept when parsing. To add a criterion, add it there and bump `pipeline.DefaultPromptVersion`.
 
 Section weights used for the weighted similarity hint:
 
@@ -33,7 +33,7 @@ The LLM response, which is also the `/match/*` response body, looks like this:
   "overall_score": 78,
   "breakdown": [
     {"criterion": "skills", "score": 85, "reason": "Strong Go and Postgres"},
-    {"criterion": "location", "score": 90, "reason": "Hybrid role in the candidate's city"}
+    {"criterion": "domain", "score": 70, "reason": "Payments experience, new to logistics"}
   ],
   "strengths": [],
   "missing_skills": [],

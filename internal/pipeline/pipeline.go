@@ -41,7 +41,7 @@ const (
 	DefaultModel             = "deepseek-chat"
 	// DefaultPromptVersion identifies the match prompt and criteria list
 	// recorded on each evaluation. Bump it when either changes.
-	DefaultPromptVersion = "jobmatch.tpl/v2"
+	DefaultPromptVersion = "jobmatch.tpl/v3"
 )
 
 // Config wires a Pipeline. Zero values take the defaults above.

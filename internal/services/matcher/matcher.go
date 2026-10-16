@@ -119,15 +119,9 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 		return nil, "", err
 	}
 
-	header, err := s.cvHeader(ctx, scope)
-	if err != nil {
-		return nil, "", err
-	}
-
 	matchInput := &entities.MatchInput{
 		JobDescription: job.Detail,
 		JobLocation:    job.Location,
-		CVHeader:       header,
 		RelevantCV:     s.buildCVContext(ctx, results),
 		Hints:          similarityHints(results),
 		Criteria:       entities.EvaluationCriteria,
@@ -143,35 +137,6 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 		return nil, raw, err
 	}
 	return response, raw, nil
-}
-
-// cvHeaderLength is how much of the start of the CV text goes into the
-// prompt as the CV header.
-const cvHeaderLength = 600
-
-// cvHeader returns the start of the CV's text, where contact details such
-// as the candidate's location usually are. For a user scope it uses the
-// user's newest CV. It is empty when there is no CV.
-func (s *Service) cvHeader(ctx context.Context, scope sectionScope) (string, error) {
-	query := s.db.WithContext(ctx).Model(&models.CV{}).Select("extracted_content")
-	if scope.cvID != (ulid.ULID{}) {
-		query = query.Where("id = ?", scope.cvID)
-	} else {
-		query = query.Where("user_id = ?", scope.userID).Order("created_at DESC")
-	}
-
-	var contents []string
-	if err := query.Limit(1).Pluck("extracted_content", &contents).Error; err != nil {
-		return "", fmt.Errorf("load CV header: %w", err)
-	}
-	if len(contents) == 0 {
-		return "", nil
-	}
-	header := strings.TrimSpace(contents[0])
-	if r := []rune(header); len(r) > cvHeaderLength {
-		header = string(r[:cvHeaderLength])
-	}
-	return header, nil
 }
 
 // decodeResponse parses the LLM's JSON answer. The decode error is wrapped

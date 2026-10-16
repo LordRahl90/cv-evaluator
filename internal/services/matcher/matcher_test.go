@@ -69,7 +69,7 @@ func seedSection(t *testing.T, db *gorm.DB, userID, cvID ulid.ULID, heading, con
 
 const validResponse = `{"overall_score":80,"breakdown":[` +
 	`{"criterion":"skills","score":70,"reason":"Go matches"},` +
-	`{"criterion":"location","score":90,"reason":"same city"}],` +
+	`{"criterion":"domain","score":90,"reason":"logistics background"}],` +
 	`"strengths":["go"],"missing_skills":["rust"],"summary":"good fit"}`
 
 func TestDecodeResponse_KeepsKnownCriteriaOnly(t *testing.T) {
@@ -175,7 +175,7 @@ func TestMatchJob_UsesStoredEmbeddingAndCVScope(t *testing.T) {
 	assert.Equal(t, []string{"rust"}, resp.MissingSkills)
 	assert.Equal(t, []CriterionScore{
 		{Criterion: "skills", Score: 70, Reason: "Go matches"},
-		{Criterion: "location", Score: 90, Reason: "same city"},
+		{Criterion: "domain", Score: 90, Reason: "logistics background"},
 	}, resp.Breakdown)
 
 	assert.Equal(t, 0, emb.calls, "an embedded job must not be embedded again")
@@ -184,8 +184,6 @@ func TestMatchJob_UsesStoredEmbeddingAndCVScope(t *testing.T) {
 	assert.Contains(t, in.RelevantCV, "skill from CV A")
 	assert.NotContains(t, in.RelevantCV, "skill from CV B")
 	assert.Equal(t, "Copenhagen", in.JobLocation)
-	assert.True(t, strings.HasPrefix(in.CVHeader, "Jane Doe\nAarhus, Denmark"))
-	assert.Len(t, []rune(in.CVHeader), cvHeaderLength)
 	assert.Equal(t, entities.EvaluationCriteria, in.Criteria)
 	require.NotEmpty(t, in.Hints)
 	assert.Equal(t, "Skills section similarity", in.Hints[0].Label)

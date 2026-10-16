@@ -38,13 +38,12 @@ var EvaluationCriteria = []Criterion{
 		Guidance: "Whether the candidate's degrees and certifications meet the job's education requirements. " +
 			"If the job states none, score by how well the education supports the role.",
 	},
-	{
-		Name: "location",
-		Guidance: "Compare the job's location and remote, hybrid or on-site policy with the candidate's " +
-			"location from the CV. Remote-friendly roles, or the same city or commuting area, score high; " +
-			"an on-site role in another country scores low. If the CV gives no location, leave this criterion out.",
-	},
 }
+
+// Location is deliberately not a criterion: every search already filters by
+// the location the user chose, and users may search far from where they
+// live, so scoring it would mostly repeat or contradict their own choice.
+// The job's listed location is still shown to the LLM as context.
 
 // IsEvaluationCriterion reports whether name is in EvaluationCriteria.
 func IsEvaluationCriterion(name string) bool {
@@ -67,10 +66,8 @@ type SimilarityHint struct {
 type MatchInput struct {
 	JobDescription string
 	// JobLocation is the location the portal lists for the job, if any.
+	// It is context only; location is not scored.
 	JobLocation string
-	// CVHeader is the start of the CV text, where contact details such as
-	// the candidate's location usually are.
-	CVHeader string
 	// RelevantCV is the CV sections closest to the job description.
 	RelevantCV string
 	// Hints are embedding similarities, labelled by what they compare.

@@ -13,6 +13,7 @@ SCORING:
 - Use exactly these criterion names. If you cannot assess a criterion, leave it out of "breakdown" instead of guessing.
 - "overall_score" is your overall judgement of fit, informed by the criteria.
 - Do not hallucinate missing experience.
+- Do not score or penalise the job's location. The candidate chose where to search and may be willing to relocate or work remotely. Mention the location in "summary" only when the job requires something notable, such as on-site work or relocation.
 
 EMBEDDING SIMILARITY HINTS (cosine similarity between the job description and parts of the CV, 0-100; higher means the texts are closer). Treat them as weak guidance; the CV text decides:
 {{- range .Hints}}
@@ -21,13 +22,10 @@ EMBEDDING SIMILARITY HINTS (cosine similarity between the job description and pa
 - none available
 {{- end}}
 
-JOB LOCATION (as listed by the portal): {{if .JobLocation}}{{.JobLocation}}{{else}}not listed; check the job description{{end}}
+JOB LOCATION (as listed by the portal; context only, not scored): {{if .JobLocation}}{{.JobLocation}}{{else}}not listed{{end}}
 
 JOB DESCRIPTION:
 {{.JobDescription}}
-
-CV HEADER (contact details; the candidate's location is usually here):
-{{.CVHeader}}
 
 RELEVANT CV CONTEXT:
 {{.RelevantCV}}

@@ -16,7 +16,6 @@ func TestBuildPrompt_GeneratesSchemaFromCriteria(t *testing.T) {
 	prompt, err := svc.buildPrompt(&entities.MatchInput{
 		JobDescription: "Senior Go engineer, hybrid in Copenhagen",
 		JobLocation:    "Copenhagen, Denmark",
-		CVHeader:       "Jane Doe - Aarhus, Denmark - jane@example.com",
 		RelevantCV:     "- Go, Kubernetes",
 		Hints: []entities.SimilarityHint{
 			{Label: "Title similarity", Score: 81.4},
@@ -39,15 +38,16 @@ func TestBuildPrompt_GeneratesSchemaFromCriteria(t *testing.T) {
 	for _, b := range schema.Breakdown {
 		names = append(names, b.Criterion)
 	}
-	assert.Equal(t, []string{"skills", "experience", "seniority", "domain", "education", "location"}, names)
+	assert.Equal(t, []string{"skills", "experience", "seniority", "domain", "education"}, names)
 
 	for _, c := range entities.EvaluationCriteria {
 		assert.Contains(t, prompt, "- "+c.Name+": "+c.Guidance)
 	}
 	assert.Contains(t, prompt, "- Title similarity: 81")
 	assert.Contains(t, prompt, "- Skills section similarity: 66")
-	assert.Contains(t, prompt, "JOB LOCATION (as listed by the portal): Copenhagen, Denmark")
-	assert.Contains(t, prompt, "Jane Doe - Aarhus, Denmark")
+	assert.Contains(t, prompt, "JOB LOCATION (as listed by the portal; context only, not scored): Copenhagen, Denmark")
+	assert.Contains(t, prompt, "Do not score or penalise the job's location")
+	assert.NotContains(t, prompt, "- location:")
 	assert.NotContains(t, prompt, "Don't consider the location")
 	assert.NotContains(t, prompt, "Seniority:", "seniority is no longer fed the title similarity")
 	assert.NotContains(t, prompt, "&#34;", "the prompt must not be HTML-escaped")
@@ -63,5 +63,5 @@ func TestBuildPrompt_CustomCriteriaAndNoHints(t *testing.T) {
 	assert.Contains(t, prompt, `"criterion": "culture"`)
 	assert.NotContains(t, prompt, `"criterion": "skills"`)
 	assert.Contains(t, prompt, "- none available")
-	assert.Contains(t, prompt, "not listed; check the job description")
+	assert.Contains(t, prompt, "context only, not scored): not listed")
 }
