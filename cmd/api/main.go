@@ -28,8 +28,8 @@ import (
 	"cv-evaluator/internal/servers/match"
 	"cv-evaluator/internal/servers/middleware"
 	portalhttp "cv-evaluator/internal/servers/portalsuggestions"
-	accountsvc "cv-evaluator/internal/services/account"
 	resulthttp "cv-evaluator/internal/servers/results"
+	accountsvc "cv-evaluator/internal/services/account"
 	apikeysvc "cv-evaluator/internal/services/apikeys"
 	jobsearchsvc "cv-evaluator/internal/services/jobsearches"
 	"cv-evaluator/internal/services/matcher"
@@ -119,9 +119,9 @@ func run() error {
 	// Job searches run against every supported portal; users can suggest more.
 	// Pass providers.WithTransport(rt) to Default to instrument scraper requests.
 	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
-	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, apiKeyVerifier)
-	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, apiKeyVerifier)
-	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, acceptAPIKeys)
+	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, authOpts...)
+	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, authOpts...)
+	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, authOpts...)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
