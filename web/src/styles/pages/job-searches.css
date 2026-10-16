@@ -108,6 +108,16 @@
     gap: 8px;
   }
 
+  /* The red "Delete search" confirmation button. */
+  .search-card-delete,
+  .search-card-delete:hover {
+    @apply border-danger bg-danger text-white;
+  }
+
+  .search-card-delete:hover {
+    filter: brightness(0.92);
+  }
+
   .search-card-message {
     padding: 0 22px 18px;
   }

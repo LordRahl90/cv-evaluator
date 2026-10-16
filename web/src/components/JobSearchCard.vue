@@ -204,7 +204,7 @@ async function confirmDelete() {
         <BusyButton
           type="button"
           variant="secondary"
-          class="btn-sm btn-danger"
+          class="btn-sm search-card-delete"
           :busy="deleting"
           busy-label="Deleting…"
           @click="confirmDelete"

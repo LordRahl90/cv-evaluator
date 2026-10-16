@@ -20,6 +20,7 @@
 @import './components/sidebar.css';
 @import './components/user-menu.css';
 @import './components/empty-state.css';
+@import './components/button-extras.css';
 @import './components/switch.css';
 @import './components/segmented.css';
 @import './components/checkbox.css';
