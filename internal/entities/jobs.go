@@ -22,11 +22,13 @@ func (j *JobPost) ToModel() *models.Job {
 		Location:   j.Location,
 		PostedAt:   j.PostedAt,
 		DetailsURL: j.DetailsURL,
-		Status:     models.StatusPending,
+		Status:     models.JobStatusNew,
 	}
 
-	if j.Details != nil {
+	if j.Details != nil && j.Details.Details != "" {
 		res.Detail = j.Details.Details
+		res.Status = models.JobStatusDescribed
+		res.Visited = true
 	}
 
 	return res

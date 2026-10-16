@@ -17,6 +17,9 @@ var appModels = []interface{}{
 	&models.APIKey{},
 	&models.JobSearch{},
 	&models.PortalSuggestion{},
+	&models.SearchResult{},
+	&models.Evaluation{},
+	&models.EvaluationScore{},
 }
 
 func Migrate(db *gorm.DB) error {

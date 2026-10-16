@@ -11,10 +11,12 @@ CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF
 ## How it works
 
 1. **CV processing** (`users.Service.ProcessCV`): extracts text from the PDF, embeds the full CV, asks a chat LLM to split it into sections (`summary`, `experience`, `skills`, `education`, `title`), and stores an embedding per section.
-2. **Job ingest** (`jobs.Service.ProcessJob`): scrapes LinkedIn search results and job details, skips jobs already stored for the user, embeds the job description and stores it.
-3. **Matching** (`matcher.Service`): embeds the job description, fetches the user's 10 closest CV sections by cosine distance, computes weighted section scores, builds a CV context and sends it to DeepSeek with the `jobmatch.tpl` prompt.
+2. **Job ingest** (`jobs.Service.ProcessJob`): scrapes LinkedIn search results and job details, stores each posting once globally (unique on provider and job ID), and embeds its description once.
+3. **Matching** (`matcher.Service`): embeds the job description (or reuses a stored job's embedding), fetches the 10 closest CV sections by cosine distance, and sends DeepSeek the `jobmatch.tpl` prompt. The prompt includes the job description and listed location, the start of the CV (where the candidate's location usually is), the closest sections, and labelled similarity hints (for example "Title similarity").
 
-Section weights used for scoring:
+The criteria the LLM scores are defined in one list, `entities.EvaluationCriteria`: skills, experience, seniority, domain, education and location. The prompt's response schema and instructions are generated from that list, and only those criteria are kept when parsing. To add a criterion, add it there and bump `pipeline.DefaultPromptVersion`.
+
+Section weights used for the weighted similarity hint:
 
 | Section    | Weight |
 |------------|--------|
@@ -24,21 +26,22 @@ Section weights used for scoring:
 | summary    | 0.10   |
 | title      | 0.10   |
 
-The LLM response is decoded into:
+The LLM response, which is also the `/match/*` response body, looks like this:
 
 ```json
 {
-  "overall_score": 0,
-  "skills_score": 0,
-  "experience_score": 0,
-  "seniority_score": 0,
-  "domain_score": 0,
-  "location_score": 0,
+  "overall_score": 78,
+  "breakdown": [
+    {"criterion": "skills", "score": 85, "reason": "Strong Go and Postgres"},
+    {"criterion": "location", "score": 90, "reason": "Hybrid role in the candidate's city"}
+  ],
   "strengths": [],
   "missing_skills": [],
   "summary": ""
 }
 ```
+
+Scores are integers from 0 to 100. A criterion the LLM could not assess is left out of `breakdown`; it is never reported as 0. The background worker stores `overall_score` on `evaluations` and one `evaluation_scores` row per criterion, indexed on `(criterion, score)` for filtering.
 
 ## Models used
 
@@ -51,6 +54,7 @@ The LLM response is decoded into:
 ```
 cmd/
   api/        HTTP API server
+  worker/     background scheduler and task workers
   seed/       create (or reuse) a user and process a CV
   loader/     scrape LinkedIn jobs and store them with embeddings
   byjobs/     match a user's CV against a stored job
@@ -69,7 +73,8 @@ internal/
   scraper/linkedin/       LinkedIn search and job detail scraping
   scraper/jobindex/       Jobindex.dk scraper (not yet used by any command)
   services/users/         signup/signin/profile (JWT + bcrypt) and CV upload/list/get/delete/process
-  services/jobs/          job ingest and dedupe per user
+  services/jobs/          job ingest; each posting is stored and embedded once
+  pipeline/               background search, embed and evaluate handlers and scheduler
   services/matcher/       retrieval, scoring and LLM match composition
   services/cleanup/       extract-then-cleanup helper (not yet used by any command)
   storage/jobs/           job repository helpers
@@ -255,6 +260,45 @@ curl -X POST localhost:8080/job-searches \
 ```
 
 Portals are implemented in `internal/providers` on top of the scrapers in `internal/scraper`. Each provider builds its search URL from the query and location.
+
+## Background worker
+
+`cmd/worker` (`make worker`) runs saved job searches on a schedule with no manual steps. It reads the same settings as the API through `internal/config`, opens the database, runs the migrations, then starts the scheduler and the embed and evaluate goroutines. On `SIGINT`/`SIGTERM` it stops claiming new work and gives in-flight steps `WORKER_SHUTDOWN_GRACE` to finish. Anything cut short is released and picked up again later.
+
+There is no separate queue table. Progress is tracked on the rows themselves (`internal/pipeline`):
+
+| Table            | State column        | Flow                                                                  |
+|------------------|---------------------|-----------------------------------------------------------------------|
+| `job_searches`   | `next_run_at`       | due → claimed (`next_run_at` pushed out as a lease) → run → next run |
+| `jobs`           | `status`            | `new` → `described` → `embedded` (or `failed`); `processing` while a worker has it |
+| `search_results` | `evaluation_status` | `pending` → `done` (or `failed`); `processing` while a worker has it  |
+
+Each step goes **claim → release → work → write**:
+
+1. **Claim**: one short statement picks one ready row with `FOR UPDATE SKIP LOCKED`, sets it to `processing` with `claimed_at`, and counts the attempt.
+2. **Work**: the scrape, embedding or LLM call runs with no transaction or connection held.
+3. **Write**: one short transaction stores the result and the final state. On failure, the row goes back to its ready state with `next_attempt_at` backed off exponentially, and it is marked `failed` after the last attempt.
+
+If a worker dies, its row stays `processing`. Once it is older than `WORKER_STALE_TIMEOUT`, another worker claims it again. Every write is an idempotent upsert, so the rare double run is harmless.
+
+Searches are claimed with a conditional update of `next_run_at`, so with several worker processes each run happens once. A claimed search runs all portals concurrently. Each portal has its own rate limit and a few retries, and a portal that keeps failing is logged without affecting the others.
+
+Evaluations use the user's most recent CV. Users without a CV are checked again an hour later. Re-evaluating a result means setting its `evaluation_status` back to `pending`.
+
+Settings (all optional):
+
+| Variable                    | Default | Meaning                                                    |
+|-----------------------------|---------|------------------------------------------------------------|
+| `WORKER_SEARCH_CONCURRENCY` | `2`     | Searches run at once (each runs all portals)               |
+| `WORKER_EMBED_CONCURRENCY`  | `4`     | Jobs described and embedded at once                        |
+| `WORKER_EVAL_CONCURRENCY`   | `2`     | LLM evaluations at once                                    |
+| `WORKER_STALE_TIMEOUT`      | `5m`    | When a `processing` row counts as abandoned (keep it above the 2m LLM timeout) |
+| `WORKER_POLL_INTERVAL`      | `2s`    | Idle wait before looking for work again                    |
+| `SCHEDULER_INTERVAL`        | `1m`    | How often due searches are looked for                      |
+| `WORKER_SHUTDOWN_GRACE`     | `30s`   | Time in-flight steps get on shutdown                       |
+| `WORKER_DB_MAX_OPEN_CONNS`  | `10`    | Database pool size. No connection is held during slow work, so this need not match the concurrency |
+
+The worker does not run any searches yet: saved searches and the portal providers are not wired in, so the scheduler finds nothing to run.
 
 ## Observability
 

@@ -27,7 +27,7 @@ var (
 
 func main() {
 	flag.StringVar(&userID, "user-id", "", "User ULID")
-	flag.StringVar(&jobID, "job-id", "", "Job ID")
+	flag.StringVar(&jobID, "job-id", "", "Provider job ID (the job_id column); jobs are global, not per user")
 	flag.Parse()
 
 	parsedUserID, err := ulid.ParseStrict(userID)

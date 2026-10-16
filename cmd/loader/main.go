@@ -14,7 +14,6 @@ import (
 	"cv-evaluator/internal/services/jobs"
 
 	"github.com/joho/godotenv"
-	"github.com/oklog/ulid/v2"
 )
 
 func main() {
@@ -22,10 +21,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	userID, err := ulid.ParseStrict("01ARZ3NDEKTSV4RRFFQ69G5FAV")
-	if err != nil {
-		log.Fatal(err)
-	}
 	//searchLink := "http://127.0.0.1:5500/linkedin/linkedin.html?position=1&pageNum=0"
 	searchLink := "https://www.linkedin.com/jobs/search?keywords=Senior%20Software%20Engineer&location=Copenhagen&geoId=&trk=public_jobs_jobs-search-bar_search-submit&position=1&pageNum=0"
 
@@ -49,13 +44,13 @@ func main() {
 	}
 
 	for _, job := range jobListings {
-		// check if job has been processed for the user
-		exists, err := jobService.IsJobProcessed(ctx, userID, job.ID)
+		// Jobs are global: a posting already stored and embedded is skipped.
+		exists, err := jobService.IsJobProcessed(ctx, job.Provider, job.ID)
 		if err != nil {
 			log.Fatal(err)
 		}
 		if exists != nil {
-			fmt.Printf("job already processed for user %s: %s\n", userID.String(), job.ID)
+			fmt.Printf("job already processed: %s/%s\n", job.Provider, job.ID)
 			continue
 		}
 
@@ -67,7 +62,7 @@ func main() {
 
 		job.Details = details
 
-		if err := jobService.ProcessJob(ctx, userID, &job); err != nil {
+		if _, err := jobService.ProcessJob(ctx, &job); err != nil {
 			log.Fatal(err)
 		}
 
