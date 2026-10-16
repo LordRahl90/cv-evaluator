@@ -65,12 +65,13 @@ type Handler struct {
 //	POST /portal-suggestions
 //	GET  /portal-suggestions
 //
-// Requests may authenticate with a JWT, or with an API key when apiKeys is
-// non-nil.
-func New(router gin.IRouter, svc Service, jwtSecret []byte, apiKeys middleware.APIKeyVerifier) *Handler {
+// opts are passed to middleware.Authenticate, for example
+// middleware.WithAPIKeyVerifier to accept API keys as well as JWTs and
+// middleware.WithSessionValidator to reject revoked sessions.
+func New(router gin.IRouter, svc Service, jwtSecret []byte, opts ...middleware.Option) *Handler {
 	h := &Handler{svc: svc}
 
-	group := router.Group("/portal-suggestions", middleware.Authenticate(jwtSecret, middleware.WithAPIKeyVerifier(apiKeys)))
+	group := router.Group("/portal-suggestions", middleware.Authenticate(jwtSecret, opts...))
 	group.POST("", h.create)
 	group.GET("", h.list)
 

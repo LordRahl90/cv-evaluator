@@ -24,6 +24,11 @@ info:
     Authorization: Bearer sk_live_<your_api_key>
     ```
 
+    Changing the password (`POST /me/password`) ends every session token
+    issued before the change; the response carries a fresh one. API keys are
+    not affected by a password change: revoke them separately with
+    `DELETE /api-keys/{id}`. Deleting the account ends every credential.
+
     Use session tokens from interactive clients (a browser or mobile app) and
     API keys from scripts, servers and CI. API keys carry the same privileges
     as your account, so keep them secret: do not commit them to source control
@@ -71,7 +76,10 @@ tags:
       Create an account and exchange credentials for a session token.
       These endpoints are public.
   - name: Users
-    description: The account behind the credential used to call the API.
+    description: |
+      The account behind the credential used to call the API: read and edit
+      the profile, change the password, download everything stored about
+      you, and delete the account.
   - name: API keys
     description: |
       Personal API keys let scripts and servers call the API on your behalf
@@ -225,6 +233,222 @@ paths:
                   $ref: '#/components/examples/User'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateCurrentUser
+      tags: [Users]
+      summary: Update the current user
+      description: |
+        Updates the fields that are present and leaves the others as they
+        are. Values are trimmed; the email is lowercased and must be a valid,
+        unused address, and a phone number, when not empty, must be unused.
+        Send an empty string to clear `first_name`, `last_name` or `phone`.
+        An empty object changes nothing and returns the current profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              last_name: King
+              email: ada.king@example.com
+      responses:
+        '200':
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                user:
+                  $ref: '#/components/examples/User'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AccountNotFound'
+        '409':
+          description: |
+            Another account already uses this email (`email_already_used`) or
+            phone number (`phone_already_used`). Nothing was changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                email:
+                  summary: Email already used
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: email_already_used
+                      message: An account with this email already exists.
+                      param: email
+                phone:
+                  summary: Phone already used
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: phone_already_used
+                      message: An account with this phone number already exists.
+                      param: phone
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: deleteCurrentUser
+      tags: [Users]
+      summary: Delete the account
+      description: |
+        Permanently deletes the account and everything it owns: CVs and
+        their sections, job searches, their results and evaluations, API
+        keys and portal suggestions. Deleted and revoked items are removed
+        too. Job postings are shared between users and are kept. This cannot
+        be undone; download your data first with `GET /me/export`.
+
+        The password is required even when calling with an API key. All of
+        the account's session tokens and API keys stop working.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+            example:
+              password: correct-horse-battery
+      responses:
+        '204':
+          description: The account and all of its data were deleted.
+        '400':
+          description: |
+            The body is malformed (`invalid_json`), the password is missing
+            (`parameter_missing`) or it is wrong (`incorrect_password`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: invalid_request_error
+                  code: incorrect_password
+                  message: The password is incorrect.
+                  param: password
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AccountNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /me/password:
+    post:
+      operationId: changePassword
+      tags: [Users]
+      summary: Change the password
+      description: |
+        Replaces the password after checking the current one. The new
+        password follows the signup rules. Every session token issued before
+        the change stops working (sign other devices in again); the response
+        carries a fresh session token so this client stays signed in.
+
+        API keys keep working: they are not tied to the password. Revoke
+        them with `DELETE /api-keys/{id}` if you think one leaked.
+
+        Session token times have one-second precision, so a token issued in
+        the same second as the change, just before it, is not revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+            example:
+              current_password: correct-horse-battery
+              new_password: staple-battery-horse-correct
+      responses:
+        '200':
+          description: The password was changed. Use the new session token from now on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                session:
+                  $ref: '#/components/examples/Session'
+        '400':
+          description: |
+            The body is malformed (`invalid_json`), a parameter is missing
+            (`parameter_missing`), the new password breaks the rules
+            (`parameter_invalid`, `param: new_password`) or the current
+            password is wrong (`incorrect_password`,
+            `param: current_password`). A wrong current password is a 400,
+            not a 401: the session itself is still valid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                incorrect:
+                  summary: Wrong current password
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: incorrect_password
+                      message: The password is incorrect.
+                      param: current_password
+                weak:
+                  summary: New password too short
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: parameter_invalid
+                      message: The password must be at least 8 characters long.
+                      param: new_password
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AccountNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /me/export:
+    get:
+      operationId: exportCurrentUser
+      tags: [Users]
+      summary: Download your data
+      description: |
+        Returns everything stored about the account as one JSON document,
+        offered as a download (`Content-Disposition: attachment;
+        filename="cv-evaluator-export.json"`): the profile, CVs with their
+        extracted text and sections, job searches, results with their job
+        and evaluations, API key metadata and portal suggestions. Deleted
+        CVs and searches and revoked keys are still stored, so they are
+        included with their deletion time.
+
+        It never contains the password hash, API key secrets or hashes,
+        embedding vectors or raw LLM output.
+      responses:
+        '200':
+          description: The export.
+          headers:
+            Content-Disposition:
+              description: Always `attachment; filename="cv-evaluator-export.json"`.
+              schema:
+                type: string
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountExport'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/AccountNotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -963,6 +1187,7 @@ components:
         A session token returned by `POST /auth/signup` or
         `POST /auth/signin`, sent as `Authorization: Bearer <token>`.
         Session tokens expire after 24 hours; sign in again to get a new one.
+        Changing the password revokes the tokens issued before the change.
     apiKey:
       type: http
       scheme: bearer
@@ -1132,12 +1357,291 @@ components:
           type: string
           description: |
             The session token. Send it as `Authorization: Bearer <token>`.
-            Valid for 24 hours.
+            Valid for 24 hours, or until the password is changed.
         token_type:
           type: string
           const: Bearer
         user:
           $ref: '#/components/schemas/User'
+
+    UpdateUserRequest:
+      type: object
+      description: Only the fields present are changed.
+      minProperties: 0
+      properties:
+        first_name:
+          type: string
+          description: Given name. Trimmed; may be empty.
+        last_name:
+          type: string
+          description: Family name. Trimmed; may be empty.
+        email:
+          type: string
+          format: email
+          description: Trimmed and lowercased; must be valid and not used by another account.
+        phone:
+          type: string
+          description: Trimmed; may be empty. When not empty, must not be used by another account.
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+          writeOnly: true
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          description: At least 8 characters and at most 72 bytes.
+          writeOnly: true
+
+    DeleteAccountRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
+          description: The account's current password, also when calling with an API key.
+          writeOnly: true
+
+    AccountExport:
+      type: object
+      description: Everything stored about an account.
+      required: [object, exported_at, profile, cvs, job_searches, results, api_keys, portal_suggestions]
+      properties:
+        object:
+          type: string
+          const: account_export
+        exported_at:
+          type: string
+          format: date-time
+        profile:
+          type: object
+          required: [id, first_name, last_name, email, phone, created_at, updated_at, password_changed_at]
+          properties:
+            id:
+              $ref: '#/components/schemas/Ulid'
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+            phone:
+              type: string
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+            password_changed_at:
+              type: [string, 'null']
+              format: date-time
+        cvs:
+          type: array
+          items:
+            type: object
+            required: [id, extracted_content, sections, created_at, updated_at, deleted_at]
+            properties:
+              id:
+                $ref: '#/components/schemas/Ulid'
+              extracted_content:
+                type: string
+                description: The text extracted from the uploaded file.
+              sections:
+                type: array
+                items:
+                  type: object
+                  required: [heading, content]
+                  properties:
+                    heading:
+                      type: string
+                    content:
+                      type: string
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
+              deleted_at:
+                type: [string, 'null']
+                format: date-time
+        job_searches:
+          type: array
+          items:
+            type: object
+            required: [id, name, query, location, frequency, enabled, last_run_at, next_run_at, created_at, updated_at, deleted_at]
+            properties:
+              id:
+                $ref: '#/components/schemas/Ulid'
+              name:
+                type: string
+              query:
+                type: string
+              location:
+                type: string
+              frequency:
+                $ref: '#/components/schemas/Frequency'
+              enabled:
+                type: boolean
+              last_run_at:
+                type: [string, 'null']
+                format: date-time
+              next_run_at:
+                type: [string, 'null']
+                format: date-time
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
+              deleted_at:
+                type: [string, 'null']
+                format: date-time
+        results:
+          type: array
+          description: Jobs the account's searches found, with their evaluations.
+          items:
+            type: object
+            required: [id, job_search_id, status, evaluation_status, created_at, updated_at, job, evaluations]
+            properties:
+              id:
+                $ref: '#/components/schemas/Ulid'
+              job_search_id:
+                $ref: '#/components/schemas/Ulid'
+              status:
+                type: string
+                enum: [new, saved, applied, dismissed]
+              evaluation_status:
+                type: string
+                enum: [pending, processing, done, failed]
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
+              job:
+                type: [object, 'null']
+                required: [id, provider, title, company, location, posted_at, details_url]
+                properties:
+                  id:
+                    $ref: '#/components/schemas/Ulid'
+                  provider:
+                    type: string
+                  title:
+                    type: string
+                  company:
+                    type: string
+                  location:
+                    type: string
+                  posted_at:
+                    type: string
+                  details_url:
+                    type: string
+              evaluations:
+                type: array
+                items:
+                  type: object
+                  required: [id, cv_id, status, overall_score, scores, strengths, missing_skills, summary, model, prompt_version, created_at, updated_at]
+                  properties:
+                    id:
+                      $ref: '#/components/schemas/Ulid'
+                    cv_id:
+                      $ref: '#/components/schemas/Ulid'
+                    status:
+                      type: string
+                      enum: [completed, failed]
+                    overall_score:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                    scores:
+                      type: array
+                      items:
+                        type: object
+                        required: [criterion, score, reason]
+                        properties:
+                          criterion:
+                            type: string
+                          score:
+                            type: integer
+                          reason:
+                            type: string
+                    strengths:
+                      type: array
+                      items:
+                        type: string
+                    missing_skills:
+                      type: array
+                      items:
+                        type: string
+                    summary:
+                      type: string
+                    error:
+                      type: string
+                      description: Why the evaluation failed, when it did.
+                    model:
+                      type: string
+                    prompt_version:
+                      type: string
+                    created_at:
+                      type: string
+                      format: date-time
+                    updated_at:
+                      type: string
+                      format: date-time
+        api_keys:
+          type: array
+          description: Key metadata only; never secrets or hashes.
+          items:
+            type: object
+            required: [id, name, prefix, created_at, last_used_at, revoked_at]
+            properties:
+              id:
+                $ref: '#/components/schemas/Ulid'
+              name:
+                type: string
+              prefix:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+              last_used_at:
+                type: [string, 'null']
+                format: date-time
+              revoked_at:
+                type: [string, 'null']
+                format: date-time
+        portal_suggestions:
+          type: array
+          items:
+            type: object
+            required: [id, name, url, note, status, created_at, updated_at]
+            properties:
+              id:
+                $ref: '#/components/schemas/Ulid'
+              name:
+                type: string
+              url:
+                type: string
+              note:
+                type: string
+              status:
+                $ref: '#/components/schemas/PortalSuggestionStatus'
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
 
     CreateApiKeyRequest:
       type: object
@@ -1765,6 +2269,7 @@ components:
             - invalid_api_key
             - email_already_used
             - phone_already_used
+            - incorrect_password
             - job_search_disabled
             - portal_already_suggested
             - portal_already_supported
@@ -1824,7 +2329,8 @@ components:
       description: |
         No credential was sent (`missing_credentials`), or the session token
         (`invalid_token`) or API key (`invalid_api_key`) is invalid, expired
-        or revoked.
+        or revoked. A session token is revoked when the password changes
+        after it was issued or the account is deleted.
       headers:
         WWW-Authenticate:
           description: Always `Bearer realm="cv-evaluator"`.
@@ -1849,6 +2355,13 @@ components:
                   type: authentication_error
                   code: invalid_token
                   message: The session token is invalid or has expired.
+            revoked:
+              summary: Session from before a password change, or of a deleted account
+              value:
+                error:
+                  type: authentication_error
+                  code: invalid_token
+                  message: The session is no longer valid. Sign in again.
             apiKey:
               summary: Revoked API key
               value:
@@ -1869,6 +2382,20 @@ components:
               code: resource_missing
               message: No such API key.
               param: id
+
+    AccountNotFound:
+      description: |
+        The account no longer exists, for example because it was deleted by
+        a concurrent request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              type: invalid_request_error
+              code: resource_missing
+              message: The account does not exist.
 
     JobSearchNotFound:
       description: The job search does not exist or belongs to another user.

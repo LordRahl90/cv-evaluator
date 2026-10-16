@@ -1,0 +1,241 @@
+/*
+ * match-result.css — one scored match (MatchResultCard): the header with
+ * ring, verdict and title; the summary; per-criterion bars with reasons;
+ * strengths and missing skills; and the requirements checklist.
+ */
+@layer components {
+  .match-card {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .match-head {
+    @apply flex flex-wrap items-center;
+    gap: 20px;
+    padding: 24px;
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  .match-head-text {
+    @apply flex min-w-0 flex-col;
+    flex: 1 1 220px;
+    gap: 6px;
+  }
+
+  .match-head-text .badge {
+    align-self: flex-start;
+  }
+
+  .match-title {
+    font-size: 20px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .match-meta {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .match-body {
+    @apply flex flex-col;
+    gap: 24px;
+    padding: 24px;
+  }
+
+  .match-summary {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  /* Breakdown bars */
+  .metric-list {
+    @apply flex flex-col;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .metric {
+    @apply grid items-center;
+    grid-template-columns: 92px minmax(0, 1fr) 32px;
+    column-gap: 12px;
+    row-gap: 2px;
+  }
+
+  .metric-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .metric-track {
+    display: block;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--color-chip);
+  }
+
+  .metric-fill {
+    display: block;
+    width: var(--value);
+    height: 8px;
+    border-radius: 999px;
+    background: var(--score-color);
+  }
+
+  .metric-score {
+    text-align: right;
+  }
+
+  .metric-reason {
+    @apply text-muted;
+    grid-column: 2 / -1;
+    font-size: 12.5px;
+  }
+
+  /* Strengths / missing skills */
+  .match-lists {
+    @apply grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+  }
+
+  .match-list {
+    @apply flex min-w-0 flex-col;
+    gap: 10px;
+  }
+
+  .match-list-title {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  .match-points {
+    @apply flex flex-col;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .match-point {
+    @apply flex items-start;
+    gap: 10px;
+    overflow-wrap: anywhere;
+  }
+
+  .match-point .icon {
+    margin-top: 1px;
+  }
+
+  .match-point.is-strength .icon {
+    @apply text-accent;
+  }
+
+  .match-point.is-missing .icon {
+    @apply text-score-low;
+  }
+
+  .match-none {
+    @apply text-muted;
+    margin: 0;
+  }
+
+  /* Requirements checklist */
+  .match-reqs {
+    @apply flex flex-col;
+    gap: 6px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .match-reqs-head {
+    @apply flex flex-wrap items-center justify-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .req-list {
+    @apply flex flex-col;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .req {
+    @apply flex items-start;
+    gap: 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .req:first-child {
+    border-top: 0;
+  }
+
+  .req-icon {
+    @apply flex items-center justify-center;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  .req-icon .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .req.is-met .req-icon {
+    @apply bg-accent-soft text-accent;
+  }
+
+  .req.is-partial .req-icon {
+    @apply bg-amber-soft text-score-mid-ink;
+  }
+
+  .req.is-missing .req-icon {
+    @apply bg-score-low-soft text-score-low;
+  }
+
+  .req-body {
+    @apply flex min-w-0 flex-1 flex-col;
+    gap: 2px;
+  }
+
+  .req-row {
+    @apply flex flex-wrap items-center justify-between;
+    gap: 6px 12px;
+  }
+
+  .req-text {
+    min-width: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .req-evidence {
+    @apply text-muted;
+    font-size: 13px;
+  }
+
+  .req-status {
+    font-weight: 600;
+  }
+
+  .req.is-met .req-status {
+    @apply text-accent-ink;
+  }
+
+  .req.is-partial .req-status {
+    @apply text-score-mid-ink;
+  }
+
+  .req.is-missing .req-status {
+    @apply text-score-low-ink;
+  }
+}

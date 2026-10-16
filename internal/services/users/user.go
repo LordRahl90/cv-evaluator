@@ -350,7 +350,12 @@ func (s *Service) createUser(ctx context.Context, req SignupRequest) (*models.Us
 }
 
 func (s *Service) generateToken(userID ulid.ULID) (string, error) {
-	now := time.Now()
+	return s.generateTokenAt(userID, time.Now())
+}
+
+// generateTokenAt issues a session token for userID with issued-at now.
+// JWT times have one-second precision, so now is truncated to the second.
+func (s *Service) generateTokenAt(userID ulid.ULID, now time.Time) (string, error) {
 	claims := jwt.RegisteredClaims{
 		Subject:   userID.String(),
 		IssuedAt:  jwt.NewNumericDate(now),

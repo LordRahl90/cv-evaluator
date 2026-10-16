@@ -116,11 +116,12 @@ type Handler struct {
 //	POST   /job-searches/:id/run
 //	GET    /providers  (read-only list of supported job portals)
 //
-// Requests may authenticate with a JWT, or with an API key when apiKeys is
-// non-nil.
-func New(router gin.IRouter, svc Service, providerList ProviderLister, jwtSecret []byte, apiKeys middleware.APIKeyVerifier) *Handler {
+// opts are passed to middleware.Authenticate, for example
+// middleware.WithAPIKeyVerifier to accept API keys as well as JWTs and
+// middleware.WithSessionValidator to reject revoked sessions.
+func New(router gin.IRouter, svc Service, providerList ProviderLister, jwtSecret []byte, opts ...middleware.Option) *Handler {
 	h := &Handler{svc: svc, providers: providerList}
-	auth := middleware.Authenticate(jwtSecret, middleware.WithAPIKeyVerifier(apiKeys))
+	auth := middleware.Authenticate(jwtSecret, opts...)
 
 	group := router.Group("/job-searches", auth)
 	group.POST("", h.create)

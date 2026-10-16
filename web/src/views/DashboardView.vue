@@ -5,7 +5,7 @@ import type { JobSearch } from '../api/types'
 import AlertMessage from '../components/AlertMessage.vue'
 import { useOverview } from '../composables/useOverview'
 import { useMatchesOverview } from '../composables/useMatchesOverview'
-import ScoreRing from '../components/ScoreRing.vue'
+import MatchScoreRing from '../components/MatchScoreRing.vue'
 import { dotted, providerLabel } from '../utils/matches'
 import { capitalise, formatDay, formatRelative, formatRunTime, greeting } from '../utils/format'
 
@@ -336,7 +336,7 @@ function searchDetail(s: JobSearch): string {
           <ul v-else-if="matches.top.value.length" class="overview-match-list">
             <li v-for="r in matches.top.value" :key="r.id">
               <RouterLink :to="`/matches/${r.id}`" class="overview-match" data-testid="top-match">
-                <ScoreRing :score="r.evaluation?.overall_score ?? null" />
+                <MatchScoreRing :score="r.evaluation?.overall_score ?? null" />
                 <div class="overview-match-body">
                   <div class="overview-match-title">{{ r.job.title || 'Untitled job' }}</div>
                   <div class="overview-match-meta">{{ dotted(r.job.company, r.job.location) }}</div>

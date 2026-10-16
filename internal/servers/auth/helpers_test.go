@@ -32,7 +32,7 @@ func newTestRouter(svc Service, apiKeyOwner ulid.ULID) *gin.Engine {
 		}
 		return ulid.ULID{}, middleware.ErrInvalidToken
 	})
-	New(r, svc, testJWTSecret, verifier)
+	New(r, svc, testJWTSecret, middleware.WithAPIKeyVerifier(verifier))
 	return r
 }
 

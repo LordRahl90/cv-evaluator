@@ -1,0 +1,67 @@
+/*
+ * confirm-dialog.css — the modal confirmation (ConfirmDialog), built on
+ * <dialog>: a centred white card over a dimmed page, with the actions at
+ * the bottom right (stacked full width on phones), and its red confirm
+ * button for destructive actions such as deleting a CV.
+ */
+@layer components {
+  .confirm-dialog {
+    @apply bg-surface text-ink;
+    box-sizing: border-box;
+    width: min(440px, calc(100vw - 32px));
+    max-width: none;
+    /* Tailwind's preflight zeroes dialog margins; auto re-centres it. */
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow:
+      0 24px 64px rgb(23 25 30 / 0.2),
+      0 2px 8px rgb(23 25 30 / 0.08);
+  }
+
+  .confirm-dialog::backdrop {
+    background: rgb(23 25 30 / 0.4);
+  }
+
+  .confirm-dialog-body {
+    @apply flex flex-col;
+    gap: 14px;
+    padding: 24px;
+  }
+
+  .confirm-dialog-title {
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .confirm-dialog-text {
+    @apply flex flex-col text-ink-soft;
+    gap: 8px;
+  }
+
+  .confirm-dialog-paragraph {
+    margin: 0;
+  }
+
+  .confirm-dialog-actions {
+    @apply flex flex-col-reverse;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  .confirm-dialog-confirm {
+    @apply border-danger bg-danger text-white;
+  }
+
+  .confirm-dialog-confirm:hover {
+    @apply text-white;
+    filter: brightness(0.92);
+  }
+
+  @media (min-width: 480px) {
+    .confirm-dialog-actions {
+      @apply flex-row justify-end;
+    }
+  }
+}

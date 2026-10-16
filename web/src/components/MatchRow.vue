@@ -3,7 +3,7 @@
 // badges, company · location · portal · found, and the top missing skills.
 import { computed } from 'vue'
 import type { SearchResult } from '../api/results'
-import ScoreRing from './ScoreRing.vue'
+import MatchScoreRing from './MatchScoreRing.vue'
 import { formatRelative } from '../utils/format'
 import {
   STATUS_BADGES,
@@ -32,7 +32,7 @@ const missing = computed(() => props.result.evaluation?.top_missing_skills ?? []
 
 <template>
   <RouterLink :to="`/matches/${result.id}`" class="match-row" data-testid="match-row">
-    <ScoreRing :score="score" />
+    <MatchScoreRing :score="score" />
     <div class="match-row-body">
       <div class="match-row-title-line">
         <span class="match-row-title">{{ result.job.title || 'Untitled job' }}</span>

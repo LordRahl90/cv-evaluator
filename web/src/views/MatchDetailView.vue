@@ -7,7 +7,7 @@ import { useRoute } from 'vue-router'
 import AppIcon from '../components/AppIcon'
 import AlertMessage from '../components/AlertMessage.vue'
 import BusyButton from '../components/BusyButton.vue'
-import ScoreRing from '../components/ScoreRing.vue'
+import MatchScoreRing from '../components/MatchScoreRing.vue'
 import { ApiError } from '../api/client'
 import { listCVs } from '../api/cvs'
 import type { CVSummary } from '../api/types'
@@ -220,7 +220,7 @@ const visibleDescription = computed(() =>
       <!-- Ready -->
       <template v-else-if="detail">
         <section class="card match-hero" aria-labelledby="match-title">
-          <ScoreRing :score="score" size="lg" caption="overall" />
+          <MatchScoreRing :score="score" size="lg" caption="overall" />
           <div class="match-hero-body">
             <div class="match-hero-badges">
               <span v-if="score !== null && score >= STRONG_SCORE" class="badge badge-green">

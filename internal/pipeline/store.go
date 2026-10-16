@@ -124,22 +124,56 @@ func claimResult(db *gorm.DB, now, stale time.Time) (*models.SearchResult, error
 
 // upsertSearchResult records that search found job, once. A result that
 // already exists keeps its state.
+//
+// A run takes a while and holds no lock, so the search (or its whole
+// account) may be deleted before its results are stored. The insert first
+// takes a share lock on the search row and is skipped when the row is
+// gone or soft-deleted, so a late run never recreates rows for a deleted
+// search or user. Account deletion locks the searches before deleting
+// results (see services/account), so the two cannot interleave.
 func upsertSearchResult(db *gorm.DB, search *Search, jobID ulid.ULID) error {
-	result := &models.SearchResult{
-		JobSearchID:      search.ID,
-		UserID:           search.UserID,
-		JobID:            jobID,
-		Status:           models.SearchResultNew,
-		EvaluationStatus: models.EvaluationPending,
-	}
-	err := db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "job_search_id"}, {Name: "job_id"}},
-		DoNothing: true,
-	}).Create(result).Error
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var live []ulid.ULID
+		if err := tx.Model(&models.JobSearch{}).
+			Clauses(clause.Locking{Strength: "SHARE"}).
+			Where("id = ?", search.ID).
+			Pluck("id", &live).Error; err != nil {
+			return err
+		}
+		if len(live) == 0 {
+			return nil
+		}
+		result := &models.SearchResult{
+			JobSearchID:      search.ID,
+			UserID:           search.UserID,
+			JobID:            jobID,
+			Status:           models.SearchResultNew,
+			EvaluationStatus: models.EvaluationPending,
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "job_search_id"}, {Name: "job_id"}},
+			DoNothing: true,
+		}).Create(result).Error
+	})
 	if err != nil {
 		return fmt.Errorf("upsert search result: %w", err)
 	}
 	return nil
+}
+
+// lockSearchResult locks the search result's row for the rest of tx and
+// reports whether it still exists. A worker's outcome is only written when
+// it does: the result (or its account) may have been deleted while the
+// worker evaluated it, and writing then would leave orphaned evaluations.
+func lockSearchResult(tx *gorm.DB, id ulid.ULID) (bool, error) {
+	var ids []ulid.ULID
+	if err := tx.Model(&models.SearchResult{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).
+		Pluck("id", &ids).Error; err != nil {
+		return false, fmt.Errorf("lock search result: %w", err)
+	}
+	return len(ids) == 1, nil
 }
 
 // saveEvaluation inserts the evaluation for (search result, CV), or

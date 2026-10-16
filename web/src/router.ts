@@ -8,6 +8,8 @@ import ComingSoonView from './views/ComingSoonView.vue'
 import GuestComingSoonView from './views/GuestComingSoonView.vue'
 import MatchesView from './views/MatchesView.vue'
 import MatchDetailView from './views/MatchDetailView.vue'
+import CVsView from './views/CVsView.vue'
+import QuickMatchView from './views/QuickMatchView.vue'
 import ApiKeysView from './views/ApiKeysView.vue'
 import SettingsView from './views/SettingsView.vue'
 
@@ -60,8 +62,13 @@ const routes: RouteRecordRaw[] = [
         component: MatchDetailView,
         meta: { title: 'Match' },
       },
-      comingSoon('cvs', 'cvs', 'CVs'),
-      comingSoon('quick-match', 'quick-match', 'Quick match'),
+      { path: 'cvs', name: 'cvs', component: CVsView, meta: { title: 'CVs' } },
+      {
+        path: 'quick-match',
+        name: 'quick-match',
+        component: QuickMatchView,
+        meta: { title: 'Quick match' },
+      },
       // API keys and settings
       { path: 'api-keys', name: 'api-keys', component: ApiKeysView, meta: { title: 'API keys' } },
       { path: 'settings', name: 'settings', component: SettingsView, meta: { title: 'Settings' } },
