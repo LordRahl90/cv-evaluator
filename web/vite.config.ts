@@ -7,8 +7,10 @@ import tailwindcss from '@tailwindcss/vite'
 // so the Go API needs no CORS setup and SPA routes never clash with API paths.
 const apiTarget = process.env.API_URL ?? 'http://localhost:8080'
 
+// The key ends in a slash so SPA routes that merely start with "api" (such
+// as /api-keys) are served by the app, not forwarded.
 const proxy: Record<string, ProxyOptions> = {
-  '/api': {
+  '/api/': {
     target: apiTarget,
     changeOrigin: true,
     rewrite: (path) => path.replace(/^\/api/, ''),

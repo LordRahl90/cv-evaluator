@@ -1,15 +1,9 @@
 /*
  * button-extras.css — additions to button.css used by the job searches
- * pages: .btn-sm for buttons inside list rows (Run now, Cancel) and
- * .link-button for a button that reads as an inline text link.
+ * pages: .link-button for a button that reads as an inline text link.
+ * (.btn-sm, used for Run now and Cancel, lives in button-variants.css.)
  */
 @layer components {
-  .btn-sm {
-    min-height: 34px;
-    padding: 0 12px;
-    font-size: 13px;
-  }
-
   .link-button {
     @apply cursor-pointer bg-transparent text-accent;
     padding: 0;

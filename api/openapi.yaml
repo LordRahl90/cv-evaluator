@@ -87,6 +87,10 @@ tags:
   - name: Job portals
     description: |
       The job portals the platform searches, and suggestions for new ones.
+  - name: Results
+    description: |
+      The jobs your searches found, each scored against your CV in the
+      background, and your own triage of them (save, applied, dismiss).
 
 security:
   - sessionToken: []
@@ -693,6 +697,262 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /results:
+    get:
+      operationId: listResults
+      tags: [Results]
+      summary: List results
+      description: |
+        Returns a page of the caller's results across all their searches.
+        Results of deleted searches are left out.
+
+        By default the best scores come first and results without a completed
+        evaluation come last (`sort=score`); `sort=newest` puts the most
+        recently found first. Page with `limit` and `starting_after`: pass the
+        `id` of the last result of a page to get the next one, while
+        `has_more` is true. `total_count` counts every result matching the
+        filters, on all pages.
+
+        A result that is being re-evaluated keeps its previous `evaluation`
+        until the new one replaces it, so `evaluation` can be set while
+        `evaluation_status` is `pending` or `processing`.
+      parameters:
+        - $ref: '#/components/parameters/ResultMinScore'
+        - $ref: '#/components/parameters/ResultStatus'
+        - $ref: '#/components/parameters/ResultEvaluationStatus'
+        - $ref: '#/components/parameters/ResultSince'
+        - $ref: '#/components/parameters/ResultCriterion'
+        - $ref: '#/components/parameters/ResultMinCriterionScore'
+        - $ref: '#/components/parameters/ResultSort'
+        - $ref: '#/components/parameters/ResultLimit'
+        - $ref: '#/components/parameters/ResultStartingAfter'
+      responses:
+        '200':
+          description: A page of the caller's results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultList'
+              examples:
+                page:
+                  $ref: '#/components/examples/SearchResultList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /results/summary:
+    get:
+      operationId: getResultsSummary
+      tags: [Results]
+      summary: Summarise results
+      description: |
+        Counts the caller's results for a dashboard. "This week" is the
+        rolling seven days before the request (`week_start`). Strong matches
+        are results scored at least `strong_score` (80) that are not
+        dismissed; `strong_matches_new` of them still have status `new`, so
+        the user has not saved, applied to or dismissed them yet.
+        `by_search` lists every one of the caller's searches, oldest first,
+        including searches with no results yet.
+      responses:
+        '200':
+          description: The caller's result counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultsSummary'
+              example:
+                object: results_summary
+                week_start: '2026-10-09T09:00:00Z'
+                total: 84
+                scored: 80
+                evaluating: 3
+                failed_evaluation: 1
+                new_this_week: 14
+                new_this_week_searches: 3
+                strong_score: 80
+                strong_matches: 5
+                strong_matches_new: 2
+                by_status:
+                  new: 70
+                  saved: 8
+                  applied: 4
+                  dismissed: 2
+                by_search:
+                  - id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+                    name: Go jobs in Copenhagen
+                    total: 23
+                    new_this_week: 9
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /results/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The id of the result.
+        schema:
+          $ref: '#/components/schemas/Ulid'
+    get:
+      operationId: getResult
+      tags: [Results]
+      summary: Retrieve a result
+      description: |
+        Returns one of the caller's results with the job's full description
+        and its current evaluation: the overall score, the per-criterion
+        breakdown (in the order the criteria are scored: skills, experience,
+        seniority, domain, education), strengths, missing skills, summary,
+        the job's requirements and whether the CV meets them, and which CV,
+        model and prompt version produced it.
+      responses:
+        '200':
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultDetail'
+              examples:
+                result:
+                  $ref: '#/components/examples/SearchResultDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ResultNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateResult
+      tags: [Results]
+      summary: Update a result's status
+      description: |
+        Moves the result through the user's own triage: `saved` to come back
+        to it, `applied` once applied, `dismissed` to hide it from the
+        default views, or back to `new`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSearchResultRequest'
+            example:
+              status: saved
+      responses:
+        '200':
+          description: The updated result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultDetail'
+              examples:
+                result:
+                  $ref: '#/components/examples/SearchResultDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ResultNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /results/{id}/re-evaluate:
+    post:
+      operationId: reEvaluateResult
+      tags: [Results]
+      summary: Re-evaluate a result
+      description: |
+        Queues the result to be evaluated again, against the CV the
+        background worker picks when it gets to it (the caller's most recent
+        CV). The evaluation happens in the background, so the response is
+        `202 Accepted` with `evaluation_status` set to `pending`; the
+        previous `evaluation` stays until the new one replaces it. A result
+        that waits for a later retry (for example because the caller had no
+        CV) is made due now. A result that is already due or being evaluated
+        cannot be queued again.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the result.
+          schema:
+            $ref: '#/components/schemas/Ulid'
+      responses:
+        '202':
+          description: The evaluation was queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ResultNotFound'
+        '409':
+          description: The result is already queued for, or undergoing, evaluation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: invalid_request_error
+                  code: evaluation_in_progress
+                  message: The result is already queued for or undergoing evaluation.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /job-searches/{id}/results:
+    get:
+      operationId: listJobSearchResults
+      tags: [Results]
+      summary: List a job search's results
+      description: |
+        Like `GET /results`, limited to one of the caller's searches. Takes
+        the same filters, sort and pagination.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the job search.
+          schema:
+            $ref: '#/components/schemas/Ulid'
+        - $ref: '#/components/parameters/ResultMinScore'
+        - $ref: '#/components/parameters/ResultStatus'
+        - $ref: '#/components/parameters/ResultEvaluationStatus'
+        - $ref: '#/components/parameters/ResultSince'
+        - $ref: '#/components/parameters/ResultCriterion'
+        - $ref: '#/components/parameters/ResultMinCriterionScore'
+        - $ref: '#/components/parameters/ResultSort'
+        - $ref: '#/components/parameters/ResultLimit'
+        - $ref: '#/components/parameters/ResultStartingAfter'
+      responses:
+        '200':
+          description: A page of the search's results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultList'
+              examples:
+                page:
+                  $ref: '#/components/examples/SearchResultList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/JobSearchNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
   securitySchemes:
     sessionToken:
@@ -711,6 +971,86 @@ components:
         A personal API key created with `POST /api-keys`, sent as
         `Authorization: Bearer sk_live_...`. Keys do not expire, but can be
         revoked at any time.
+
+  parameters:
+    ResultMinScore:
+      name: min_score
+      in: query
+      description: Only results whose overall score is at least this. Leaves out results without a completed evaluation.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 100
+      example: 70
+    ResultStatus:
+      name: status
+      in: query
+      description: Only results with one of these statuses. Repeat the parameter or separate values with commas.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/SearchResultStatus'
+      example: [new, saved, applied]
+    ResultEvaluationStatus:
+      name: evaluation_status
+      in: query
+      description: Only results with one of these evaluation statuses. Repeat the parameter or separate values with commas.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/EvaluationStatus'
+    ResultSince:
+      name: since
+      in: query
+      description: Only results found at or after this time (RFC 3339).
+      schema:
+        type: string
+        format: date-time
+      example: '2026-10-09T00:00:00Z'
+    ResultCriterion:
+      name: criterion
+      in: query
+      description: With `min_criterion_score`, only results whose evaluation scored this criterion at least that.
+      schema:
+        type: string
+        enum: [skills, experience, seniority, domain, education]
+    ResultMinCriterionScore:
+      name: min_criterion_score
+      in: query
+      description: The minimum score for `criterion`. Required with `criterion`, and only allowed with it.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 100
+    ResultSort:
+      name: sort
+      in: query
+      description: |
+        `score`: best overall score first, results without a completed
+        evaluation last. `newest`: most recently found first.
+      schema:
+        type: string
+        enum: [score, newest]
+        default: score
+    ResultLimit:
+      name: limit
+      in: query
+      description: How many results to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    ResultStartingAfter:
+      name: starting_after
+      in: query
+      description: The id of the last result of the previous page, to get the next page in the same sort order.
+      schema:
+        $ref: '#/components/schemas/Ulid'
 
   schemas:
     Ulid:
@@ -1100,6 +1440,296 @@ components:
           items:
             $ref: '#/components/schemas/PortalSuggestion'
 
+    SearchResultStatus:
+      type: string
+      description: |
+        The user's own triage of a result. Every result starts as `new`.
+      enum: [new, saved, applied, dismissed]
+
+    EvaluationStatus:
+      type: string
+      description: |
+        `pending` until the result is evaluated against the user's CV (and
+        again after a re-evaluation is requested), `processing` while a
+        worker evaluates it, `done` once evaluated, and `failed` once
+        evaluation has failed every retry.
+      enum: [pending, processing, done, failed]
+
+    UpdateSearchResultRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/SearchResultStatus'
+
+    SearchRef:
+      type: object
+      description: The saved search that found the result.
+      required: [id, name]
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+
+    ResultJob:
+      type: object
+      description: The job posting a result is about.
+      required: [id, title, company, location, provider, details_url, posted_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        title:
+          type: string
+        company:
+          type: string
+        location:
+          type: string
+          description: The location the portal lists, possibly empty.
+        provider:
+          type: string
+          description: The job portal the posting is from, e.g. `linkedin`.
+        details_url:
+          type: string
+          description: The original posting on the job portal.
+        posted_at:
+          type: string
+          description: When the portal says the job was posted, as the portal phrases it (e.g. `2 days ago` or a date).
+        description:
+          type: string
+          description: The job's full description. Only on a single result.
+
+    EvaluationSummary:
+      type: object
+      description: What a listed result shows of its evaluation.
+      required: [overall_score, top_missing_skills, evaluated_at]
+      properties:
+        overall_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        top_missing_skills:
+          type: array
+          maxItems: 3
+          description: The first three missing skills, most important first.
+          items:
+            type: string
+        evaluated_at:
+          type: string
+          format: date-time
+
+    SearchResult:
+      type: object
+      description: A job one of the user's searches found, with its score.
+      required: [object, id, status, evaluation_status, created_at, updated_at, search, job, evaluation]
+      properties:
+        object:
+          type: string
+          const: search_result
+        id:
+          $ref: '#/components/schemas/Ulid'
+        status:
+          $ref: '#/components/schemas/SearchResultStatus'
+        evaluation_status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        created_at:
+          type: string
+          format: date-time
+          description: When the search found the job.
+        updated_at:
+          type: string
+          format: date-time
+        search:
+          $ref: '#/components/schemas/SearchRef'
+        job:
+          $ref: '#/components/schemas/ResultJob'
+        evaluation:
+          description: The current evaluation, or `null` until the result has a completed one.
+          oneOf:
+            - $ref: '#/components/schemas/EvaluationSummary'
+            - type: 'null'
+
+    SearchResultList:
+      type: object
+      required: [object, data, has_more, total_count]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        has_more:
+          type: boolean
+          description: Whether another page follows. Get it with `starting_after` set to the last `id`.
+        total_count:
+          type: integer
+          description: How many results match the filters, on all pages.
+
+    CriterionScore:
+      type: object
+      required: [criterion, score, reason]
+      properties:
+        criterion:
+          type: string
+          description: One of `skills`, `experience`, `seniority`, `domain`, `education`.
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        reason:
+          type: string
+
+    Requirement:
+      type: object
+      description: One of the job's requirements and whether the CV meets it.
+      required: [requirement, importance, met, evidence]
+      properties:
+        requirement:
+          type: string
+        importance:
+          type: string
+          enum: [must, nice]
+        met:
+          type: string
+          enum: ['yes', partial, 'no']
+        evidence:
+          type: string
+          description: What in the CV shows it, possibly empty.
+
+    Evaluation:
+      type: object
+      description: A result's full current evaluation against one of the user's CVs.
+      required: [id, cv_id, overall_score, breakdown, strengths, missing_skills, summary, requirements, model, prompt_version, evaluated_at]
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        cv_id:
+          $ref: '#/components/schemas/Ulid'
+        overall_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        breakdown:
+          type: array
+          description: The scored criteria, in the order skills, experience, seniority, domain, education. A criterion that was not scored is absent.
+          items:
+            $ref: '#/components/schemas/CriterionScore'
+        strengths:
+          type: array
+          items:
+            type: string
+        missing_skills:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+        requirements:
+          type: [array, 'null']
+          description: The job's requirements, or `null` for evaluations made before requirements were part of an evaluation.
+          items:
+            $ref: '#/components/schemas/Requirement'
+        model:
+          type: string
+          description: The LLM that evaluated it.
+        prompt_version:
+          type: string
+        evaluated_at:
+          type: string
+          format: date-time
+
+    SearchResultDetail:
+      type: object
+      description: A result with the job's full description and its full evaluation.
+      required: [object, id, status, evaluation_status, created_at, updated_at, search, job, evaluation]
+      properties:
+        object:
+          type: string
+          const: search_result
+        id:
+          $ref: '#/components/schemas/Ulid'
+        status:
+          $ref: '#/components/schemas/SearchResultStatus'
+        evaluation_status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        created_at:
+          type: string
+          format: date-time
+          description: When the search found the job.
+        updated_at:
+          type: string
+          format: date-time
+        search:
+          $ref: '#/components/schemas/SearchRef'
+        job:
+          $ref: '#/components/schemas/ResultJob'
+        evaluation:
+          description: The current evaluation, or `null` until the result has a completed one.
+          oneOf:
+            - $ref: '#/components/schemas/Evaluation'
+            - type: 'null'
+
+    SearchCount:
+      type: object
+      required: [id, name, total, new_this_week]
+      properties:
+        id:
+          $ref: '#/components/schemas/Ulid'
+        name:
+          type: string
+        total:
+          type: integer
+        new_this_week:
+          type: integer
+
+    ResultsSummary:
+      type: object
+      required: [object, week_start, total, scored, evaluating, failed_evaluation, new_this_week, new_this_week_searches, strong_score, strong_matches, strong_matches_new, by_status, by_search]
+      properties:
+        object:
+          type: string
+          const: results_summary
+        week_start:
+          type: string
+          format: date-time
+          description: The start of the rolling week the weekly counts cover.
+        total:
+          type: integer
+        scored:
+          type: integer
+          description: Results with a completed evaluation.
+        evaluating:
+          type: integer
+          description: Results waiting for, or undergoing, evaluation.
+        failed_evaluation:
+          type: integer
+        new_this_week:
+          type: integer
+          description: Results found since `week_start`.
+        new_this_week_searches:
+          type: integer
+          description: How many different searches found the `new_this_week` results.
+        strong_score:
+          type: integer
+          description: The overall score from which a match counts as strong.
+        strong_matches:
+          type: integer
+          description: Results scored at least `strong_score` that are not dismissed.
+        strong_matches_new:
+          type: integer
+          description: Strong matches that still have status `new`.
+        by_status:
+          type: object
+          required: [new, saved, applied, dismissed]
+          additionalProperties:
+            type: integer
+        by_search:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchCount'
+
     Error:
       type: object
       required: [type, message]
@@ -1138,6 +1768,7 @@ components:
             - job_search_disabled
             - portal_already_suggested
             - portal_already_supported
+            - evaluation_in_progress
             - internal_error
             - timeout
         message:
@@ -1252,6 +1883,19 @@ components:
               message: No such job search.
               param: id
 
+    ResultNotFound:
+      description: The result does not exist or belongs to another user.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              type: invalid_request_error
+              code: resource_missing
+              message: No such result.
+              param: id
+
     InternalError:
       description: An unexpected error on our side. No internal details are exposed.
       content:
@@ -1312,3 +1956,105 @@ components:
         status: submitted
         created_at: '2026-10-16T10:00:00Z'
         updated_at: '2026-10-16T10:00:00Z'
+    SearchResultList:
+      summary: A page of results
+      value:
+        object: list
+        has_more: true
+        total_count: 31
+        data:
+          - object: search_result
+            id: 01JA4D5E6F7G8H9J0K1M2N3P4Q
+            status: new
+            evaluation_status: done
+            created_at: '2026-10-16T07:00:12Z'
+            updated_at: '2026-10-16T07:04:40Z'
+            search:
+              id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+              name: Go jobs in Copenhagen
+            job:
+              id: 01JA4D5E6F7G8H9J0K1M2N3P4R
+              title: Senior Go Engineer
+              company: Northwind Logistics
+              location: Copenhagen
+              provider: linkedin
+              details_url: https://www.linkedin.com/jobs/view/4012345678
+              posted_at: 2 hours ago
+            evaluation:
+              overall_score: 91
+              top_missing_skills: [Terraform]
+              evaluated_at: '2026-10-16T07:04:40Z'
+          - object: search_result
+            id: 01JA4D5E6F7G8H9J0K1M2N3P4S
+            status: saved
+            evaluation_status: pending
+            created_at: '2026-10-16T07:00:12Z'
+            updated_at: '2026-10-16T07:00:12Z'
+            search:
+              id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+              name: Go jobs in Copenhagen
+            job:
+              id: 01JA4D5E6F7G8H9J0K1M2N3P4T
+              title: Backend Developer
+              company: Hollow Pine Games
+              location: Copenhagen
+              provider: jobindex
+              details_url: https://www.jobindex.dk/vis-job/h1234567
+              posted_at: '2026-10-15'
+            evaluation: null
+    SearchResultDetail:
+      summary: A result
+      value:
+        object: search_result
+        id: 01JA4D5E6F7G8H9J0K1M2N3P4Q
+        status: new
+        evaluation_status: done
+        created_at: '2026-10-16T07:00:12Z'
+        updated_at: '2026-10-16T07:04:40Z'
+        search:
+          id: 01JA2B3C4D5E6F7G8H9J0K1M2N
+          name: Go jobs in Copenhagen
+        job:
+          id: 01JA4D5E6F7G8H9J0K1M2N3P4R
+          title: Senior Go Engineer
+          company: Northwind Logistics
+          location: Copenhagen
+          provider: linkedin
+          details_url: https://www.linkedin.com/jobs/view/4012345678
+          posted_at: 2 hours ago
+          description: We're building the routing engine behind same-day delivery across the Nordics...
+        evaluation:
+          id: 01JA4D5E6F7G8H9J0K1M2N3P4V
+          cv_id: 01JA1A2B3C4D5E6F7G8H9J0K1M
+          overall_score: 91
+          breakdown:
+            - criterion: skills
+              score: 94
+              reason: Go, Kafka and PostgreSQL in production roles.
+            - criterion: experience
+              score: 90
+              reason: Six years on distributed backend systems.
+            - criterion: seniority
+              score: 88
+              reason: Senior scope matches the role.
+            - criterion: domain
+              score: 76
+              reason: No logistics background.
+            - criterion: education
+              score: 80
+              reason: Computer science degree.
+          strengths: [6 years of production Go, Kafka and PostgreSQL event pipelines]
+          missing_skills: [Terraform]
+          summary: A close fit. The main gap is infrastructure as code.
+          requirements:
+            - requirement: 5+ years of Go
+              importance: must
+              met: 'yes'
+              evidence: Six years of Go at Acme and Initech.
+            - requirement: Terraform
+              importance: nice
+              met: 'no'
+              evidence: ''
+          model: deepseek-chat
+          prompt_version: v4
+          evaluated_at: '2026-10-16T07:04:40Z'

@@ -1,0 +1,54 @@
+/*
+ * data-table.css — tables inside a card (.table-card): the scroll box that
+ * keeps a wide table from widening the page on phones (.table-scroll), and
+ * the table itself (.data-table) with its header row, muted cells and a
+ * right-aligned actions column.
+ */
+@layer components {
+  .table-card {
+    overflow: hidden;
+  }
+
+  /* position: relative keeps absolutely positioned children (such as an
+     .sr-only column label) inside the scroll box instead of the page. */
+  .table-scroll {
+    position: relative;
+    overflow-x: auto;
+  }
+
+  .table-scroll:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .data-table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+  }
+
+  .data-table th {
+    @apply bg-row-hover text-left whitespace-nowrap text-muted;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-line);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .data-table td {
+    padding: 15px 16px;
+    border-bottom: 1px solid var(--color-divider);
+    vertical-align: middle;
+  }
+
+  .data-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .data-table-muted {
+    @apply text-muted;
+  }
+
+  .data-table .data-table-actions {
+    text-align: right;
+  }
+}

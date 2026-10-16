@@ -66,6 +66,13 @@ func TestPipeline_EndToEnd_IdempotentAcrossRuns(t *testing.T) {
 	assert.Equal(t, models.StringList{"go"}, eval.Strengths)
 	assert.Equal(t, models.StringList{"rust"}, eval.MissingSkills)
 	assert.Equal(t, goodRaw, eval.RawResponse)
+
+	var evaluated models.SearchResult
+	require.NoError(t, testDB.Take(&evaluated, "id = ?", eval.SearchResultID).Error)
+	require.NotNil(t, evaluated.EvaluationID, "the result points at its current evaluation")
+	assert.Equal(t, eval.ID, *evaluated.EvaluationID)
+	require.NotNil(t, evaluated.OverallScore)
+	assert.Equal(t, 77, *evaluated.OverallScore, "the score is copied onto the result")
 	assert.Equal(t, DefaultModel, eval.Model)
 	assert.Equal(t, DefaultPromptVersion, eval.PromptVersion)
 
@@ -416,6 +423,9 @@ func TestEvaluateOne_PersistentFailureEndsFailed(t *testing.T) {
 	assert.Equal(t, models.StatusFailed, eval.Status)
 	assert.Contains(t, eval.Error, "invalid character")
 	assert.Equal(t, "garbage", eval.RawResponse)
+	require.NotNil(t, got.EvaluationID)
+	assert.Equal(t, eval.ID, *got.EvaluationID)
+	assert.Nil(t, got.OverallScore, "a failed evaluation has no score")
 }
 
 func TestEvaluateOne_ReevaluationReplacesScores(t *testing.T) {
@@ -443,6 +453,10 @@ func TestEvaluateOne_ReevaluationReplacesScores(t *testing.T) {
 	require.NoError(t, testDB.Take(&second).Error)
 	assert.Equal(t, first.ID, second.ID)
 	assert.Equal(t, 40, second.OverallScore)
+	var reevaluated models.SearchResult
+	require.NoError(t, testDB.Take(&reevaluated, "id = ?", result.ID).Error)
+	require.NotNil(t, reevaluated.OverallScore)
+	assert.Equal(t, 40, *reevaluated.OverallScore, "the copied score follows the new evaluation")
 	var scores []models.EvaluationScore
 	require.NoError(t, testDB.Where("evaluation_id = ?", second.ID).Find(&scores).Error)
 	require.Len(t, scores, 1, "the old scores are replaced, not merged")
