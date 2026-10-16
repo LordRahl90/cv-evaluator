@@ -19,7 +19,7 @@ var appModels = []interface{}{
 	&models.PortalSuggestion{},
 	&models.SearchResult{},
 	&models.Evaluation{},
-	&models.QueueTask{},
+	&models.EvaluationScore{},
 }
 
 func Migrate(db *gorm.DB) error {

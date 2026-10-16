@@ -1,5 +1,5 @@
-// Command worker runs the background pipeline: a scheduler that queues due
-// job searches, and workers that fetch, embed and evaluate jobs.
+// Command worker runs the background pipeline: a scheduler that runs due
+// job searches, and pools of goroutines that embed and evaluate jobs.
 package main
 
 import (
@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
@@ -25,8 +24,6 @@ import (
 	"cv-evaluator/internal/pipeline"
 	pipelinesources "cv-evaluator/internal/pipeline/sources"
 	"cv-evaluator/internal/providers"
-	"cv-evaluator/internal/queue"
-	"cv-evaluator/internal/services/jobs"
 	"cv-evaluator/internal/services/matcher"
 	"cv-evaluator/internal/telemetry"
 
@@ -47,13 +44,13 @@ type options struct {
 	// nil means http.DefaultTransport. The worker adds telemetry itself, so
 	// don't pass an instrumented transport or requests are recorded twice.
 	Transport http.RoundTripper
-	// Observer is told about every task run and scheduler tick. nil means
+	// Observer is told about every pipeline step and scheduler tick. nil means
 	// no-op.
 	Observer pipeline.RunObserver
 }
 
 // sources returns the job search store and the portal fetcher. Scrapers use
-// the client's transport so outbound portal requests can be instrumented.
+// the client's transport so outbound portal requests are instrumented.
 func sources(dbase *gorm.DB, client *http.Client) (pipeline.SearchStore, pipeline.Fetcher) {
 	return pipelinesources.NewStore(dbase), pipelinesources.NewFetcher(providers.Default(providers.WithTransport(client.Transport)))
 }
@@ -89,6 +86,12 @@ func run(opts options) error {
 	}
 	defer func() { _ = sqlDB.Close() }()
 
+	// No connection is held while scraping, embedding or calling the LLM:
+	// each step claims its row and writes its result in short statements,
+	// so a small pool serves any worker concurrency.
+	sqlDB.SetMaxOpenConns(settings.dbMaxOpenConns)
+	sqlDB.SetMaxIdleConns(settings.dbMaxOpenConns)
+
 	if err := migrator.Migrate(dbase); err != nil {
 		return err
 	}
@@ -97,10 +100,16 @@ func run(opts options) error {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	// ollama.New instruments its own client; DeepSeek and the portal
-	// fetcher are wrapped here, so no request is recorded twice.
-	llmClient := &http.Client{Timeout: 30 * time.Minute, Transport: transport}
-	fetchClient := &http.Client{Timeout: time.Minute, Transport: telemetry.NewJobBoardTransport(transport)}
+	// Keep these well below WORKER_STALE_TIMEOUT, so a row is only
+	// reclaimed when its worker is really gone. ollama.New instruments its
+	// own client; DeepSeek and the portal fetcher are wrapped here, so no
+	// request is recorded twice.
+	llmClient := &http.Client{Timeout: llmTimeout, Transport: transport}
+	fetchClient := &http.Client{Timeout: fetchTimeout, Transport: telemetry.NewJobBoardTransport(transport)}
+	if settings.staleTimeout <= llmTimeout {
+		return fmt.Errorf("WORKER_STALE_TIMEOUT (%s) must be longer than the LLM request timeout (%s)",
+			settings.staleTimeout, llmTimeout)
+	}
 
 	ollamaLLM := ollama.New(llmClient, cfg.OllamaBaseURL)
 	deepseekClient, err := deepseekLib.NewClientWithOptions(cfg.DeepSeekAPIKey, deepseekLib.WithHTTPClient(telemetry.NewHTTPClient(telemetry.PeerDeepSeek, llmClient)))
@@ -111,63 +120,59 @@ func run(opts options) error {
 
 	searches, fetcher := sources(dbase, fetchClient)
 
-	q := queue.New(dbase, queue.Options{})
 	p, err := pipeline.New(pipeline.Config{
-		DB:                       dbase,
-		Queue:                    q,
-		Searches:                 searches,
-		Fetcher:                  fetcher,
-		Embedder:                 jobs.New(dbase, ollamaLLM),
-		Evaluator:                matcher.New(dbase, ollamaLLM, deepseekLLM),
-		MaxConcurrentEvaluations: settings.maxEvaluations,
-		Observer:                 opts.Observer,
+		DB:                dbase,
+		Searches:          searches,
+		Fetcher:           fetcher,
+		Embedder:          ollamaLLM,
+		Evaluator:         matcher.New(dbase, ollamaLLM, deepseekLLM),
+		SearchConcurrency: settings.searchConcurrency,
+		EmbedWorkers:      settings.embedConcurrency,
+		EvaluateWorkers:   settings.evalConcurrency,
+		StaleTimeout:      settings.staleTimeout,
+		PollInterval:      settings.pollInterval,
+		SchedulerInterval: settings.schedulerInterval,
+		ShutdownGrace:     settings.shutdownGrace,
+		Observer:          opts.Observer,
 	})
 	if err != nil {
 		return err
 	}
-	scheduler := pipeline.NewScheduler(q, searches, fetcher, pipeline.SchedulerOptions{
-		Interval: settings.schedulerInterval,
-		Observer: opts.Observer,
-	})
-	worker := queue.NewWorker(q, p.Handlers(), queue.WorkerOptions{
-		Concurrency:   settings.concurrency,
-		PollInterval:  settings.pollInterval,
-		ShutdownGrace: settings.shutdownGrace,
-	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	slog.Info("worker starting",
 		"environment", cfg.Environment,
-		"worker_id", worker.ID(),
-		"concurrency", settings.concurrency,
-		"max_evaluations", settings.maxEvaluations,
+		"search_concurrency", settings.searchConcurrency,
+		"embed_concurrency", settings.embedConcurrency,
+		"eval_concurrency", settings.evalConcurrency,
+		"stale_timeout", settings.staleTimeout,
 		"scheduler_interval", settings.schedulerInterval,
+		"db_max_open_conns", settings.dbMaxOpenConns,
 		"providers", fetcher.Providers())
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		scheduler.Run(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		worker.Run(ctx)
-	}()
-	wg.Wait()
+	p.Run(ctx)
 
 	slog.Info("worker stopped")
 	return nil
 }
 
+// HTTP timeouts for outbound calls. WORKER_STALE_TIMEOUT must exceed them.
+const (
+	llmTimeout   = 2 * time.Minute
+	fetchTimeout = time.Minute
+)
+
 type settings struct {
-	concurrency       int
-	maxEvaluations    int
+	searchConcurrency int
+	embedConcurrency  int
+	evalConcurrency   int
+	staleTimeout      time.Duration
 	pollInterval      time.Duration
 	schedulerInterval time.Duration
 	shutdownGrace     time.Duration
+	dbMaxOpenConns    int
 }
 
 // loadSettings reads the worker's tuning knobs from the environment.
@@ -176,11 +181,14 @@ func loadSettings() (settings, error) {
 		s    settings
 		errs []error
 	)
-	s.concurrency = envInt("WORKER_CONCURRENCY", 4, &errs)
-	s.maxEvaluations = envInt("WORKER_MAX_EVALUATIONS", pipeline.DefaultMaxConcurrentEvaluations, &errs)
-	s.pollInterval = envDuration("WORKER_POLL_INTERVAL", time.Second, &errs)
-	s.schedulerInterval = envDuration("SCHEDULER_INTERVAL", time.Minute, &errs)
-	s.shutdownGrace = envDuration("WORKER_SHUTDOWN_GRACE", 30*time.Second, &errs)
+	s.searchConcurrency = envInt("WORKER_SEARCH_CONCURRENCY", pipeline.DefaultSearchConcurrency, &errs)
+	s.embedConcurrency = envInt("WORKER_EMBED_CONCURRENCY", pipeline.DefaultEmbedWorkers, &errs)
+	s.evalConcurrency = envInt("WORKER_EVAL_CONCURRENCY", pipeline.DefaultEvaluateWorkers, &errs)
+	s.staleTimeout = envDuration("WORKER_STALE_TIMEOUT", pipeline.DefaultStaleTimeout, &errs)
+	s.pollInterval = envDuration("WORKER_POLL_INTERVAL", pipeline.DefaultPollInterval, &errs)
+	s.schedulerInterval = envDuration("SCHEDULER_INTERVAL", pipeline.DefaultSchedulerInterval, &errs)
+	s.shutdownGrace = envDuration("WORKER_SHUTDOWN_GRACE", pipeline.DefaultShutdownGrace, &errs)
+	s.dbMaxOpenConns = envInt("WORKER_DB_MAX_OPEN_CONNS", 10, &errs)
 	return s, errors.Join(errs...)
 }
 

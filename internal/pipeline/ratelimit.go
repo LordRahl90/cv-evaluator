@@ -3,17 +3,11 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"cv-evaluator/internal/entities"
-	"cv-evaluator/internal/queue"
 )
-
-// ErrRateLimited is returned (wrapped in queue.RetryAfter) when a portal
-// call would have to wait longer than RateLimitOptions.MaxWait.
-var ErrRateLimited = errors.New("provider rate limited")
 
 // RateLimitOptions configures per-portal rate limiting.
 type RateLimitOptions struct {
@@ -26,10 +20,6 @@ type RateLimitOptions struct {
 	// Each failure doubles the penalty, starting at the interval; a success
 	// clears it. Default 10m.
 	MaxPenalty time.Duration
-	// MaxWait is the longest a task blocks waiting for its turn. Beyond it
-	// the task is put back in the queue to run later instead of holding a
-	// worker. Default 30s.
-	MaxWait time.Duration
 }
 
 func (o RateLimitOptions) withDefaults() RateLimitOptions {
@@ -38,9 +28,6 @@ func (o RateLimitOptions) withDefaults() RateLimitOptions {
 	}
 	if o.MaxPenalty <= 0 {
 		o.MaxPenalty = 10 * time.Minute
-	}
-	if o.MaxWait <= 0 {
-		o.MaxWait = 30 * time.Second
 	}
 	return o
 }
@@ -101,9 +88,9 @@ func (l *RateLimiter) state(provider string) *providerState {
 	return st
 }
 
-// reserve books the next slot for provider. It returns how long the caller
-// must wait, or false when that is longer than MaxWait (nothing is booked).
-func (l *RateLimiter) reserve(provider string) (time.Duration, bool) {
+// reserve books the next slot for provider and returns how long the caller
+// must wait for it.
+func (l *RateLimiter) reserve(provider string) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -113,23 +100,13 @@ func (l *RateLimiter) reserve(provider string) (time.Duration, bool) {
 	if st.next.After(now) {
 		start = st.next
 	}
-	wait := start.Sub(now)
-	if wait > l.opts.MaxWait {
-		return wait, false
-	}
 	st.next = start.Add(l.interval(provider))
-	return wait, true
+	return start.Sub(now)
 }
 
-// Wait blocks until provider may be called. When the wait would exceed
-// MaxWait it returns ErrRateLimited wrapped in queue.RetryAfter, so the
-// task is retried once the portal is available again.
+// Wait blocks until provider may be called, or ctx is done.
 func (l *RateLimiter) Wait(ctx context.Context, provider string) error {
-	wait, ok := l.reserve(provider)
-	if !ok {
-		return queue.RetryAfter(fmt.Errorf("%s: %w (next slot in %s)", provider, ErrRateLimited, wait.Round(time.Second)), wait)
-	}
-	return l.sleep(ctx, wait)
+	return l.sleep(ctx, l.reserve(provider))
 }
 
 // Report records the outcome of a call. A failure doubles the portal's

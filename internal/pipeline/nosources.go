@@ -14,9 +14,7 @@ import (
 var ErrNoSources = errors.New("pipeline: no job search sources configured")
 
 // NoSources is a placeholder SearchStore and Fetcher with no searches and
-// no portals. The worker uses it until the adapter over the job search
-// store and the provider registry is wired in; with it the scheduler finds
-// nothing to run.
+// no portals. With it the scheduler finds nothing to run.
 type NoSources struct{}
 
 var (
@@ -26,7 +24,9 @@ var (
 
 func (NoSources) DueSearches(context.Context, time.Time, int) ([]Search, error) { return nil, nil }
 
-func (NoSources) GetSearch(context.Context, ulid.ULID) (*Search, error) { return nil, nil }
+func (NoSources) ClaimRun(context.Context, ulid.ULID, time.Time, time.Time) (bool, error) {
+	return false, nil
+}
 
 func (NoSources) MarkRun(context.Context, ulid.ULID, time.Time, time.Time) error { return nil }
 

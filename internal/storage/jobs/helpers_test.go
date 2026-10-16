@@ -35,7 +35,7 @@ func makeJob(provider, jobID string) *models.Job {
 		Location:   "Remote",
 		PostedAt:   "today",
 		DetailsURL: "https://example.com/jobs/" + jobID,
-		Status:     models.StatusPending,
+		Status:     models.JobStatusNew,
 		Detail:     "Build production systems in Go",
 		Embedding:  makeVector768(),
 	}

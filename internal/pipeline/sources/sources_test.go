@@ -2,6 +2,8 @@ package sources
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,15 +64,35 @@ func TestStore(t *testing.T) {
 		assert.Equal(t, older.ID, limited[0].ID)
 	})
 
-	t.Run("GetSearch returns nil for a deleted search", func(t *testing.T) {
-		got, err := store.GetSearch(ctx, due.ID)
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		assert.Equal(t, "due", got.Name)
+	t.Run("ClaimRun lets exactly one caller win a due run", func(t *testing.T) {
+		lease := now.Add(30 * time.Minute)
 
-		gone, err := store.GetSearch(ctx, deleted.ID)
-		require.NoError(t, err)
-		assert.Nil(t, gone)
+		var wins atomic.Int32
+		var wg sync.WaitGroup
+		for range 5 {
+			wg.Go(func() {
+				ok, err := store.ClaimRun(ctx, older.ID, now, lease)
+				assert.NoError(t, err)
+				if ok {
+					wins.Add(1)
+				}
+			})
+		}
+		wg.Wait()
+		assert.Equal(t, int32(1), wins.Load())
+
+		var row models.JobSearch
+		require.NoError(t, db.First(&row, "id = ?", older.ID).Error)
+		require.NotNil(t, row.NextRunAt)
+		assert.True(t, row.NextRunAt.Equal(lease))
+	})
+
+	t.Run("ClaimRun refuses searches that are not due, disabled or deleted", func(t *testing.T) {
+		for _, js := range []*models.JobSearch{future, disabled, unscheduled, deleted} {
+			ok, err := store.ClaimRun(ctx, js.ID, now, now.Add(time.Hour))
+			require.NoError(t, err)
+			assert.False(t, ok, js.Name)
+		}
 	})
 
 	t.Run("MarkRun sets last and next run", func(t *testing.T) {

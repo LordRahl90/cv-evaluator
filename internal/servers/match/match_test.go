@@ -19,8 +19,11 @@ func TestMatchByJobDescription_Success(t *testing.T) {
 	svc := new(MockJobMatcher)
 	userID := ulid.Make()
 	expected := &matcher.Response{
-		OverallScore:  85,
-		SkillsScore:   90,
+		OverallScore: 85,
+		Breakdown: []matcher.CriterionScore{
+			{Criterion: "skills", Score: 90, Reason: "Go and distributed systems"},
+			{Criterion: "location", Score: 70, Reason: "hybrid, same country"},
+		},
 		Strengths:     []string{"Go", "Distributed systems"},
 		MissingSkills: []string{"Kubernetes"},
 		Summary:       "Strong match",
@@ -35,7 +38,8 @@ func TestMatchByJobDescription_Success(t *testing.T) {
 	var got matcher.Response
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, expected.OverallScore, got.OverallScore)
-	assert.Equal(t, expected.SkillsScore, got.SkillsScore)
+	assert.Equal(t, expected.Breakdown, got.Breakdown)
+	assert.Contains(t, w.Body.String(), `"breakdown":[{"criterion":"skills","score":90,"reason":"Go and distributed systems"}`)
 	assert.Equal(t, expected.Strengths, got.Strengths)
 	assert.Equal(t, expected.MissingSkills, got.MissingSkills)
 	assert.Equal(t, expected.Summary, got.Summary)

@@ -56,22 +56,21 @@ func (s *Store) DueSearches(ctx context.Context, now time.Time, limit int) ([]pi
 	return res, nil
 }
 
-// GetSearch returns the search, or nil and no error if it was deleted.
-func (s *Store) GetSearch(ctx context.Context, id ulid.ULID) (*pipeline.Search, error) {
-	var row models.JobSearch
-	err := s.db.WithContext(ctx).Where("id = ?", id).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
+// ClaimRun takes ownership of one run of the search by pushing next_run_at
+// out to until, but only while the search is still enabled and due. Of
+// several workers racing for the same run, exactly one sees true.
+func (s *Store) ClaimRun(ctx context.Context, id ulid.ULID, now, until time.Time) (bool, error) {
+	res := s.db.WithContext(ctx).
+		Model(&models.JobSearch{}).
+		Where("id = ? AND enabled AND next_run_at IS NOT NULL AND next_run_at <= ?", id, now).
+		Update("next_run_at", until)
+	if res.Error != nil {
+		return false, res.Error
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	search := toSearch(&row)
-	return &search, nil
+	return res.RowsAffected == 1, nil
 }
 
-// MarkRun records the run. A search disabled while it was being queued is
+// MarkRun records the run. A search disabled while it was running is
 // left unscheduled rather than given a new next run.
 func (s *Store) MarkRun(ctx context.Context, id ulid.ULID, ranAt, next time.Time) error {
 	return s.db.WithContext(ctx).

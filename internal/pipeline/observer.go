@@ -3,16 +3,19 @@ package pipeline
 import (
 	"context"
 	"time"
-
-	"cv-evaluator/internal/queue"
 )
 
-// KindScheduleTick is the observer kind for one scheduler tick.
-const KindScheduleTick = "schedule_tick"
+// Observer kinds: one per pipeline step.
+const (
+	KindRunSearch    = "run_search"    // one search on one portal
+	KindEmbedJob     = "embed_job"     // fetch a job's details if needed and embed it
+	KindEvaluateJob  = "evaluate_job"  // evaluate one search result
+	KindScheduleTick = "schedule_tick" // one scheduler pass over due searches
+)
 
-// RunObserver is told about every background run: each task handler
-// execution (kind run_search, embed_job or evaluate_job) and each scheduler
-// tick (kind schedule_tick). It is the hook for metrics and tracing.
+// RunObserver is told about every background run: each step (kind
+// run_search per portal, embed_job, evaluate_job) and each scheduler tick
+// (kind schedule_tick). It is the hook for metrics and tracing.
 //
 // RunStarted may return a derived context (e.g. carrying a span); the run
 // uses it, so anything the run does nests under it. RunFinished receives
@@ -43,13 +46,4 @@ func observe(ctx context.Context, o RunObserver, kind string, fn func(context.Co
 	err := fn(ctx)
 	o.RunFinished(ctx, kind, time.Since(start), err)
 	return err
-}
-
-// observed wraps a queue handler with the observer.
-func observed(o RunObserver, kind queue.Kind, h queue.Handler) queue.Handler {
-	return func(ctx context.Context, task *queue.Task) error {
-		return observe(ctx, o, string(kind), func(ctx context.Context) error {
-			return h(ctx, task)
-		})
-	}
 }
