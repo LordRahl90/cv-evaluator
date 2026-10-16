@@ -1,0 +1,313 @@
+/*
+ * match-detail.css — one match (/matches/:id): the back link, the header card
+ * with the score ring and actions, the two columns of sections (summary,
+ * score breakdown bars, requirements checklist, strengths and missing
+ * skills; evaluation info and the posting), and the dismiss button.
+ */
+@layer components {
+  .match-detail {
+    gap: 20px;
+  }
+
+  .match-detail-stack {
+    @apply flex flex-col;
+    gap: 20px;
+  }
+
+  .match-back {
+    @apply inline-flex items-center self-start;
+    gap: 6px;
+    font-weight: 600;
+  }
+
+  .match-back .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Header card */
+  .match-hero {
+    @apply flex flex-wrap items-center;
+    gap: 20px 24px;
+    padding: 24px;
+  }
+
+  .match-hero-body {
+    @apply flex flex-col;
+    flex: 1 1 280px;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .match-hero-badges {
+    @apply flex flex-wrap;
+    gap: 8px;
+  }
+
+  .match-hero-badges .badge {
+    white-space: normal;
+  }
+
+  .match-hero-title {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .match-hero-meta {
+    @apply text-muted;
+  }
+
+  .match-hero-actions {
+    @apply flex flex-wrap;
+    gap: 8px;
+  }
+
+  @media (min-width: 768px) {
+    .match-hero-title {
+      font-size: 26px;
+    }
+  }
+
+  /* Columns */
+  .match-columns {
+    @apply flex flex-wrap items-start;
+    gap: 20px;
+  }
+
+  .match-main {
+    @apply flex flex-col;
+    flex: 2 1 480px;
+    min-width: 0;
+    gap: 20px;
+  }
+
+  .match-aside {
+    @apply flex flex-col;
+    flex: 1 1 280px;
+    min-width: 0;
+    gap: 20px;
+  }
+
+  .match-section {
+    @apply flex flex-col;
+    gap: 14px;
+    padding: 22px 24px;
+  }
+
+  .match-section-title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .match-section-action {
+    align-self: flex-start;
+  }
+
+  .match-summary {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .match-muted {
+    @apply text-muted;
+    margin: 0;
+  }
+
+  /* Score breakdown */
+  .match-metrics {
+    @apply flex flex-col;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .match-metric {
+    @apply grid items-center;
+    grid-template-columns: 96px minmax(0, 1fr) 36px;
+    gap: 4px 12px;
+  }
+
+  .match-metric-track {
+    --bar-color: var(--color-accent);
+    @apply bg-chip;
+    display: block;
+    height: 8px;
+    border-radius: 999px;
+  }
+
+  .match-metric-track.is-fair {
+    --bar-color: var(--match-amber);
+  }
+
+  .match-metric-fill {
+    display: block;
+    width: calc(var(--score, 0) * 1%);
+    height: 8px;
+    border-radius: 999px;
+    background: var(--bar-color);
+  }
+
+  .match-metric-value {
+    text-align: right;
+  }
+
+  .match-metric-reason {
+    @apply text-muted;
+    grid-column: 2 / -1;
+    font-size: 12.5px;
+  }
+
+  /* Requirements */
+  .match-reqs {
+    @apply flex flex-col;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .match-req {
+    @apply flex items-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .match-req:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .match-req-icon {
+    @apply flex;
+    flex: none;
+    margin-top: 1px;
+  }
+
+  .match-req-icon .icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .match-req.is-yes .match-req-icon {
+    @apply text-accent;
+  }
+
+  .match-req.is-partial .match-req-icon {
+    color: var(--match-amber);
+  }
+
+  .match-req.is-no .match-req-icon {
+    @apply text-danger;
+  }
+
+  .match-req-body {
+    min-width: 0;
+  }
+
+  .match-req-line {
+    @apply flex flex-wrap items-center;
+    gap: 6px 8px;
+  }
+
+  .match-req-text {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .match-req-evidence {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  /* Strengths and missing skills */
+  .match-lists {
+    @apply grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+  }
+
+  .match-items {
+    @apply flex flex-col;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .match-item {
+    @apply flex items-start;
+    gap: 10px;
+    overflow-wrap: anywhere;
+  }
+
+  .match-item .icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    margin-top: 1px;
+  }
+
+  .match-item.is-strength .icon {
+    @apply text-accent;
+  }
+
+  .match-item.is-gap .icon {
+    @apply text-danger;
+  }
+
+  /* Evaluation info */
+  .match-kv {
+    margin: 0;
+  }
+
+  .match-kv-row {
+    @apply flex justify-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .match-kv-row:first-child {
+    border-top: 0;
+  }
+
+  .match-kv-row dt {
+    @apply text-muted;
+  }
+
+  .match-kv-row dd {
+    margin: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .match-dismiss,
+  .match-dismiss:hover {
+    border-color: var(--color-danger-line);
+    color: var(--color-danger);
+  }
+
+  /* Posting */
+  .match-description {
+    @apply text-muted;
+    margin: 0;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+
+  .match-link-btn {
+    @apply cursor-pointer self-start bg-transparent text-accent;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    font-weight: 600;
+  }
+
+  .match-link-btn:hover {
+    @apply text-accent-ink;
+  }
+}

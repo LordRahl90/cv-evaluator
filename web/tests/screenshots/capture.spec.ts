@@ -9,14 +9,17 @@ import {
   mockCVStore,
   mockJobSearchesApi,
   mockQuickMatch,
+  mockResults,
   pdfFile,
   sampleApiKeys,
   sampleCV,
   sampleCVs,
   sampleJobDescription,
+  sampleResults,
   sampleSearches,
   sampleSuggestions,
   signedIn,
+  unscoredResults,
 } from '../support/mockApi'
 
 const OUT = process.env.SCREENSHOT_DIR ?? 'screenshots'
@@ -113,6 +116,108 @@ test('mobile dashboard', async ({ page }) => {
   await page.getByRole('button', { name: 'Account menu' }).click()
   await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
   await shoot(page, 'mobile-user-menu', false)
+})
+
+// ── Matches ─────────────────────────────────────────────────────────────────
+
+async function withMatches(page: Page, options: Parameters<typeof mockResults>[1] = {}) {
+  await signedIn(page)
+  await mockApi(page, { cvs: [sampleCV], searches: sampleSearches() })
+  await mockResults(page, options)
+}
+
+test('dashboard with matches', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 940 })
+  await withMatches(page, { results: sampleResults() })
+  await page.goto('/')
+  await expect(page.getByTestId('top-match')).toHaveCount(5)
+  await shoot(page, 'dashboard-with-matches')
+})
+
+test('matches list', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: sampleResults() })
+  await page.goto('/matches')
+  await expect(page.getByTestId('match-row')).toHaveCount(6)
+  await shoot(page, 'matches')
+})
+
+test('matches filtered to one search', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: sampleResults() })
+  await page.goto('/matches?search=01JA2B3C4D5E6F7G8H9J0KS001&min=80')
+  await expect(page.getByTestId('match-row')).toHaveCount(2)
+  await shoot(page, 'matches-filtered')
+})
+
+test('matches loading', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  const hold = deferred()
+  await withMatches(page, { results: sampleResults(), gate: hold.promise })
+  await page.goto('/matches')
+  await expect(page.getByTestId('matches-loading')).toBeVisible()
+  await shoot(page, 'matches-loading', false)
+  hold.release()
+})
+
+test('matches in progress', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: unscoredResults() })
+  await page.goto('/matches')
+  await expect(page.getByTestId('matches-in-progress')).toBeVisible()
+  await shoot(page, 'matches-in-progress')
+})
+
+test('matches empty', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page)
+  await page.goto('/matches')
+  await expect(page.getByTestId('matches-empty-state')).toBeVisible()
+  await shoot(page, 'matches-empty')
+})
+
+test('match detail', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await withMatches(page, { results: sampleResults() })
+  await page.goto('/matches/01JA2B3C4D5E6F7G8H9J0KR001')
+  await expect(page.getByTestId('match-metric')).toHaveCount(5)
+  await shoot(page, 'match-detail')
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible()
+  await page.getByRole('button', { name: 'Re-evaluate with active CV' }).click()
+  await expect(page.getByTestId('match-eval-status')).toBeVisible()
+  await shoot(page, 'match-detail-saved-rescoring', false)
+})
+
+test('match detail with a failed update', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: sampleResults() })
+  await page.route('**/api/results/01JA2B3C4D5E6F7G8H9J0KR001', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 500,
+          json: apiError('api_error', 'internal_error', 'An unexpected error occurred.'),
+        })
+      : route.fallback(),
+  )
+  await page.goto('/matches/01JA2B3C4D5E6F7G8H9J0KR001')
+  await page.getByRole('button', { name: 'Mark applied' }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await shoot(page, 'match-detail-error', false)
+})
+
+test('mobile matches', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await withMatches(page, { results: sampleResults() })
+  await page.goto('/matches')
+  await expect(page.getByTestId('match-row')).toHaveCount(6)
+  await shoot(page, 'mobile-matches')
+  await page.goto('/matches/01JA2B3C4D5E6F7G8H9J0KR001')
+  await expect(page.getByTestId('match-metric')).toHaveCount(5)
+  await shoot(page, 'mobile-match-detail')
+  await page.goto('/')
+  await expect(page.getByTestId('top-match')).toHaveCount(5)
+  await shoot(page, 'mobile-dashboard-with-matches')
 })
 
 // Job searches

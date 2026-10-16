@@ -1,0 +1,15 @@
+/*
+ * match-badge.css — the two match status pills badge.css has no colour for:
+ * .badge-new (dark, not triaged yet) and .badge-blue (applied). Saved uses
+ * .badge-green and dismissed .badge-grey from badge.css.
+ */
+@layer components {
+  .badge-new {
+    @apply bg-ink text-white;
+  }
+
+  .badge-blue {
+    background: var(--match-blue-soft);
+    color: var(--match-blue-ink);
+  }
+}

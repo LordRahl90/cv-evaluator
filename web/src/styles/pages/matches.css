@@ -1,0 +1,267 @@
+/*
+ * matches.css — the matches list page (/matches): search tabs, the filter
+ * row, the result rows (MatchRow), the loading rows, the "scoring in
+ * progress" card and the "Load more" row.
+ */
+@layer components {
+  .matches-page {
+    gap: 18px;
+  }
+
+  /* Search tabs */
+  .match-tabs {
+    @apply flex flex-wrap;
+    gap: 6px;
+  }
+
+  .match-tab {
+    @apply bg-surface text-ink-soft;
+    padding: 8px 14px;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .match-tab:hover {
+    @apply bg-surface-hover text-ink;
+  }
+
+  .match-tab.is-active,
+  .match-tab.is-active:hover {
+    @apply border-ink bg-ink text-white;
+  }
+
+  .match-tab-count {
+    margin-left: 2px;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+
+  /* Filters */
+  .match-filters {
+    @apply flex flex-wrap items-center;
+    gap: 10px 16px;
+  }
+
+  .match-filter {
+    @apply flex items-center;
+    gap: 8px;
+  }
+
+  .match-filter-label {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .match-select {
+    @apply bg-surface text-ink;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+    font: inherit;
+  }
+
+  .match-select:focus {
+    @apply border-accent;
+  }
+
+  .match-count {
+    @apply text-muted;
+    margin-left: auto;
+    font-size: 12.5px;
+  }
+
+  /* Rows */
+  .match-list {
+    overflow: hidden;
+  }
+
+  .match-row {
+    @apply flex flex-wrap items-center text-ink;
+    gap: 12px 16px;
+    padding: 16px 22px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .match-row:first-of-type {
+    border-top: 0;
+  }
+
+  .match-row:hover {
+    @apply bg-row-hover text-ink;
+  }
+
+  .match-row-body {
+    flex: 1 1 200px;
+    min-width: 0;
+  }
+
+  .match-row-title-line {
+    @apply flex flex-wrap items-center;
+    gap: 8px;
+  }
+
+  .match-row-title {
+    font-size: 15px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .match-row-meta {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .match-row-gaps {
+    @apply flex flex-wrap;
+    flex: 0 1 260px;
+    gap: 6px;
+  }
+
+  .match-gap {
+    display: inline-flex;
+    padding: 1px 8px;
+    border-radius: 6px;
+    background: var(--match-gap-soft);
+    color: var(--match-gap-ink);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  /* Loading rows */
+  .match-skeleton {
+    @apply flex items-center;
+    gap: 16px;
+    padding: 16px 22px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .match-skeleton:first-of-type {
+    border-top: 0;
+  }
+
+  .match-skeleton-ring {
+    @apply bg-chip;
+    width: 46px;
+    height: 46px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  .match-skeleton-body {
+    @apply flex flex-1 flex-col;
+    gap: 8px;
+  }
+
+  /* Scoring in progress */
+  .match-progress {
+    @apply flex flex-col items-start;
+    gap: 4px;
+    padding: 24px;
+  }
+
+  .match-progress-head {
+    @apply flex flex-wrap items-center justify-between self-stretch;
+    gap: 12px;
+  }
+
+  .match-progress-title {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .match-progress-text {
+    @apply text-muted;
+    margin: 0 0 8px;
+  }
+
+  .match-stages {
+    @apply self-stretch;
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .match-stage {
+    @apply flex items-start;
+    gap: 14px;
+    padding: 12px 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .match-stage-dot {
+    @apply flex items-center justify-center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  .match-stage-dot .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .match-stage-dot.is-done {
+    @apply bg-accent text-white;
+  }
+
+  .match-stage-dot.is-active {
+    @apply bg-amber-soft text-amber-ink;
+  }
+
+  .match-stage-body {
+    @apply flex flex-1 flex-col;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .match-stage-title {
+    font-weight: 600;
+  }
+
+  .match-stage-note {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  /* Indeterminate: the API has no per-job progress to show. */
+  .match-stage-bar {
+    @apply bg-chip;
+    position: relative;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+  }
+
+  .match-stage-bar span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 30%;
+    border-radius: 999px;
+    background: var(--match-amber);
+    animation: match-indeterminate 1.6s ease-in-out infinite;
+  }
+
+  @keyframes match-indeterminate {
+    from {
+      left: -30%;
+    }
+    to {
+      left: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .match-stage-bar span {
+      animation: none;
+      left: 0;
+    }
+  }
+
+  .match-more {
+    @apply flex justify-center;
+  }
+}

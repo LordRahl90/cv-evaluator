@@ -4,6 +4,9 @@ import AppIcon, { type IconName } from '../components/AppIcon'
 import type { JobSearch } from '../api/types'
 import AlertMessage from '../components/AlertMessage.vue'
 import { useOverview } from '../composables/useOverview'
+import { useMatchesOverview } from '../composables/useMatchesOverview'
+import MatchScoreRing from '../components/MatchScoreRing.vue'
+import { dotted, providerLabel } from '../utils/matches'
 import { capitalise, formatDay, formatRelative, formatRunTime, greeting } from '../utils/format'
 
 const {
@@ -24,7 +27,13 @@ const {
   lastRun,
 } = useOverview()
 
-onMounted(load)
+const matches = useMatchesOverview()
+const matchSummary = matches.summary
+
+onMounted(() => {
+  load()
+  matches.load()
+})
 
 const firstName = computed(() => user.value?.first_name?.trim() || '')
 
@@ -39,6 +48,8 @@ const subtitle = computed(() => {
     const left = 3 - stepsDone.value
     return `${left === 1 ? 'One more step' : 'Two more steps'} and your first scored jobs start arriving.`
   }
+  const fresh = matchSummary.value?.new_this_week ?? 0
+  if (fresh > 0) return `${plural(fresh, 'new match', 'new matches')} this week.`
   const n = activeSearches.value.length
   if (n === 0) return 'All your searches are paused. Resume one to keep new jobs coming.'
   return `${n} active ${n === 1 ? 'search is' : 'searches are'} looking for new jobs on your schedule.`
@@ -112,6 +123,18 @@ const runStat = computed(() => {
     note: hasSearch.value ? 'The first run starts shortly' : 'Runs start after you add a search',
     empty: true,
   }
+})
+
+const newMatchesNote = computed(() => {
+  const n = matchSummary.value?.new_this_week_searches ?? 0
+  if (!matchSummary.value?.new_this_week) return 'None found this week'
+  return `Across ${plural(n, 'search', 'searches')}`
+})
+
+const strongNote = computed(() => {
+  const s = matchSummary.value
+  if (!s || s.strong_matches === 0) return `Scored ${s?.strong_score ?? 80} or more`
+  return s.strong_matches_new > 0 ? `${s.strong_matches_new} still new` : 'All triaged'
 })
 
 const recentSearches = computed(() => searches.value.slice(0, 5))
@@ -226,6 +249,41 @@ function searchDetail(s: JobSearch): string {
       </section>
 
       <section class="stat-grid" aria-label="Activity summary">
+        <!-- Match counts, once there is something to match (GET /results/summary). -->
+        <template v-if="setupComplete">
+          <div class="card stat" data-testid="stat-new-matches">
+            <div class="stat-label">New matches this week</div>
+            <span v-if="matches.status.value === 'loading'" class="skeleton skeleton-value" />
+            <div
+              v-else
+              class="stat-value"
+              :class="{ 'is-empty': !matchSummary || matchSummary.new_this_week === 0 }"
+            >
+              {{ matchSummary ? matchSummary.new_this_week : '–' }}
+            </div>
+            <div class="stat-note">
+              {{ matches.status.value === 'error' ? "Couldn't load" : newMatchesNote }}
+            </div>
+          </div>
+          <div class="card stat" data-testid="stat-strong-matches">
+            <div class="stat-label">Strong matches ({{ matchSummary?.strong_score ?? 80 }}+)</div>
+            <span v-if="matches.status.value === 'loading'" class="skeleton skeleton-value" />
+            <div
+              v-else
+              class="stat-value"
+              :class="
+                !matchSummary || matchSummary.strong_matches === 0
+                  ? 'is-empty'
+                  : 'stat-value-accent'
+              "
+            >
+              {{ matchSummary ? matchSummary.strong_matches : '–' }}
+            </div>
+            <div class="stat-note">
+              {{ matches.status.value === 'error' ? "Couldn't load" : strongNote }}
+            </div>
+          </div>
+        </template>
         <div class="card stat" data-testid="stat-searches">
           <div class="stat-label">Active searches</div>
           <div class="stat-value" :class="{ 'is-empty': searchStat.value === 0 }">
@@ -239,7 +297,7 @@ function searchDetail(s: JobSearch): string {
           <div v-else class="stat-value stat-value-sm is-empty">Not set</div>
           <div class="stat-note">{{ cvNote }}</div>
         </div>
-        <div class="card stat" data-testid="stat-last-run">
+        <div v-if="!setupComplete" class="card stat" data-testid="stat-last-run">
           <div class="stat-label">Last search run</div>
           <div v-if="runStat.empty" class="stat-value stat-value-sm is-empty">
             {{ runStat.value }}
@@ -255,10 +313,55 @@ function searchDetail(s: JobSearch): string {
             <h2 id="matches-title" class="section-title">Top new matches</h2>
             <RouterLink to="/matches" class="link-strong">See all matches</RouterLink>
           </div>
-          <div class="empty-state" data-testid="matches-empty">
+          <div
+            v-if="matches.status.value === 'loading'"
+            class="overview-match-list"
+            aria-busy="true"
+            data-testid="matches-loading"
+          >
+            <span class="sr-only" role="status">Loading matches…</span>
+            <div v-for="n in 3" :key="n" class="overview-match-skeleton" aria-hidden="true">
+              <span class="skeleton overview-match-skeleton-ring" />
+              <span class="skeleton skeleton-line skeleton-w-40" />
+            </div>
+          </div>
+          <div v-else-if="matches.status.value === 'error'" class="overview-match-error">
+            <AlertMessage>
+              We couldn't load your matches. {{ matches.error.value?.message }}
+            </AlertMessage>
+            <button type="button" class="btn btn-secondary" @click="matches.load">
+              <AppIcon name="refresh" />Try again
+            </button>
+          </div>
+          <ul v-else-if="matches.top.value.length" class="overview-match-list">
+            <li v-for="r in matches.top.value" :key="r.id">
+              <RouterLink :to="`/matches/${r.id}`" class="overview-match" data-testid="top-match">
+                <MatchScoreRing :score="r.evaluation?.overall_score ?? null" />
+                <div class="overview-match-body">
+                  <div class="overview-match-title">{{ r.job.title || 'Untitled job' }}</div>
+                  <div class="overview-match-meta">{{ dotted(r.job.company, r.job.location) }}</div>
+                </div>
+                <span class="badge badge-grey">{{ providerLabel(r.job.provider) }}</span>
+                <span class="overview-match-time">{{ formatRelative(r.created_at) }}</span>
+              </RouterLink>
+            </li>
+          </ul>
+          <div v-else class="empty-state" data-testid="matches-empty">
             <span class="empty-state-icon"><AppIcon name="star" /></span>
-            <div class="empty-state-title">No matches to show yet</div>
-            <p class="empty-state-text">Matches appear here after your first search runs.</p>
+            <template v-if="matchSummary && matchSummary.total > 0">
+              <div class="empty-state-title">No new matches this week</div>
+              <p class="empty-state-text">
+                {{
+                  matchSummary.evaluating > 0
+                    ? `${plural(matchSummary.evaluating, 'job is', 'jobs are')} still being scored.`
+                    : 'Your earlier matches are on the Matches page.'
+                }}
+              </p>
+            </template>
+            <template v-else>
+              <div class="empty-state-title">No matches to show yet</div>
+              <p class="empty-state-text">Matches appear here after your first search runs.</p>
+            </template>
           </div>
         </section>
 
