@@ -112,7 +112,7 @@ func run() error {
 	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
 	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, apiKeyVerifier)
 	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, apiKeyVerifier)
-	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, apiKeyVerifier)
+	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, acceptAPIKeys)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

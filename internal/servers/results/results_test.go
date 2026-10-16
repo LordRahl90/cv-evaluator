@@ -44,7 +44,7 @@ func newTestRouter(svc Service, apiKeyUser ulid.ULID) *gin.Engine {
 		}
 		return apiKeyUser, nil
 	})
-	New(r, svc, testJWTSecret, verifier)
+	New(r, svc, testJWTSecret, middleware.WithAPIKeyVerifier(verifier))
 	return r
 }
 
@@ -296,7 +296,7 @@ func TestRoutesCoexistWithJobSearchRoutes(t *testing.T) {
 	r := gin.New()
 	assert.NotPanics(t, func() {
 		jobsearchhttp.New(r, nil, providers.Default(), testJWTSecret, nil)
-		New(r, new(MockService), testJWTSecret, nil)
+		New(r, new(MockService), testJWTSecret)
 	})
 }
 
