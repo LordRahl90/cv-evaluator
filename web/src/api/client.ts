@@ -54,12 +54,28 @@ export interface RequestOptions {
 }
 
 /** Sends a request to the API and returns the decoded JSON body (or null). */
-export async function request<T>(
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await send(path, options)
+  return (await readJson(response)) as T
+}
+
+/** Like request(), for endpoints that answer with a file (e.g. a download). */
+export async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const response = await send(path, options)
+  return response.blob()
+}
+
+/**
+ * Sends the request and turns failures into ApiError. A FormData body goes
+ * out as multipart (the browser sets the boundary); anything else as JSON.
+ */
+async function send(
   path: string,
-  { method = 'GET', body, auth = true, signal }: RequestOptions = {},
-): Promise<T> {
+  { method = 'GET', body, auth = true, signal }: RequestOptions,
+): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' }
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const isForm = body instanceof FormData
+  if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json'
   const token = auth ? getToken() : null
   if (token) headers.Authorization = `Bearer ${token}`
 
@@ -68,7 +84,7 @@ export async function request<T>(
     response = await fetch(API_BASE_URL + path, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
       signal,
     })
   } catch (err) {
@@ -79,14 +95,12 @@ export async function request<T>(
     })
   }
 
-  const data = await readJson(response)
-
   if (!response.ok) {
-    const error = toApiError(response.status, data)
+    const error = toApiError(response.status, await readJson(response))
     if (response.status === 401 && auth && unauthorizedHandler) unauthorizedHandler(error)
     throw error
   }
-  return data as T
+  return response
 }
 
 async function readJson(response: Response): Promise<unknown> {
