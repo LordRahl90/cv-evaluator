@@ -29,7 +29,7 @@ const testAPIKey = "sk_live_handlertest"
 func newTestRouter(svc Service, verifier *MockVerifier) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	New(r, svc, testJWTSecret, NewVerifier(verifier))
+	New(r, svc, testJWTSecret, middleware.WithAPIKeyVerifier(NewVerifier(verifier)))
 	return r
 }
 

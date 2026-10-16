@@ -85,13 +85,14 @@ type Handler struct {
 //	GET    /api-keys
 //	DELETE /api-keys/:id
 //
-// Requests may authenticate with a JWT, or with an API key when apiKeys is
-// non-nil.
-func New(router gin.IRouter, svc Service, jwtSecret []byte, apiKeys middleware.APIKeyVerifier) *Handler {
+// opts are passed to middleware.Authenticate, for example
+// middleware.WithAPIKeyVerifier to accept API keys as well as JWTs and
+// middleware.WithSessionValidator to reject revoked sessions.
+func New(router gin.IRouter, svc Service, jwtSecret []byte, opts ...middleware.Option) *Handler {
 	h := &Handler{svc: svc}
 
 	group := router.Group("/api-keys")
-	group.Use(middleware.Authenticate(jwtSecret, middleware.WithAPIKeyVerifier(apiKeys)))
+	group.Use(middleware.Authenticate(jwtSecret, opts...))
 	group.POST("", h.create)
 	group.GET("", h.list)
 	group.DELETE("/:id", h.delete)

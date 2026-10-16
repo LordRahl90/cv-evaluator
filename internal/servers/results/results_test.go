@@ -295,7 +295,7 @@ func TestRoutesCoexistWithJobSearchRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	assert.NotPanics(t, func() {
-		jobsearchhttp.New(r, nil, providers.Default(), testJWTSecret, nil)
+		jobsearchhttp.New(r, nil, providers.Default(), testJWTSecret)
 		New(r, new(MockService), testJWTSecret)
 	})
 }

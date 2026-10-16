@@ -49,7 +49,7 @@ func newTestRouter(svc Service, apiKeyUser ulid.ULID) *gin.Engine {
 		}
 		return apiKeyUser, nil
 	})
-	New(r, svc, providers.Default(), testJWTSecret, verifier)
+	New(r, svc, providers.Default(), testJWTSecret, middleware.WithAPIKeyVerifier(verifier))
 	return r
 }
 
@@ -413,7 +413,7 @@ func TestListProviders(t *testing.T) {
 func TestListProviders_WithoutDescriber(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	New(r, new(MockService), providers.NewRegistry(bareProvider{}), testJWTSecret, nil)
+	New(r, new(MockService), providers.NewRegistry(bareProvider{}), testJWTSecret)
 
 	w := doRequest(r, http.MethodGet, "/providers", bearerJWT(t, ulid.Make()), "")
 

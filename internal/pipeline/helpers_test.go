@@ -405,10 +405,12 @@ func (h *harness) tick() int {
 }
 
 // newSearch returns an enabled search that is due (NextRunAt in the past),
-// as a newly created search is.
+// as a newly created search is. It is also stored as a job_searches row,
+// since results are only recorded for searches that exist; resetDB leaves
+// those rows alone, and their ids never repeat.
 func newSearch(userID ulid.ULID, query string) *Search {
 	due := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	return &Search{
+	s := &Search{
 		NextRunAt: &due,
 		ID:        ulid.Make(),
 		UserID:    userID,
@@ -418,6 +420,13 @@ func newSearch(userID ulid.ULID, query string) *Search {
 		Frequency: FrequencyDaily,
 		Enabled:   true,
 	}
+	if err := testDB.Create(&models.JobSearch{
+		ID: s.ID, UserID: userID, Name: query, Query: query, Location: s.Location,
+		Frequency: s.Frequency, Enabled: true, NextRunAt: &due,
+	}).Error; err != nil {
+		panic(fmt.Sprintf("store search: %v", err))
+	}
+	return s
 }
 
 func seedCV(t *testing.T, userID ulid.ULID, createdAt time.Time) *models.CV {

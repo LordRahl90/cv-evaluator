@@ -4,10 +4,12 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/mail"
 	"strings"
+	"time"
 
 	"cv-evaluator/internal/servers/apierror"
 	"cv-evaluator/internal/servers/middleware"
@@ -31,6 +33,27 @@ type Service interface {
 	Signup(ctx context.Context, req users.SignupRequest) (*users.AuthResponse, error)
 	Signin(ctx context.Context, req users.SigninRequest) (*users.AuthResponse, error)
 	GetProfile(ctx context.Context, userID ulid.ULID) (*users.Profile, error)
+}
+
+// SessionChecker is the subset of *users.Service that decides whether a
+// session token is still valid.
+type SessionChecker interface {
+	ValidateSession(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error
+}
+
+// NewSessionValidator adapts the users service to
+// middleware.SessionValidator, translating users.ErrSessionRevoked (token
+// issued before the last password change) and users.ErrUserNotFound (the
+// account was deleted) into middleware.ErrInvalidToken so the middleware
+// answers with 401 (and with 500 for anything else).
+func NewSessionValidator(svc SessionChecker) middleware.SessionValidator {
+	return middleware.SessionValidatorFunc(func(ctx context.Context, userID ulid.ULID, issuedAt time.Time) error {
+		err := svc.ValidateSession(ctx, userID, issuedAt)
+		if errors.Is(err, users.ErrSessionRevoked) || errors.Is(err, users.ErrUserNotFound) {
+			return fmt.Errorf("%w: %w", middleware.ErrInvalidToken, err)
+		}
+		return err
+	})
 }
 
 type signupRequest struct {
@@ -73,13 +96,18 @@ type Handler struct {
 //
 //	POST /auth/signup  (public)
 //	POST /auth/signin  (public)
-//	GET  /me           (JWT, or API key when apiKeys is non-nil)
-func New(router gin.IRouter, svc Service, jwtSecret []byte, apiKeys middleware.APIKeyVerifier) *Handler {
+//	GET  /me           (authenticated)
+//
+// opts are passed to middleware.Authenticate for /me, for example
+// middleware.WithAPIKeyVerifier to accept API keys as well as JWTs.
+// The other account routes (PATCH and DELETE /me, ...) are registered by
+// package account.
+func New(router gin.IRouter, svc Service, jwtSecret []byte, opts ...middleware.Option) *Handler {
 	h := &Handler{svc: svc}
 
 	router.POST("/auth/signup", h.signup)
 	router.POST("/auth/signin", h.signin)
-	router.GET("/me", middleware.Authenticate(jwtSecret, middleware.WithAPIKeyVerifier(apiKeys)), h.me)
+	router.GET("/me", middleware.Authenticate(jwtSecret, opts...), h.me)
 
 	return h
 }
@@ -109,7 +137,7 @@ func (h *Handler) signup(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, toSession(resp))
+	c.JSON(http.StatusCreated, ToSession(resp))
 }
 
 func (h *Handler) signin(c *gin.Context) {
@@ -135,7 +163,7 @@ func (h *Handler) signin(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toSession(resp))
+	c.JSON(http.StatusOK, ToSession(resp))
 }
 
 func (h *Handler) me(c *gin.Context) {
@@ -156,7 +184,7 @@ func (h *Handler) me(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toUser(*profile))
+	c.JSON(http.StatusOK, ToUser(*profile))
 }
 
 func validateSignup(req signupRequest) *apierror.Error {
@@ -168,19 +196,35 @@ func validateSignup(req signupRequest) *apierror.Error {
 	switch {
 	case req.Email == "":
 		return invalid(apierror.CodeParameterMissing, "The email parameter is required.", "email")
-	case !validEmail(req.Email):
+	case !ValidEmail(req.Email):
 		return invalid(apierror.CodeParameterInvalid, "The email parameter must be a valid email address.", "email")
-	case req.Password == "":
-		return invalid(apierror.CodeParameterMissing, "The password parameter is required.", "password")
-	case len([]rune(req.Password)) < MinPasswordLength:
-		return invalid(apierror.CodeParameterInvalid, "The password must be at least 8 characters long.", "password")
-	case len(req.Password) > MaxPasswordBytes:
-		return invalid(apierror.CodeParameterInvalid, "The password must be at most 72 bytes long.", "password")
+	}
+	return ValidatePassword(req.Password, "password")
+}
+
+// ValidatePassword checks a new password against the signup rules: present,
+// at least MinPasswordLength characters and at most MaxPasswordBytes bytes.
+// param names the request parameter in the returned error.
+func ValidatePassword(password, param string) *apierror.Error {
+	invalid := func(code, msg string) *apierror.Error {
+		e := apierror.InvalidRequest(code, msg, param)
+		return &e
+	}
+
+	switch {
+	case password == "":
+		return invalid(apierror.CodeParameterMissing, fmt.Sprintf("The %s parameter is required.", param))
+	case len([]rune(password)) < MinPasswordLength:
+		return invalid(apierror.CodeParameterInvalid, fmt.Sprintf("The password must be at least %d characters long.", MinPasswordLength))
+	case len(password) > MaxPasswordBytes:
+		return invalid(apierror.CodeParameterInvalid, fmt.Sprintf("The password must be at most %d bytes long.", MaxPasswordBytes))
 	}
 	return nil
 }
 
-func validEmail(email string) bool {
+// ValidEmail reports whether email is a bare email address (no display
+// name), as signup requires.
+func ValidEmail(email string) bool {
 	addr, err := mail.ParseAddress(email)
 	return err == nil && addr.Address == email
 }
@@ -201,16 +245,18 @@ func handleServiceError(c *gin.Context, err error) {
 	}
 }
 
-func toSession(resp *users.AuthResponse) SessionResponse {
+// ToSession renders a session (a token and its user).
+func ToSession(resp *users.AuthResponse) SessionResponse {
 	return SessionResponse{
 		Object:    "session",
 		Token:     resp.Token,
 		TokenType: "Bearer",
-		User:      toUser(resp.User),
+		User:      ToUser(resp.User),
 	}
 }
 
-func toUser(p users.Profile) UserResponse {
+// ToUser renders a user profile.
+func ToUser(p users.Profile) UserResponse {
 	return UserResponse{
 		Object:    "user",
 		ID:        p.ID.String(),
