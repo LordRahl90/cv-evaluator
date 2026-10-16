@@ -1,0 +1,66 @@
+/*
+ * card.css — the white bordered surface used across the app, its section
+ * header (.section-head / .section-title) and the stat cards.
+ */
+@layer components {
+  .card {
+    @apply bg-surface;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+  }
+
+  .section-head {
+    @apply flex items-center justify-between gap-3;
+    padding: 18px 20px;
+  }
+
+  .section-title {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .link-strong {
+    font-weight: 600;
+  }
+
+  .stat-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+
+  .stat {
+    @apply flex flex-col gap-1;
+    padding: 20px 24px;
+  }
+
+  .stat-label {
+    @apply text-muted;
+  }
+
+  .stat-value {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .stat-value.is-empty {
+    @apply text-faint;
+  }
+
+  .stat-value-sm {
+    font-size: 20px;
+    padding: 8px 0;
+  }
+
+  .stat-text {
+    font-weight: 600;
+    font-size: 15px;
+    padding: 10px 0 6px;
+  }
+
+  .stat-note {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+}

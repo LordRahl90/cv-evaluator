@@ -1,0 +1,83 @@
+/*
+ * skeleton.css — loading placeholders: a soft shimmer block (.skeleton) and
+ * size helpers for lines, titles, stat values and checklist rows.
+ */
+@layer components {
+  .skeleton {
+    display: block;
+    border-radius: 6px;
+    background: linear-gradient(
+      90deg,
+      var(--color-chip) 0%,
+      var(--color-divider) 40%,
+      var(--color-chip) 80%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  .skeleton-line {
+    height: 12px;
+  }
+
+  .skeleton-title {
+    width: 260px;
+    max-width: 70%;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .skeleton-value {
+    width: 56px;
+    height: 32px;
+    margin: 6px 0;
+    border-radius: 8px;
+  }
+
+  .skeleton-bar {
+    height: 6px;
+    border-radius: 999px;
+  }
+
+  .skeleton-row {
+    height: 44px;
+    border-radius: var(--radius-control);
+  }
+
+  .skeleton-w-24 {
+    width: 6rem;
+  }
+  .skeleton-w-32 {
+    width: 8rem;
+  }
+  .skeleton-w-40 {
+    width: 40%;
+  }
+  .skeleton-w-56 {
+    width: 56%;
+  }
+  .skeleton-w-80 {
+    width: 22rem;
+    max-width: 90%;
+  }
+
+  .skeleton-card {
+    @apply flex flex-col gap-4;
+    padding: 20px 24px;
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton {
+      animation: none;
+    }
+  }
+}

@@ -1,0 +1,57 @@
+/*
+ * tokens.css — design tokens from the approved mockups, as Tailwind theme
+ * variables. Each --color-* becomes a utility (bg-accent, text-muted, …) for
+ * use with @apply, and a CSS variable (var(--color-accent)) for plain CSS.
+ */
+@theme {
+  /* Surfaces */
+  --color-canvas: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-surface-hover: #fafaf8;
+  --color-row-hover: #fbfaf8;
+  --color-nav-hover: #f1f0ec;
+
+  /* Lines */
+  --color-line: #e4e2dc;
+  --color-line-strong: #d9d6ce;
+  --color-divider: #eeece7;
+
+  /* Text */
+  --color-ink: #17191e;
+  --color-ink-soft: #3d4148;
+  --color-muted: #5f6368;
+  --color-faint: #a3a6ab;
+
+  /* Brand */
+  --color-accent: #0e6b5c;
+  --color-accent-hover: #0a5245;
+  --color-accent-ink: #0a4f43;
+  --color-accent-soft: #e6f2ef;
+  --color-avatar: #dce9e5;
+
+  /* Dark auth panel */
+  --color-panel: #0e3b34;
+  --color-panel-ink: #e8f1ee;
+  --color-panel-muted: #b9d2cb;
+  --color-panel-mark: #3fb59a;
+  --color-panel-step: #7fd4bf;
+
+  /* Status */
+  --color-chip: #efeeea;
+  --color-chip-ink: #4a4e55;
+  --color-amber-soft: #fcf1dc;
+  --color-amber-ink: #7a4a00;
+  --color-danger: #b3261e;
+  --color-danger-soft: #fcebea;
+  --color-danger-line: #f2c4c0;
+
+  /* Type */
+  --font-display: 'Bricolage Grotesque', 'Geist', system-ui, sans-serif;
+  --font-sans: 'Geist', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  /* Radii */
+  --radius-control: 10px;
+  --radius-card: 14px;
+  --radius-nav: 8px;
+}
