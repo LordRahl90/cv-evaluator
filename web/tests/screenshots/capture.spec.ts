@@ -2,8 +2,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import {
+  ACCOUNT_PASSWORD,
   apiError,
   deferred,
+  mockAccount,
   mockApi,
   mockApiKeys,
   mockCVStore,
@@ -549,38 +551,6 @@ test('api keys, create dialog, new secret and list', async ({ page, context }) =
   await shoot(page, 'api-keys-revoke-confirm', false)
 })
 
-test('settings', async ({ page }) => {
-  await page.setViewportSize(desktop)
-  await signedIn(page)
-  await mockApi(page, {
-    user: {
-      object: 'user',
-      id: '01JA2B3C4D5E6F7G8H9J0K1M2N',
-      first_name: 'Jane',
-      last_name: 'Doe',
-      email: 'jane.doe@example.com',
-      phone: '+1 555 0100',
-    },
-  })
-  await page.goto('/settings')
-  await expect(page.getByTestId('profile-email')).toBeVisible()
-  await shoot(page, 'settings')
-  await page.getByRole('button', { name: 'Account menu' }).click()
-  await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
-  await shoot(page, 'settings-user-menu', false)
-})
-
-test('settings, loading', async ({ page }) => {
-  await page.setViewportSize(desktop)
-  await signedIn(page)
-  const hold = deferred()
-  await mockApi(page, { gate: hold.promise })
-  await page.goto('/settings')
-  await expect(page.getByTestId('profile-skeleton').first()).toBeVisible()
-  await shoot(page, 'settings-loading', false)
-  hold.release()
-})
-
 test('mobile api keys and settings', async ({ page }) => {
   await page.setViewportSize(phone)
   await signedIn(page)
@@ -601,6 +571,139 @@ test('mobile api keys and settings', async ({ page }) => {
   await shoot(page, 'mobile-api-keys-new-secret')
 
   await page.goto('/settings')
-  await expect(page.getByTestId('profile-email')).toBeVisible()
+  await expect(page.getByLabel('Email')).toHaveValue('jane.doe@example.com')
   await shoot(page, 'mobile-settings')
+})
+
+// ---- Account settings -----------------------------------------------------
+
+const janeWithPhone = {
+  object: 'user' as const,
+  id: '01JA2B3C4D5E6F7G8H9J0K1M2N',
+  first_name: 'Jane',
+  last_name: 'Doe',
+  email: 'jane.doe@example.com',
+  phone: '+1 555 0100',
+}
+
+async function openSettings(page: Page, options: Parameters<typeof mockAccount>[1] = {}) {
+  await signedIn(page)
+  await mockApi(page, { user: janeWithPhone })
+  const account = await mockAccount(page, { user: janeWithPhone, ...options })
+  await page.goto('/settings')
+  await expect(page.getByLabel('Email')).toHaveValue('jane.doe@example.com')
+  return account
+}
+
+test('settings', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await openSettings(page)
+  await shoot(page, 'settings')
+})
+
+test('settings, loading', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await signedIn(page)
+  const hold = deferred()
+  await mockApi(page, { gate: hold.promise })
+  await page.goto('/settings')
+  await expect(page.getByTestId('profile-skeleton').first()).toBeVisible()
+  await shoot(page, 'settings-loading', false)
+  hold.release()
+})
+
+test('settings, profile saved and the menu updated', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await openSettings(page)
+  await page.getByLabel('First name').fill('Janet')
+  await page.getByLabel('Email').fill('janet.doe@example.com')
+  await page.getByRole('button', { name: 'Save profile' }).click()
+  await expect(page.getByText('Profile saved.')).toBeVisible()
+  await page.getByRole('button', { name: 'Account menu' }).click()
+  await expect(page.getByRole('menu', { name: 'Account' })).toContainText('Janet Doe')
+  await shoot(page, 'settings-profile-saved', false)
+})
+
+test('settings, profile and password errors', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1200 })
+  await openSettings(page, {
+    updateError: {
+      status: 409,
+      body: apiError(
+        'invalid_request_error',
+        'email_already_used',
+        'An account with this email already exists.',
+        'email',
+      ),
+    },
+  })
+  await page.getByLabel('Email').fill('taken@example.com')
+  await page.getByRole('button', { name: 'Save profile' }).click()
+  await expect(page.locator('#email-error')).toBeVisible()
+
+  const form = page.getByTestId('password-form')
+  await form.getByLabel('Current password').fill('not-my-password')
+  await form.getByLabel('New password', { exact: true }).fill('a-long-new-password')
+  await form.getByLabel('Confirm new password').fill('a-long-new-password')
+  await form.getByRole('button', { name: 'Change password' }).click()
+  await expect(page.locator('#current-password-error')).toBeVisible()
+  await shoot(page, 'settings-errors')
+})
+
+test('settings, password changed', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await openSettings(page)
+  const form = page.getByTestId('password-form')
+  await form.getByLabel('Current password').fill(ACCOUNT_PASSWORD)
+  await form.getByLabel('New password', { exact: true }).fill('a-long-new-password')
+  await form.getByLabel('Confirm new password').fill('a-long-new-password')
+  await form.getByRole('button', { name: 'Change password' }).click()
+  await expect(form.getByText('Password changed.', { exact: false })).toBeVisible()
+  await form.scrollIntoViewIfNeeded()
+  await shoot(page, 'settings-password-changed', false)
+})
+
+test('settings, data downloaded', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await openSettings(page)
+  const downloading = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download my data first' }).click()
+  await downloading
+  await expect(page.getByText('Your data was downloaded')).toBeVisible()
+  await page.getByRole('button', { name: 'Delete account' }).scrollIntoViewIfNeeded()
+  await shoot(page, 'settings-data-downloaded', false)
+})
+
+test('settings, delete dialog and the sign-in page after', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await openSettings(page)
+  await page.getByRole('button', { name: 'Delete account' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete your account?' })
+  await expect(dialog).toBeVisible()
+  await shoot(page, 'settings-delete-dialog', false)
+
+  await dialog.getByLabel('Your password').fill(ACCOUNT_PASSWORD)
+  await dialog.getByLabel('Type DELETE to confirm').fill('DELET')
+  await dialog.getByRole('button', { name: 'Delete account' }).click()
+  await expect(page.locator('#delete-confirm-error')).toBeVisible()
+  await shoot(page, 'settings-delete-dialog-error', false)
+
+  await dialog.getByLabel('Type DELETE to confirm').fill('DELETE')
+  await dialog.getByRole('button', { name: 'Delete account' }).click()
+  await expect(page).toHaveURL('/signin?deleted=1')
+  await expect(page.getByText('Your account was deleted')).toBeVisible()
+  await shoot(page, 'signin-account-deleted')
+})
+
+test('mobile settings, errors and delete dialog', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await openSettings(page)
+  await page.getByLabel('Email').fill('not-an-email')
+  await page.getByRole('button', { name: 'Save profile' }).click()
+  await expect(page.locator('#email-error')).toBeVisible()
+  await shoot(page, 'mobile-settings-errors')
+
+  await page.getByRole('button', { name: 'Delete account' }).click()
+  await expect(page.getByRole('dialog', { name: 'Delete your account?' })).toBeVisible()
+  await shoot(page, 'mobile-settings-delete-dialog', false)
 })

@@ -1,7 +1,14 @@
 // API keys and Settings on a 375px screen: no page-level horizontal scroll;
 // the key table scrolls inside its own box.
 import { expect, test, type Page } from '@playwright/test'
-import { mockApi, mockApiKeys, sampleApiKeys, signedIn } from '../support/mockApi'
+import {
+  apiError,
+  mockAccount,
+  mockApi,
+  mockApiKeys,
+  sampleApiKeys,
+  signedIn,
+} from '../support/mockApi'
 
 test.skip(({ viewport }) => (viewport?.width ?? 0) > 400, 'phone layout only')
 
@@ -54,8 +61,47 @@ test('the key table scrolls inside its box, and the banner and dialogs fit', asy
   expect(secret.x + secret.width).toBeLessThanOrEqual(375)
 })
 
-test('settings fit', async ({ page }) => {
+test('settings fit, with errors and the delete dialog', async ({ page }) => {
+  await mockAccount(page, {
+    updateError: {
+      status: 409,
+      body: apiError(
+        'invalid_request_error',
+        'email_already_used',
+        'An account with this email already exists.',
+        'email',
+      ),
+    },
+  })
   await page.goto('/settings')
-  await expect(page.getByTestId('profile-email')).toHaveText('jane.doe@example.com')
+  await expect(page.getByLabel('Email')).toHaveValue('jane.doe@example.com')
+  await expectNoHorizontalScroll(page)
+
+  // Fields stack in one column, full width minus the gutter.
+  const first = (await page.getByLabel('First name').boundingBox())!
+  const last = (await page.getByLabel('Last name').boundingBox())!
+  expect(last.y).toBeGreaterThan(first.y)
+  expect(first.x + first.width).toBeLessThanOrEqual(375)
+
+  await page.getByLabel('Email').fill('a-really-long-address-that-should-wrap@example.com')
+  await page.getByRole('button', { name: 'Save profile' }).click()
+  await expect(page.locator('#email-error')).toBeVisible()
+  await page.getByTestId('password-form').getByRole('button', { name: 'Change password' }).click()
+  await expect(page.locator('#new-password-error')).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  for (const name of ['Download my data first', 'Delete account']) {
+    const box = (await page.getByRole('button', { name }).boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(375)
+  }
+
+  await page.getByRole('button', { name: 'Delete account' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete your account?' })
+  await dialog.getByRole('button', { name: 'Delete account' }).click()
+  await expect(page.locator('#delete-confirm-error')).toBeVisible()
+  const box = (await dialog.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(375)
   await expectNoHorizontalScroll(page)
 })

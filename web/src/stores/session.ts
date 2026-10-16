@@ -43,6 +43,20 @@ export async function signUp(details: SignUpDetails): Promise<void> {
   start(await authApi.signUp(details))
 }
 
+/** Replaces the signed-in user, e.g. after the profile was edited. */
+export function setUser(user: User): void {
+  state.user = user
+  state.userError = null
+}
+
+/**
+ * Swaps in a new session, e.g. the fresh token a password change returns
+ * (the old one no longer works).
+ */
+export function renewSession(next: Session): void {
+  start(next)
+}
+
 export function signOut(): void {
   clearToken()
   state.token = null

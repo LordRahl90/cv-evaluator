@@ -11,3 +11,10 @@ export function saveBlob(blob: Blob, fileName: string): void {
   // Give the browser a moment to start the download before revoking.
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+// Saves data the app already holds as a pretty-printed JSON file. The API call
+// itself stays in src/api/.
+export function saveJsonFile(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' })
+  saveBlob(blob, filename)
+}
