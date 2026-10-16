@@ -272,6 +272,11 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 
 	// then we create embeddings for each section
 	for heading, v := range sectionMap {
+		// Optional sections the CV doesn't have come back empty; an
+		// embedding of "" or [] would only add noise.
+		if isEmptySection(v) {
+			continue
+		}
 		// let's parse the content back to string
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -398,4 +403,21 @@ func mustGenerateJWTSecret() string {
 	}
 
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// isEmptySection reports whether a parsed CV section has no content: null,
+// a blank string, or an empty list or object.
+func isEmptySection(v any) bool {
+	switch v := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		return len(v) == 0
+	default:
+		return false
+	}
 }

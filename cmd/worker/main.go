@@ -120,7 +120,7 @@ func run(opts options) error {
 		Searches:          searches,
 		Fetcher:           fetcher,
 		Embedder:          ollamaLLM,
-		Evaluator:         matcher.New(dbase, ollamaLLM, deepseekLLM),
+		Evaluator:         matcher.New(dbase, deepseekLLM),
 		SearchConcurrency: settings.searchConcurrency,
 		EmbedWorkers:      settings.embedConcurrency,
 		EvaluateWorkers:   settings.evalConcurrency,

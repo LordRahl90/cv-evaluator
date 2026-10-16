@@ -17,12 +17,17 @@ type Criterion struct {
 // a criterion, add it here (and bump the matcher's prompt version).
 var EvaluationCriteria = []Criterion{
 	{
-		Name:     "skills",
-		Guidance: "How well the candidate's technical and soft skills cover the skills the job requires.",
+		Name: "skills",
+		Guidance: "How well the candidate's technical and soft skills cover the skills the job requires. " +
+			"A skill counts as shown when the CV demonstrates it in a role, a project or a certification; " +
+			"a bare list of skills is weaker evidence than using them.",
 	},
 	{
-		Name:     "experience",
-		Guidance: "How relevant and deep the candidate's work experience is for the job's responsibilities.",
+		Name: "experience",
+		Guidance: "How relevant and deep the candidate's work experience is for the job's responsibilities. " +
+			"Professional roles count fully. Side projects and open source support it but count for less, " +
+			"and never toward a stated number of years of professional experience: when they are the only " +
+			"evidence for such a requirement, mark it \"partial\", not \"yes\".",
 	},
 	{
 		Name: "seniority",
@@ -35,8 +40,10 @@ var EvaluationCriteria = []Criterion{
 	},
 	{
 		Name: "education",
-		Guidance: "Whether the candidate's degrees and certifications meet the job's education requirements. " +
-			"If the job states none, score by how well the education supports the role.",
+		Guidance: "Whether the candidate's degrees and certifications meet the job's education and " +
+			"qualification requirements. A certification the job names fully meets that requirement, and a " +
+			"relevant certification can stand in for formal education when the job allows equivalent " +
+			"experience. If the job states none, score by how well the education supports the role.",
 	},
 }
 
@@ -55,13 +62,6 @@ func IsEvaluationCriterion(name string) bool {
 	return false
 }
 
-// SimilarityHint is an embedding-based similarity between the job
-// description and part of the CV, on a 0-100 scale.
-type SimilarityHint struct {
-	Label string
-	Score float64
-}
-
 // MatchInput is everything the match prompt is rendered from.
 type MatchInput struct {
 	JobDescription string
@@ -70,8 +70,6 @@ type MatchInput struct {
 	JobLocation string
 	// CV is the candidate's full CV text.
 	CV string
-	// Hints are embedding similarities, labelled by what they compare.
-	Hints []SimilarityHint
 	// Criteria to score. Empty means EvaluationCriteria.
 	Criteria []Criterion
 }

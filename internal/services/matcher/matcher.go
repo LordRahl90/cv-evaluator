@@ -9,21 +9,11 @@ import (
 	"strings"
 
 	"cv-evaluator/internal/entities"
+	"cv-evaluator/internal/llm/prompts"
 	"cv-evaluator/internal/models"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
-)
-
-var (
-	breakDown = map[string]float64{
-		"summary":    0.1,
-		"education":  0.15,
-		"experience": 0.25,
-		"skills":     0.4,
-		"title":      0.1,
-	}
 )
 
 // ErrNoCV is returned when there is no CV to match against.
@@ -35,30 +25,28 @@ const (
 	maxCVChars = 20000
 	// maxRequirements caps the requirements kept from a response.
 	maxRequirements = 20
+	// maxListItems caps strengths and missing skills, as the prompt asks.
+	maxListItems = 5
 	// mustHaveCap is the highest overall score a CV can get when it misses
 	// a must-have requirement. It matches the score scale in the prompt.
 	mustHaveCap = 69
 )
-
-type EmbeddingLLMService interface {
-	CreateEmbedding(ctx context.Context, content string) ([]float32, error)
-}
 
 type JobMatchLLMService interface {
 	JobMatch(ctx context.Context, matchInput *entities.MatchInput) (string, error)
 }
 
 type Service struct {
-	db           *gorm.DB
-	embeddingLLM EmbeddingLLMService
-	jobMatchLLM  JobMatchLLMService
+	db          *gorm.DB
+	jobMatchLLM JobMatchLLMService
 }
 
-func New(db *gorm.DB, embeddingLLM EmbeddingLLMService, jobMatchLLM JobMatchLLMService) *Service {
+// New returns a matcher that evaluates CVs with jobMatchLLM. It needs no
+// embeddings: the LLM reads the full CV text.
+func New(db *gorm.DB, jobMatchLLM JobMatchLLMService) *Service {
 	return &Service{
-		db:           db,
-		embeddingLLM: embeddingLLM,
-		jobMatchLLM:  jobMatchLLM,
+		db:          db,
+		jobMatchLLM: jobMatchLLM,
 	}
 }
 
@@ -109,42 +97,20 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 		return nil, "", err
 	}
 
-	var queryEmbedding pgvector.Vector
-	if job.IsEmbedded() {
-		queryEmbedding = *job.Embedding
-	} else {
-		embedding, err := s.embeddingLLM.CreateEmbedding(ctx, job.Detail)
-		if err != nil {
-			return nil, "", err
-		}
-		queryEmbedding = pgvector.NewVector(embedding)
-	}
+	return s.evaluate(ctx, cvText, job)
+}
 
-	query := s.db.WithContext(ctx).
-		Model(&models.SectionEmbedding{}).
-		Select(
-			"section_heading, section, embedding <=> ? AS distance, 1 - (embedding <=> ?) AS score",
-			queryEmbedding, queryEmbedding,
-		)
-	if scope.cvID != (ulid.ULID{}) {
-		query = query.Where("cv_id = ?", scope.cvID)
-	} else {
-		query = query.Where("user_id = ?", scope.userID)
-	}
-
-	var results []MatchResult
-	if err := query.Order("distance ASC").Limit(10).Find(&results).Error; err != nil {
-		return nil, "", err
-	}
-
-	// The full CV goes to the LLM: a CV has only a handful of sections, so
-	// retrieving the closest ones barely filters anything and can drop
-	// education or the title. Retrieval still feeds the similarity hints.
+// evaluate asks the LLM to evaluate cvText against job and decodes the
+// answer. It returns the raw LLM output too, also on a decode failure.
+//
+// The full CV goes to the LLM: a CV has only a handful of sections, so
+// retrieving the closest ones barely filtered anything and could drop
+// education or the title.
+func (s *Service) evaluate(ctx context.Context, cvText string, job *models.Job) (*Response, string, error) {
 	matchInput := &entities.MatchInput{
-		JobDescription: stripPromptTags(job.Detail),
-		JobLocation:    stripPromptTags(job.Location),
-		CV:             stripPromptTags(cvText),
-		Hints:          similarityHints(results),
+		JobDescription: prompts.StripTags(job.Detail),
+		JobLocation:    prompts.StripTags(job.Location),
+		CV:             prompts.StripTags(cvText),
 		Criteria:       entities.EvaluationCriteria,
 	}
 
@@ -184,21 +150,6 @@ func (s *Service) cvText(ctx context.Context, scope sectionScope) (string, error
 	return text, nil
 }
 
-// promptTags are the tags the prompt wraps untrusted text in.
-var promptTags = strings.NewReplacer(
-	"</job_description>", "", "<job_description>", "",
-	"</cv>", "", "<cv>", "",
-	"</JOB_DESCRIPTION>", "", "<JOB_DESCRIPTION>", "",
-	"</CV>", "", "<CV>", "",
-)
-
-// stripPromptTags removes the prompt's own tags from scraped or uploaded
-// text, so a job posting or CV can't close its tag early and smuggle text
-// into the instructions.
-func stripPromptTags(text string) string {
-	return promptTags.Replace(text)
-}
-
 // decodeResponse parses the LLM's JSON answer. The decode error is wrapped
 // so callers can see why the response was rejected. Only known criteria are
 // kept, each once (the first wins), with scores clamped to 0-100. Only
@@ -228,6 +179,9 @@ func decodeResponse(raw string) (*Response, error) {
 	}
 	response.Breakdown = kept
 
+	response.Strengths = cleanList(response.Strengths)
+	response.MissingSkills = cleanList(response.MissingSkills)
+	response.Summary = strings.TrimSpace(response.Summary)
 	response.Requirements = cleanRequirements(response.Requirements)
 	for _, r := range response.Requirements {
 		if r.Importance == entities.RequirementMust && r.Met == entities.RequirementNotMet {
@@ -236,6 +190,22 @@ func decodeResponse(raw string) (*Response, error) {
 		}
 	}
 	return response, nil
+}
+
+// cleanList trims the items, drops empty ones and keeps at most
+// maxListItems.
+func cleanList(in []string) []string {
+	out := make([]string, 0, min(len(in), maxListItems))
+	for _, item := range in {
+		if item = strings.TrimSpace(item); item == "" {
+			continue
+		}
+		out = append(out, item)
+		if len(out) == maxListItems {
+			break
+		}
+	}
+	return out
 }
 
 // cleanRequirements normalises the LLM's requirements and drops any whose
@@ -270,49 +240,4 @@ func cleanRequirements(in []Requirement) []Requirement {
 
 func clampScore(n int) int {
 	return max(0, min(100, n))
-}
-
-// hintSections are the CV sections reported as similarity hints, with the
-// label they are shown under. Labels say what was compared, so the LLM does
-// not mistake e.g. the title similarity for a seniority assessment.
-var hintSections = []struct{ heading, label string }{
-	{"skills", "Skills section similarity"},
-	{"experience", "Experience section similarity"},
-	{"education", "Education section similarity"},
-	{"summary", "Summary section similarity"},
-	{"title", "Title similarity"},
-}
-
-// similarityHints turns the closest CV sections into labelled hints: the
-// best similarity per section (0-100), then the weighted similarity across
-// sections using the section weights.
-func similarityHints(results []MatchResult) []entities.SimilarityHint {
-	best := map[string]float64{}
-	for _, r := range results {
-		heading := strings.ToLower(r.SectionHeading)
-		if s := float64(r.Score); s > best[heading] {
-			best[heading] = s
-		}
-	}
-
-	var (
-		hints              []entities.SimilarityHint
-		weighted, totalWts float64
-	)
-	for _, sec := range hintSections {
-		score, ok := best[sec.heading]
-		if !ok {
-			continue
-		}
-		hints = append(hints, entities.SimilarityHint{Label: sec.label, Score: score * 100})
-		weighted += score * breakDown[sec.heading]
-		totalWts += breakDown[sec.heading]
-	}
-	if totalWts > 0 {
-		hints = append(hints, entities.SimilarityHint{
-			Label: "Weighted similarity across sections",
-			Score: weighted / totalWts * 100,
-		})
-	}
-	return hints
 }

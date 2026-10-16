@@ -1,15 +1,5 @@
 package matcher
 
-// MatchResult holds a CV section alongside its similarity score (0–1) and
-// raw cosine distance (0–2) relative to the query embedding.
-// Score = 1 - Distance; higher score means a closer match.
-type MatchResult struct {
-	SectionHeading string  `gorm:"column:section_heading" json:"section_heading"`
-	Content        string  `gorm:"column:section"         json:"content"`
-	Distance       float32 `gorm:"column:distance"        json:"distance"`
-	Score          float32 `gorm:"column:score"           json:"score"`
-}
-
 // Response is the parsed LLM evaluation of a CV against a job.
 type Response struct {
 	// Requirements are the job's requirements with whether the CV meets

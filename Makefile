@@ -28,3 +28,6 @@ by-job:
 
 seed-cv:
 	@go run ./cmd/seed $(ARGS)
+
+eval-prompt:
+	@go test -tags eval -run TestPromptEval -count=1 -v ./internal/services/matcher/

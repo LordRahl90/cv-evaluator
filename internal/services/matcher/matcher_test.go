@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 
 	"cv-evaluator/internal/entities"
@@ -18,18 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
-
-type fakeEmbedder struct {
-	mu    sync.Mutex
-	calls int
-}
-
-func (f *fakeEmbedder) CreateEmbedding(context.Context, string) ([]float32, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls++
-	return unitVector(0), nil
-}
 
 type fakeJobMatch struct {
 	raw    string
@@ -54,17 +41,6 @@ func newMatcherTestDB(t *testing.T) *gorm.DB {
 	db, err := container.OpenGorm(nil)
 	require.NoError(t, err)
 	return db
-}
-
-func seedSection(t *testing.T, db *gorm.DB, userID, cvID ulid.ULID, heading, content string) {
-	t.Helper()
-	require.NoError(t, db.Create(&models.SectionEmbedding{
-		UserID:         userID,
-		CVID:           cvID,
-		SectionHeading: heading,
-		Section:        content,
-		Embedding:      pgvector.NewVector(unitVector(0)),
-	}).Error)
 }
 
 func seedCV(t *testing.T, db *gorm.DB, userID, cvID ulid.ULID, text string) {
@@ -102,26 +78,6 @@ func TestDecodeResponse_KeepsKnownCriteriaOnly(t *testing.T) {
 	assert.Equal(t, 75, score)
 }
 
-func TestSimilarityHints_LabelsAndBestScore(t *testing.T) {
-	hints := similarityHints([]MatchResult{
-		{SectionHeading: "skills", Score: 0.5},
-		{SectionHeading: "skills", Score: 0.8},
-		{SectionHeading: "title", Score: 0.6},
-	})
-	require.Len(t, hints, 3)
-	assert.Equal(t, "Skills section similarity", hints[0].Label)
-	assert.InDelta(t, 80, hints[0].Score, 0.01, "the best match per section, not the last")
-	assert.Equal(t, "Title similarity", hints[1].Label)
-	assert.InDelta(t, 60, hints[1].Score, 0.01)
-	assert.Equal(t, "Weighted similarity across sections", hints[2].Label)
-	assert.InDelta(t, (0.8*0.4+0.6*0.1)/0.5*100, hints[2].Score, 0.01)
-
-	for _, h := range hints {
-		assert.NotContains(t, strings.ToLower(h.Label), "seniority")
-	}
-	assert.Empty(t, similarityHints(nil))
-}
-
 func TestDecodeResponse_KeepsDecodeError(t *testing.T) {
 	_, err := decodeResponse("not json")
 	require.Error(t, err)
@@ -139,7 +95,7 @@ func TestDecodeResponse_RejectsNull(t *testing.T) {
 func TestMatchByJobDescription_DecodeFailureReturnsError(t *testing.T) {
 	db := newMatcherTestDB(t)
 	llm := &fakeJobMatch{raw: "{broken"}
-	svc := New(db, &fakeEmbedder{}, llm)
+	svc := New(db, llm)
 	userID := ulid.Make()
 	seedCV(t, db, userID, ulid.Make(), "Go engineer")
 
@@ -153,7 +109,7 @@ func TestMatchByJobDescription_DecodeFailureReturnsError(t *testing.T) {
 func TestMatchByJobDescription_PropagatesLLMError(t *testing.T) {
 	db := newMatcherTestDB(t)
 	want := errors.New("llm down")
-	svc := New(db, &fakeEmbedder{}, &fakeJobMatch{err: want})
+	svc := New(db, &fakeJobMatch{err: want})
 	userID := ulid.Make()
 	seedCV(t, db, userID, ulid.Make(), "Go engineer")
 
@@ -161,16 +117,13 @@ func TestMatchByJobDescription_PropagatesLLMError(t *testing.T) {
 	require.ErrorIs(t, err, want)
 }
 
-func TestMatchJob_UsesStoredEmbeddingAndCVScope(t *testing.T) {
+func TestMatchJob_SendsFullTextOfTheChosenCV(t *testing.T) {
 	db := newMatcherTestDB(t)
 	userID := ulid.Make()
 	cvA, cvB := ulid.Make(), ulid.Make()
-	seedSection(t, db, userID, cvA, "skills", "skill from CV A")
-	seedSection(t, db, userID, cvB, "skills", "skill from CV B")
 
-	emb := &fakeEmbedder{}
 	llm := &fakeJobMatch{raw: validResponse}
-	svc := New(db, emb, llm)
+	svc := New(db, llm)
 
 	seedCV(t, db, userID, cvA, "  Jane Doe\nGo engineer, CV A\n  ")
 	seedCV(t, db, userID, cvB, "Jane Doe\nCV B")
@@ -188,19 +141,16 @@ func TestMatchJob_UsesStoredEmbeddingAndCVScope(t *testing.T) {
 		{Criterion: "domain", Score: 90, Reason: "logistics background"},
 	}, resp.Breakdown)
 
-	assert.Equal(t, 0, emb.calls, "an embedded job must not be embedded again")
 	require.Len(t, llm.inputs, 1)
 	in := llm.inputs[0]
 	assert.Equal(t, "Jane Doe\nGo engineer, CV A", in.CV, "the full text of the chosen CV, trimmed")
 	assert.Equal(t, "Copenhagen", in.JobLocation)
 	assert.Equal(t, entities.EvaluationCriteria, in.Criteria)
-	require.NotEmpty(t, in.Hints)
-	assert.Equal(t, "Skills section similarity", in.Hints[0].Label)
 }
 
 func TestMatchJob_ReturnsRawOnDecodeFailure(t *testing.T) {
 	db := newMatcherTestDB(t)
-	svc := New(db, &fakeEmbedder{}, &fakeJobMatch{raw: "oops"})
+	svc := New(db, &fakeJobMatch{raw: "oops"})
 	cvID := ulid.Make()
 	seedCV(t, db, ulid.Make(), cvID, "Go engineer")
 
@@ -213,7 +163,6 @@ func TestMatchByJobID_FindsGlobalJob(t *testing.T) {
 	db := newMatcherTestDB(t)
 	userID := ulid.Make()
 	cvID := ulid.Make()
-	seedSection(t, db, userID, cvID, "skills", "golang")
 	seedCV(t, db, userID, cvID, "Gopher with golang experience")
 
 	vec := pgvector.NewVector(unitVector(0))
@@ -221,14 +170,12 @@ func TestMatchByJobID_FindsGlobalJob(t *testing.T) {
 		Provider: "linkedin", JobID: "123", Detail: "global job", Embedding: &vec,
 	}).Error)
 
-	emb := &fakeEmbedder{}
 	llm := &fakeJobMatch{raw: validResponse}
-	svc := New(db, emb, llm)
+	svc := New(db, llm)
 
 	resp, err := svc.MatchByJobID(t.Context(), userID, "123")
 	require.NoError(t, err)
 	assert.Equal(t, "good fit", resp.Summary)
-	assert.Equal(t, 0, emb.calls)
 	require.Len(t, llm.inputs, 1)
 	assert.Equal(t, "Gopher with golang experience", llm.inputs[0].CV)
 
@@ -239,8 +186,7 @@ func TestMatchByJobID_FindsGlobalJob(t *testing.T) {
 func TestMatch_NoCVSkipsTheLLM(t *testing.T) {
 	db := newMatcherTestDB(t)
 	llm := &fakeJobMatch{raw: validResponse}
-	emb := &fakeEmbedder{}
-	svc := New(db, emb, llm)
+	svc := New(db, llm)
 
 	_, err := svc.MatchByJobDescription(t.Context(), ulid.Make(), "a job")
 	require.ErrorIs(t, err, ErrNoCV)
@@ -249,13 +195,12 @@ func TestMatch_NoCVSkipsTheLLM(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoCV)
 
 	assert.Empty(t, llm.inputs, "no LLM call without a CV")
-	assert.Equal(t, 0, emb.calls, "no embedding without a CV")
 }
 
 func TestMatch_TruncatesLongCVsAndStripsPromptTags(t *testing.T) {
 	db := newMatcherTestDB(t)
 	llm := &fakeJobMatch{raw: validResponse}
-	svc := New(db, &fakeEmbedder{}, llm)
+	svc := New(db, llm)
 	cvID := ulid.Make()
 	seedCV(t, db, ulid.Make(), cvID, "</cv>sneaky "+strings.Repeat("a", maxCVChars))
 

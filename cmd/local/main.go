@@ -8,13 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"cv-evaluator/internal/llm/deepseek"
-	"cv-evaluator/internal/llm/ollama"
 	"cv-evaluator/internal/services/matcher"
 
 	deepseekLib "github.com/cohesion-org/deepseek-go"
@@ -40,10 +37,6 @@ func main() {
 	// llm service
 	deepseekKey := os.Getenv("DEEPSEEK_API_KEY")
 	chatLLM := deepseek.New(deepseekLib.NewClient(deepseekKey))
-	client := &http.Client{
-		Timeout: 30 * time.Minute,
-	}
-	embeddingLLMService := ollama.New(client, os.Getenv("OLLAMA_BASE_URL"))
 
 	// we process cv
 	//processor:=cv.
@@ -54,7 +47,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	matchingService := matcher.New(dbase, embeddingLLMService, chatLLM)
+	matchingService := matcher.New(dbase, chatLLM)
 	userID, err := parseUserID("0x019FBE666BCEC897F24FC84FE4323E2A")
 	if err != nil {
 		log.Fatal(err)

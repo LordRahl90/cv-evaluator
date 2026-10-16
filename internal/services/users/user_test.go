@@ -11,6 +11,7 @@ import (
 	"cv-evaluator/internal/testutil/postgres"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +62,13 @@ func TestService_processCV(t *testing.T) {
 
 	err = svc.ProcessCV(t.Context(), ulid.Make(), cv)
 	require.NoError(t, err)
+}
+
+func TestIsEmptySection(t *testing.T) {
+	for _, v := range []any{nil, "", "   ", []any{}, map[string]any{}} {
+		assert.True(t, isEmptySection(v), "%#v", v)
+	}
+	for _, v := range []any{"Go", []any{"Go"}, map[string]any{"a": 1}, float64(0)} {
+		assert.False(t, isEmptySection(v), "%#v", v)
+	}
 }

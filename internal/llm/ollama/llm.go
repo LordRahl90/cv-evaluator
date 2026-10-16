@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,7 +32,7 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	prompt := fmt.Sprintf("%s\n\n%s", string(b), content)
+	prompt := string(b) + "\n\n" + prompts.TagCV(content)
 	req := Request{
 		Model: "qwen3:8b",
 		//Model:  model,
