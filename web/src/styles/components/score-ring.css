@@ -1,0 +1,84 @@
+/*
+ * score-ring.css — a match's score as a conic ring (ScoreRing), small in
+ * lists and large on the match page, plus the match colours shared by the
+ * matches pages: green from 80, amber below, grey while unscored. The fill
+ * comes from the --score custom property (0-100) set on the element.
+ */
+@layer components {
+  :root {
+    --match-track: #eceae4;
+    --match-amber: #b26b00;
+    --match-amber-ink: #8a5300;
+    --match-blue-soft: #e7eefb;
+    --match-blue-ink: #1d3f8a;
+    --match-gap-soft: #fdf3f1;
+    --match-gap-ink: #8e2a1f;
+  }
+
+  .score-ring {
+    --ring-color: var(--color-accent);
+    --ring-ink: var(--color-accent);
+    @apply flex items-center justify-center;
+    flex: none;
+    border-radius: 999px;
+    background: conic-gradient(
+      var(--ring-color) 0 calc(var(--score, 0) * 1%),
+      var(--match-track) 0
+    );
+  }
+
+  .score-ring.is-fair {
+    --ring-color: var(--match-amber);
+    --ring-ink: var(--match-amber-ink);
+  }
+
+  .score-ring.is-none {
+    --ring-color: var(--match-track);
+    --ring-ink: var(--color-faint);
+  }
+
+  .score-ring-inner {
+    @apply flex flex-col items-center justify-center bg-surface;
+    border-radius: 999px;
+  }
+
+  .score-ring-value {
+    color: var(--ring-ink);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .score-ring-caption {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .score-ring-sm {
+    width: 46px;
+    height: 46px;
+  }
+
+  .score-ring-sm .score-ring-inner {
+    width: 36px;
+    height: 36px;
+  }
+
+  .score-ring-sm .score-ring-value {
+    font-size: 13px;
+  }
+
+  .score-ring-lg {
+    width: 92px;
+    height: 92px;
+  }
+
+  .score-ring-lg .score-ring-inner {
+    width: 74px;
+    height: 74px;
+  }
+
+  .score-ring-lg .score-ring-value {
+    font-family: var(--font-display);
+    font-size: 28px;
+  }
+}

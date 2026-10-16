@@ -24,3 +24,10 @@
 @import './pages/auth.css';
 @import './pages/app.css';
 @import './pages/dashboard.css';
+
+/* Matches */
+@import './components/score-ring.css';
+@import './components/match-badge.css';
+@import './pages/matches.css';
+@import './pages/match-detail.css';
+@import './pages/dashboard-matches.css';

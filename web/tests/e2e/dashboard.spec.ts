@@ -66,7 +66,11 @@ test('account with a CV and searches: stats, empty matches, search activity', as
   await expect(page.getByTestId('stat-searches')).toContainText('2')
   await expect(page.getByTestId('stat-searches')).toContainText(/Next run in 3\d min/)
   await expect(page.getByTestId('stat-cv')).toContainText('CV uploaded')
-  await expect(page.getByTestId('stat-last-run')).toContainText('2h ago')
+  // With setup done, match counts replace the "last search run" card.
+  await expect(page.getByTestId('stat-last-run')).toHaveCount(0)
+  await expect(page.getByTestId('stat-new-matches')).toContainText('0')
+  await expect(page.getByTestId('stat-new-matches')).toContainText('None found this week')
+  await expect(page.getByTestId('stat-strong-matches')).toContainText('Strong matches (80+)')
 
   await expect(page.getByTestId('matches-empty')).toContainText(
     'Matches appear here after your first search runs.',

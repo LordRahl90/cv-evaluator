@@ -11,6 +11,15 @@ const ICONS = {
     ['path', { d: 'm20 20-3.5-3.5' }],
   ],
   star: [['path', { d: 'm12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z' }]],
+  // Matches: save, open the posting, partial requirement.
+  bookmark: [['path', { d: 'M6 4h12v17l-6-4-6 4z' }]],
+  external: [
+    ['path', { d: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5' }],
+  ],
+  clock: [
+    ['path', { d: 'M12 6v6l4 2' }],
+    ['circle', { cx: 12, cy: 12, r: 9 }],
+  ],
   file: [
     ['path', { d: 'M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z' }],
     ['path', { d: 'M14 3v5h5M9 13h6M9 17h6' }],

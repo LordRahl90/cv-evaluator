@@ -1,0 +1,77 @@
+/*
+ * dashboard-matches.css — the overview's matches area: the "Top new matches"
+ * rows, their loading rows and error, and the green strong-matches count.
+ */
+@layer components {
+  .stat-value-accent {
+    @apply text-accent;
+  }
+
+  .overview-match-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .overview-match {
+    @apply flex flex-wrap items-center text-ink;
+    gap: 10px 14px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .overview-match:hover {
+    @apply bg-row-hover text-ink;
+  }
+
+  .overview-match-body {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+
+  .overview-match-title {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .overview-match-meta,
+  .overview-match-time {
+    @apply text-muted;
+    font-size: 12.5px;
+  }
+
+  .overview-match-time {
+    margin-left: auto;
+    min-width: 64px;
+    text-align: right;
+  }
+
+  .overview-match-skeleton {
+    @apply flex items-center;
+    gap: 14px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .overview-match-skeleton .skeleton-line {
+    flex: 1;
+  }
+
+  .overview-match-skeleton-ring {
+    width: 46px;
+    height: 46px;
+    flex: none;
+    border-radius: 999px;
+  }
+
+  .overview-match-error {
+    @apply flex flex-col items-start;
+    gap: 12px;
+    padding: 16px 20px 20px;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .overview-match-error .alert {
+    align-self: stretch;
+  }
+}
