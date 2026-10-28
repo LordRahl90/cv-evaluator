@@ -2,10 +2,92 @@
 
 CV Evaluator is a Go project for CV-to-job matching. It extracts text from a PDF CV, stores CV and job embeddings in PostgreSQL (`pgvector`), and asks an LLM (DeepSeek) to evaluate the full CV against each job, producing a structured JSON result with evidence and per-criterion scores.
 
+## Walkthrough
+
+A tour of the web app (`web/`), from a new account to a cover letter. The screens use the Playwright mock data, so every name, company and score is fictional.
+
+### 1. Sign in
+
+Sign up with your name, email and a password, or sign in to an existing account.
+
+![Sign-in page](docs/screenshots/signin.png)
+
+### 2. Get set up
+
+A new account lands on the overview, which lists the two steps left before scored jobs start arriving: upload a CV and add a job search.
+
+![Overview for a new account, with the set-up checklist](docs/screenshots/dashboard-new-account.png)
+
+### 3. Upload your CV
+
+Upload a PDF. It is split into sections and embedded, and your newest CV is the one every job is scored against. Older versions stay listed so you can download or delete them.
+
+![CVs page with the active CV and two older versions](docs/screenshots/cvs-list.png)
+
+### 4. Create a job search
+
+Pick keywords, an optional location and how often to run. Each search runs on every supported portal (currently Jobindex and LinkedIn), skips jobs it has already seen, and scores each new one against your active CV.
+
+![New job search form](docs/screenshots/search-form-new.png)
+
+Saved searches can be run now, paused or edited. If a portal you use is missing, suggest it from the same page.
+
+![Job searches list with the portal list and the suggestion form](docs/screenshots/searches-list.png)
+
+### 5. Watch the matches come in
+
+Once searches have run, the overview shows this week's matches, how many scored 80 or more, and when each search runs next.
+
+![Overview with top new matches and search activity](docs/screenshots/dashboard-with-matches.png)
+
+The Matches page lists every scored job. Filter by search, minimum score or status, sort by score, and see each job's missing skills at a glance.
+
+![Matches list filtered by search, score and status](docs/screenshots/matches.png)
+
+### 6. Read why a job scored what it did
+
+A match shows the overall score, a summary, the score for each criterion (skills, experience, seniority, domain, education), every requirement in the posting with the CV evidence for it, and your strengths and missing skills. From here you can open the posting, save it, mark it applied, dismiss it, or re-evaluate it against your current CV.
+
+![Match detail with score breakdown and requirements](docs/screenshots/match-detail.png)
+
+### 7. Score a single job with Quick match
+
+Already have a job in mind? Paste its description into Quick match for a score in seconds, without setting up a search.
+
+![Quick match result for a partial match](docs/screenshots/quick-match-result.png)
+
+### 8. Write a cover letter
+
+From a quick match, write a cover letter for that job. Every claim in it must come from your CV and the tone is checked before you see it. Edit the subject and letter freely, then copy them. Letters aren't stored, so copy before you leave the page.
+
+![Generated cover letter with its quality checks](docs/screenshots/cover-letter-ready.png)
+
+### 9. API keys and settings
+
+Create API keys to call the HTTP API from scripts. Each secret is shown once, and keys can be revoked at any time.
+
+![API keys list](docs/screenshots/api-keys-list.png)
+
+Settings lets you edit your profile, change your password, download your data, and delete your account.
+
+![Settings page](docs/screenshots/settings.png)
+
+### On a phone
+
+Every page works down to 375px wide.
+
+<p>
+  <img src="docs/screenshots/mobile-dashboard-with-matches.png" alt="Overview on a phone" width="240">
+  <img src="docs/screenshots/mobile-match-detail.png" alt="Match detail on a phone" width="240">
+  <img src="docs/screenshots/mobile-quick-match-result.png" alt="Quick match on a phone" width="240">
+</p>
+
+To refresh these images, run `npx playwright install chromium` once, then `SCREENSHOT_DIR=../docs/screenshots npm run screenshots` from `web/`. That captures every screen in `web/tests/screenshots/capture.spec.ts`; keep the ones this section uses and delete the rest.
+
 ## Current status
 
-- CLI entrypoints under `cmd/` are the main way to use the project.
-- `cmd/api` serves the CV and match routes over HTTP, behind JWT auth. There are no HTTP routes yet to sign up or sign in, so tokens have to be minted outside the API for now.
+- The web app in `web/` (see the walkthrough above) and the HTTP API in `cmd/api` are the main way to use the project; the CLI entrypoints under `cmd/` remain for local runs.
+- `cmd/api` serves sign-up, sign-in, CV, match, job search and API key routes over HTTP, behind JWT or API key auth.
 - Core logic lives in service packages and is covered by unit and integration tests.
 
 ## How it works
