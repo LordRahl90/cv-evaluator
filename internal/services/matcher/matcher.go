@@ -16,13 +16,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrNoCV is returned when there is no CV to match against.
-var ErrNoCV = errors.New("no CV to match against")
+var (
+	// ErrNoCV is returned when there is no CV to match against.
+	ErrNoCV = errors.New("no CV to match against")
+	// ErrJobNotFound is returned when no stored job has the given id.
+	ErrJobNotFound = errors.New("job not found")
+)
 
 const (
 	// maxCVChars caps the CV text sent to the LLM. Real CVs are far
 	// shorter; this only guards against pathological uploads.
 	maxCVChars = 20000
+	// MaxJobDescriptionChars caps the job description sent to the LLM.
+	// Pasted descriptions over it are rejected; scraped ones are cut off.
+	MaxJobDescriptionChars = 20000
 	// maxRequirements caps the requirements kept from a response.
 	maxRequirements = 20
 	// maxListItems caps strengths and missing skills, as the prompt asks.
@@ -61,6 +68,9 @@ func (s *Service) MatchByJobID(ctx context.Context, userID ulid.ULID, jobID stri
 		Where("job_id = ?", jobID).
 		Order("created_at ASC").
 		First(&job).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrJobNotFound
+		}
 		return nil, fmt.Errorf("failed to retrieve job: %w", err)
 	}
 
@@ -114,7 +124,7 @@ func (s *Service) match(ctx context.Context, scope sectionScope, job *models.Job
 // education or the title.
 func (s *Service) evaluate(ctx context.Context, cvText string, job *models.Job) (*Response, string, error) {
 	matchInput := &entities.MatchInput{
-		JobDescription: prompts.StripTags(job.Detail),
+		JobDescription: truncateRunes(prompts.StripTags(job.Detail), MaxJobDescriptionChars),
 		JobLocation:    prompts.StripTags(job.Location),
 		CV:             prompts.StripTags(cvText),
 		Criteria:       entities.EvaluationCriteria,
@@ -149,11 +159,15 @@ func (s *Service) cvText(ctx context.Context, scope sectionScope) (string, error
 	if len(contents) == 0 || strings.TrimSpace(contents[0]) == "" {
 		return "", ErrNoCV
 	}
-	text := strings.TrimSpace(contents[0])
-	if r := []rune(text); len(r) > maxCVChars {
-		text = string(r[:maxCVChars])
+	return truncateRunes(strings.TrimSpace(contents[0]), maxCVChars), nil
+}
+
+// truncateRunes cuts s to at most n characters.
+func truncateRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
 	}
-	return text, nil
+	return s
 }
 
 // decodeResponse parses the LLM's JSON answer. The decode error is wrapped

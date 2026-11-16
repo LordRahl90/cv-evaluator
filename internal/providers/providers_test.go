@@ -109,7 +109,9 @@ func TestLinkedIn_SearchBuildsURL(t *testing.T) {
 func TestLinkedIn_Details(t *testing.T) {
 	srv := newRecordingServer(t, filepath.Join("..", "scraper", "linkedin", "testdata"))
 
-	details, err := NewLinkedIn().Details(t.Context(), &entities.JobPost{
+	p := NewLinkedIn()
+	p.scraper.AllowedHosts = []string{strings.TrimPrefix(srv.URL, "http://")}
+	details, err := p.Details(t.Context(), &entities.JobPost{
 		ID:         "1001",
 		DetailsURL: srv.URL + "/job-1001.html",
 	})
@@ -136,7 +138,9 @@ func TestJobindex_SearchBuildsURL(t *testing.T) {
 func TestJobindex_Details(t *testing.T) {
 	srv := newRecordingServer(t, filepath.Join("..", "scraper", "jobindex", "testdata"))
 
-	details, err := NewJobindex().Details(t.Context(), &entities.JobPost{
+	p := NewJobindex()
+	p.allowedHosts = []string{strings.TrimPrefix(srv.URL, "http://")}
+	details, err := p.Details(t.Context(), &entities.JobPost{
 		ID:         "2001",
 		DetailsURL: srv.URL + "/jobannonce/2001",
 	})

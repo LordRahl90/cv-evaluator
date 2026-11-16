@@ -27,6 +27,10 @@ defaults:
   run:
     working-directory: web
 
+# Read-only token: no job writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Lint, typecheck and build

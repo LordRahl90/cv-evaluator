@@ -7,6 +7,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// Names of the unique indexes on users, created by the migrator.
+const (
+	UserEmailUniqueIndex = "users_email_unique"
+	UserPhoneUniqueIndex = "users_phone_unique"
+)
+
 // User is an account. PasswordChangedAt is when the password was last
 // changed (nil if never): session tokens issued before it are rejected.
 type User struct {

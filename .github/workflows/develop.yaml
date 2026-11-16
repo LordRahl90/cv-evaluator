@@ -26,6 +26,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Read-only token: no job writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Linting
@@ -39,7 +43,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
 
       - name: Lint and Vet
         uses: golangci/golangci-lint-action@v9
@@ -57,7 +61,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       - name: Test
         env:
@@ -74,7 +78,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       - name: Test
         env:
@@ -92,7 +96,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
       - name: Test
         run: make shuffle-test

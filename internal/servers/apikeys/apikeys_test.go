@@ -246,18 +246,24 @@ func TestRoutes_RequireAuth(t *testing.T) {
 	}
 }
 
-func TestRoutes_AcceptAPIKey(t *testing.T) {
-	svc := new(MockAPIKeyService)
-	verifier := new(MockVerifier)
-	owner := ulid.Make()
-	verifier.On("Verify", mock.Anything, testAPIKey).Return(owner, nil).Once()
-	svc.On("List", mock.Anything, owner).Return([]apikeysvc.Key{}, nil).Once()
+func TestRoutes_RejectAPIKey(t *testing.T) {
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api-keys", ""},
+		{http.MethodPost, "/api-keys", `{"name":"replacement"}`},
+		{http.MethodDelete, "/api-keys/" + ulid.Make().String(), ""},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			svc := new(MockAPIKeyService)
+			verifier := new(MockVerifier)
+			verifier.On("Verify", mock.Anything, testAPIKey).Return(ulid.Make(), nil).Once()
 
-	w := doRequest(newTestRouter(svc, verifier), http.MethodGet, "/api-keys", "Bearer "+testAPIKey, "")
+			w := doRequest(newTestRouter(svc, verifier), tc.method, tc.path, "Bearer "+testAPIKey, tc.body)
 
-	require.Equal(t, http.StatusOK, w.Code)
-	svc.AssertExpectations(t)
-	verifier.AssertExpectations(t)
+			require.Equal(t, http.StatusForbidden, w.Code)
+			assert.Equal(t, "session_required", decodeError(t, w).Error.Code)
+			assert.Empty(t, svc.Calls)
+		})
+	}
 }
 
 func TestRoutes_RevokedAPIKey(t *testing.T) {

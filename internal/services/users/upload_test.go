@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/testutil/postgres"
 
@@ -25,7 +26,8 @@ func (uploadTestEmbeddingLLM) CreateEmbedding(_ context.Context, _ string) ([]fl
 type uploadTestChatLLM struct{}
 
 func (uploadTestChatLLM) CleanupCV(_ context.Context, _ string) (string, error) {
-	return `{"summary":"summary","experience":["exp"],"skills":["go"],"education":["uni"],"title":"engineer"}`, nil
+	// "injected" is not a CV section; it must not get an embedding.
+	return `{"summary":"summary","experience":["exp"],"skills":["go"],"education":["uni"],"title":"engineer","injected":"x"}`, nil
 }
 
 func newUploadTestService(t *testing.T) (*Service, *models.User) {
@@ -93,7 +95,20 @@ func TestService_UploadCV(t *testing.T) {
 		Where("user_id = ? AND cv_id = ?", user.ID, cvs[0].ID).
 		Count(&sectionCount).Error
 	require.NoError(t, err)
-	require.Greater(t, sectionCount, int64(0))
+	require.Equal(t, int64(5), sectionCount, "one embedding per known, non-empty section")
+}
+
+func TestService_UploadCV_RejectsANonPDF(t *testing.T) {
+	svc, user := newUploadTestService(t)
+	path := filepath.Join(t.TempDir(), "cv.pdf")
+	require.NoError(t, os.WriteFile(path, []byte("MZ this is an executable, not a PDF"), 0o600))
+
+	err := svc.UploadCV(t.Context(), user.ID, makeFileHeaderFromPath(t, path))
+	require.ErrorIs(t, err, extractor.ErrNotPDF)
+
+	cvs, err := svc.ListUserCVs(t.Context(), user.ID)
+	require.NoError(t, err)
+	require.Empty(t, cvs)
 }
 
 func TestService_UploadCV_RequiresFile(t *testing.T) {

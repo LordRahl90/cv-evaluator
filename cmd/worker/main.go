@@ -92,8 +92,10 @@ func run(opts options) error {
 	sqlDB.SetMaxOpenConns(settings.dbMaxOpenConns)
 	sqlDB.SetMaxIdleConns(settings.dbMaxOpenConns)
 
-	if err := migrator.Migrate(dbase); err != nil {
-		return err
+	if cfg.MigrateOnStart {
+		if err := migrator.Migrate(dbase); err != nil {
+			return err
+		}
 	}
 
 	transport := opts.Transport

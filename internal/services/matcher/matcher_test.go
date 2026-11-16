@@ -180,7 +180,7 @@ func TestMatchByJobID_FindsGlobalJob(t *testing.T) {
 	assert.Equal(t, "Gopher with golang experience", llm.inputs[0].CV)
 
 	_, err = svc.MatchByJobID(t.Context(), userID, "missing")
-	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.ErrorIs(t, err, ErrJobNotFound)
 }
 
 func TestMatch_NoCVSkipsTheLLM(t *testing.T) {

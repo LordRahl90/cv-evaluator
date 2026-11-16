@@ -86,7 +86,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID ulid.ULID, req Updat
 			return nil
 		}
 		if err := tx.Model(&models.User{}).Where("id = ?", userID).Updates(changes).Error; err != nil {
-			return err
+			return alreadyUsed(err)
 		}
 		return tx.Where("id = ?", userID).Take(&updated).Error
 	})

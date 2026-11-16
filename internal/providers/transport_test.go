@@ -40,6 +40,8 @@ func TestWithTransport(t *testing.T) {
 	jp, _ := r.Get(JobindexName)
 	lp.(*LinkedIn).searchBase = li.URL + "/result-1.html"
 	jp.(*Jobindex).searchBase = ji.URL + "/result-1.html"
+	lp.(*LinkedIn).scraper.AllowedHosts = []string{li.Listener.Addr().String()}
+	jp.(*Jobindex).allowedHosts = []string{ji.Listener.Addr().String()}
 
 	_, err := lp.Search(t.Context(), Criteria{Query: "go", MaxPages: 1})
 	require.NoError(t, err)

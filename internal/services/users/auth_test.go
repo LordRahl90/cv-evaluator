@@ -140,3 +140,24 @@ func TestService_GetProfile(t *testing.T) {
 	_, err = svc.GetProfile(context.Background(), ulid.Make())
 	require.ErrorIs(t, err, ErrUserNotFound)
 }
+
+func TestCreateUser_UniqueIndexCatchesARace(t *testing.T) {
+	svc, db := newAuthTestService(t)
+	ctx := t.Context()
+
+	// Simulate a concurrent sign-up that slipped past the check: insert the
+	// row directly, then let the service's insert hit the index.
+	require.NoError(t, db.Create(&models.User{Email: "Race@Example.com", Password: "x"}).Error)
+	err := db.Create(&models.User{Email: "race@example.com", Password: "x"}).Error
+	require.ErrorIs(t, alreadyUsed(err), ErrEmailAlreadyUsed, "emails are unique in any case")
+
+	require.NoError(t, db.Create(&models.User{Email: "a@example.com", Phone: "+4512345678", Password: "x"}).Error)
+	err = db.Create(&models.User{Email: "b@example.com", Phone: "+4512345678", Password: "x"}).Error
+	require.ErrorIs(t, alreadyUsed(err), ErrPhoneAlreadyUsed)
+
+	require.NoError(t, db.Create(&models.User{Email: "c@example.com", Password: "x"}).Error)
+	require.NoError(t, db.Create(&models.User{Email: "d@example.com", Password: "x"}).Error, "empty phones are not unique")
+
+	_, err = svc.Signin(ctx, SigninRequest{Email: "nobody@example.com", Password: "whatever"})
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+}

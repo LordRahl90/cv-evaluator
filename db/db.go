@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"os"
 
 	"cv-evaluator/internal/config"
@@ -22,5 +23,6 @@ func SetupDatabase() (*gorm.DB, error) {
 		Name:     os.Getenv("DB_NAME"),
 		User:     os.Getenv("DB_USER"),
 		Password: os.Getenv("DB_PASSWORD"),
+		SSLMode:  cmp.Or(os.Getenv("DB_SSLMODE"), config.DefaultSSLMode(os.Getenv("ENVIRONMENT"))),
 	})
 }

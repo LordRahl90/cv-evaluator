@@ -3,8 +3,11 @@ package match
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 
+	"cv-evaluator/internal/servers/apierror"
 	"cv-evaluator/internal/servers/middleware"
 	"cv-evaluator/internal/services/matcher"
 
@@ -61,7 +64,12 @@ func (h *Handler) matchByJobDescription(c *gin.Context) {
 
 	var req matchByDescriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, errorResponse(err.Error()))
+		apierror.BadRequest(c, apierror.CodeInvalidJSON, "The request body must be JSON with a job_description.", "job_description")
+		return
+	}
+	if n := len([]rune(req.JobDescription)); n > matcher.MaxJobDescriptionChars {
+		apierror.BadRequest(c, apierror.CodeParameterInvalid,
+			fmt.Sprintf("The job_description parameter must be at most %d characters long.", matcher.MaxJobDescriptionChars), "job_description")
 		return
 	}
 
@@ -122,20 +130,26 @@ func getUserID(c *gin.Context) (ulid.ULID, bool) {
 	return ulid.ULID{}, false
 }
 
-// handleServiceError maps well-known service errors to appropriate HTTP status codes.
+// handleServiceError maps well-known service errors to appropriate HTTP
+// status codes. Anything else is logged and answered with a generic 500, so
+// internal details never reach the client.
 func handleServiceError(c *gin.Context, err error) {
-	var statusCode int
 	switch {
 	case errors.Is(err, matcher.ErrNoCV):
-		c.JSON(http.StatusUnprocessableEntity, errorResponse("upload a CV before matching"))
-		return
+		apierror.Write(c, http.StatusUnprocessableEntity,
+			apierror.InvalidRequest(CodeCVRequired, "Upload a CV before matching.", ""))
+	case errors.Is(err, matcher.ErrJobNotFound):
+		apierror.NotFound(c, "No job has that id.", "id")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		statusCode = http.StatusGatewayTimeout
+		apierror.GatewayTimeout(c)
 	default:
-		statusCode = http.StatusInternalServerError
+		slog.ErrorContext(c.Request.Context(), "match failed", "error", err)
+		apierror.InternalServerError(c)
 	}
-	c.JSON(statusCode, errorResponse(err.Error()))
 }
+
+// CodeCVRequired is the error code when the user has no CV to match against.
+const CodeCVRequired = "cv_required"
 
 func errorResponse(msg string) gin.H {
 	return gin.H{"error": msg}

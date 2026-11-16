@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -93,9 +92,8 @@ func (h *Handler) create(c *gin.Context) {
 	}
 
 	// Only well-formed requests count toward the limit.
-	if ok, retryAfter := h.limiter.Allow(userID.String()); !ok {
-		apierror.TooManyRequests(c, fmt.Sprintf("Too many cover letters in a short time (at most %d per %s). Try again in %d seconds.",
-			h.limiter.Limit(), windowText(h.limiter.Window()), int(math.Ceil(retryAfter.Seconds()))), retryAfter)
+	if ok, retryAfter := h.limiter.AllowContext(c.Request.Context(), userID.String()); !ok {
+		ratelimit.Reject(c, h.limiter, "cover letters", retryAfter)
 		return
 	}
 
@@ -109,13 +107,6 @@ func (h *Handler) create(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, letter)
-}
-
-func windowText(d time.Duration) string {
-	if d == time.Minute {
-		return "minute"
-	}
-	return d.String()
 }
 
 func handleServiceError(c *gin.Context, err error) {

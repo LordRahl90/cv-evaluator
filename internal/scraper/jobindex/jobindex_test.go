@@ -46,7 +46,7 @@ func TestGetJobDetails(t *testing.T) {
 	server := httptest.NewServer(http.FileServer(http.Dir(testDataDir)))
 	defer server.Close()
 
-	s := &Service{}
+	s := &Service{AllowedHosts: []string{server.Listener.Addr().String()}}
 	details, err := s.GetJobDetails(t.Context(), &entities.JobPost{
 		ID:         "2001",
 		Provider:   provider,

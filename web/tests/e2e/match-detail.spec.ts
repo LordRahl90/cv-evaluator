@@ -187,6 +187,16 @@ test('an older evaluation without requirements leaves the checklist out', async 
   await expect(page.getByRole('heading', { name: 'Requirements' })).toHaveCount(0)
 })
 
+test('a posting link that is not http(s) is not shown', async ({ page }) => {
+  const r = sampleResults()[0]!
+  const detail = sampleDetail(r)
+  detail.job.details_url = 'javascript:alert(document.cookie)'
+  await mockResults(page, { results: [r], details: { [r.id]: detail } })
+  await page.goto(`/matches/${r.id}`)
+  await expect(page.getByRole('heading', { name: 'Why it scored 91' })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Open posting/ })).toHaveCount(0)
+})
+
 test('an unknown match shows a way back', async ({ page }) => {
   await mockResults(page)
   await page.goto('/matches/01JA2B3C4D5E6F7G8H9J0KR999')

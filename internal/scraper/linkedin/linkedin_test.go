@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"cv-evaluator/internal/entities"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,7 +80,7 @@ func TestGetJobDetails(t *testing.T) {
 	server := httptest.NewServer(http.FileServer(http.Dir(testDataDir)))
 	defer server.Close()
 
-	s := &Service{}
+	s := &Service{AllowedHosts: []string{server.Listener.Addr().String()}}
 	details, err := s.GetJobDetails(t.Context(), &entities.JobPost{
 		ID:         "1001",
 		Provider:   provider,
@@ -91,4 +93,28 @@ func TestGetJobDetails(t *testing.T) {
 	require.True(t, len(details.Details) > 100)
 	require.NotContains(t, details.Details, "<ul>")
 	require.NotContains(t, details.Details, "<div")
+}
+
+func TestGetJobDetails_RejectsURLsOffLinkedIn(t *testing.T) {
+	s := &Service{}
+	for _, u := range []string{
+		"http://169.254.169.254/latest/meta-data/",
+		"http://ollama.default.svc.cluster.local:11434/api/tags",
+		"https://linkedin.com.evil.example/jobs/view/1",
+		"javascript:alert(1)",
+		"file:///etc/passwd",
+	} {
+		_, err := s.GetJobDetails(t.Context(), &entities.JobPost{ID: "1", DetailsURL: u})
+		require.ErrorIs(t, err, ErrDetailsURLNotAllowed, u)
+	}
+
+	assert.True(t, s.detailsURLAllowed(mustParse(t, "https://dk.linkedin.com/jobs/view/123")))
+	assert.True(t, s.detailsURLAllowed(mustParse(t, "https://www.linkedin.com/jobs/view/123")))
+}
+
+func mustParse(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	require.NoError(t, err)
+	return u
 }

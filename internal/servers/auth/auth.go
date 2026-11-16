@@ -13,6 +13,7 @@ import (
 
 	"cv-evaluator/internal/servers/apierror"
 	"cv-evaluator/internal/servers/middleware"
+	"cv-evaluator/internal/servers/ratelimit"
 	"cv-evaluator/internal/services/users"
 
 	"github.com/gin-gonic/gin"
@@ -89,7 +90,13 @@ type SessionResponse struct {
 
 // Handler wires the Service to HTTP routes.
 type Handler struct {
-	svc Service
+	svc            Service
+	signinPerEmail *ratelimit.Limiter
+}
+
+// LimitSigninPerEmail caps sign-in attempts per email address with l.
+func (h *Handler) LimitSigninPerEmail(l *ratelimit.Limiter) {
+	h.signinPerEmail = l
 }
 
 // New registers the account routes on router:
@@ -155,6 +162,15 @@ func (h *Handler) signin(c *gin.Context) {
 	if req.Password == "" {
 		apierror.BadRequest(c, apierror.CodeParameterMissing, "The password parameter is required.", "password")
 		return
+	}
+
+	// Count attempts per account, whatever the client IP, so a password
+	// cannot be guessed from many addresses.
+	if h.signinPerEmail != nil {
+		if ok, retryAfter := h.signinPerEmail.AllowContext(c.Request.Context(), strings.ToLower(req.Email)); !ok {
+			ratelimit.Reject(c, h.signinPerEmail, "sign-in attempts for this account", retryAfter)
+			return
+		}
 	}
 
 	resp, err := h.svc.Signin(c.Request.Context(), users.SigninRequest{Email: req.Email, Password: req.Password})

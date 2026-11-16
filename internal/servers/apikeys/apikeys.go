@@ -92,7 +92,9 @@ func New(router gin.IRouter, svc Service, jwtSecret []byte, opts ...middleware.O
 	h := &Handler{svc: svc}
 
 	group := router.Group("/api-keys")
-	group.Use(middleware.Authenticate(jwtSecret, opts...))
+	// Only a signed-in session manages keys: a leaked key must not be able
+	// to mint a replacement for itself.
+	group.Use(middleware.Authenticate(jwtSecret, opts...), middleware.SessionOnly())
 	group.POST("", h.create)
 	group.GET("", h.list)
 	group.DELETE("/:id", h.delete)

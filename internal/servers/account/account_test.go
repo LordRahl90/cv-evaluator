@@ -139,13 +139,12 @@ func TestUpdate_Success(t *testing.T) {
 	assert.Equal(t, "ada@example.com", resp.Email)
 }
 
-func TestUpdate_WithAPIKey(t *testing.T) {
+func TestUpdate_RejectsAPIKey(t *testing.T) {
 	f := newFixture(t)
-	f.profiles.On("UpdateProfile", mock.Anything, f.userID, users.UpdateProfileRequest{FirstName: ptr("Ada")}).
-		Return(profile(f.userID), nil).Once()
 
-	w := f.doAs("Bearer "+testAPIKey, http.MethodPatch, "/me", `{"first_name":"Ada"}`)
-	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w := f.doAs("Bearer "+testAPIKey, http.MethodPatch, "/me", `{"email":"attacker@example.com"}`)
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	f.profiles.AssertNotCalled(t, "UpdateProfile")
 }
 
 func TestUpdate_Validation(t *testing.T) {

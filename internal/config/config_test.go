@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testJWTSecret = "0123456789abcdef0123456789abcdef"
+
 func setValidEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ENVIRONMENT", "")
@@ -16,10 +18,11 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("DB_NAME", "cv_evaluator")
 	t.Setenv("DB_USER", "postgres")
 	t.Setenv("DB_PASSWORD", "postgres")
+	t.Setenv("DB_SSLMODE", "")
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/")
 	t.Setenv("DEEPSEEK_API_KEY", "key")
 	t.Setenv("CV_CLEANUP_PROVIDER", "")
-	t.Setenv("JWT_SECRET", "secret")
+	t.Setenv("JWT_SECRET", testJWTSecret)
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "")
 	t.Setenv("OTEL_SDK_DISABLED", "")
@@ -36,8 +39,47 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "8080", cfg.Port)
 	assert.Equal(t, CleanupProviderDeepSeek, cfg.CleanupProvider)
 	assert.Equal(t, "http://localhost:11434", cfg.OllamaBaseURL)
-	assert.Equal(t, "secret", cfg.JWTSecret)
-	assert.Equal(t, "host=localhost port=5432 user=postgres password=postgres dbname=cv_evaluator sslmode=disable", cfg.Database.DSN())
+	assert.Equal(t, testJWTSecret, cfg.JWTSecret)
+	assert.Equal(t, "postgres://postgres:postgres@localhost:5432/cv_evaluator?sslmode=require", cfg.Database.DSN())
+}
+
+func TestLoad_SSLModeDefaultsToDisableInDevelopment(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("ENVIRONMENT", "development")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "disable", cfg.Database.SSLMode)
+}
+
+func TestLoad_InvalidSSLMode(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("DB_SSLMODE", "prefer-ish")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DB_SSLMODE")
+}
+
+func TestDatabase_DSNEscapesValues(t *testing.T) {
+	d := Database{Host: "ep-x.neon.tech", Port: "5432", Name: "app", User: "app", Password: "p@ss word/'#", SSLMode: "require"}
+	assert.Equal(t, "postgres://app:p%40ss%20word%2F%27%23@ep-x.neon.tech:5432/app?sslmode=require", d.DSN())
+}
+
+func TestLoad_WeakJWTSecretInProduction(t *testing.T) {
+	for name, secret := range map[string]string{
+		"too short": "secret",
+		"example":   "change-me-with-a-long-random-value",
+	} {
+		t.Run(name, func(t *testing.T) {
+			setValidEnv(t)
+			t.Setenv("JWT_SECRET", secret)
+
+			_, err := Load()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "JWT_SECRET")
+		})
+	}
 }
 
 func TestLoad_MissingJWTSecretInProduction(t *testing.T) {

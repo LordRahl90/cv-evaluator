@@ -70,3 +70,18 @@ export function formatDateTime(value: string): string {
 export function dotted(...parts: (string | null | undefined)[]): string {
   return parts.filter((p) => p && p.trim()).join(' · ')
 }
+
+/**
+ * Returns url when it is an absolute http(s) URL, otherwise null. Posting
+ * links are scraped from job portals, so a javascript: or data: URL must
+ * never become a link.
+ */
+export function safePostingUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null
+  } catch {
+    return null
+  }
+}

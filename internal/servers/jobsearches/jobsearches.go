@@ -5,6 +5,7 @@ package jobsearches
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -21,6 +22,9 @@ import (
 
 // CodeJobSearchDisabled is returned when running a disabled search.
 const CodeJobSearchDisabled = "job_search_disabled"
+
+// CodeTooManySearches is the error code when the user is at the search cap.
+const CodeTooManySearches = "too_many_job_searches"
 
 // Service is the domain interface the handler depends on.
 // *jobsearchsvc.Service satisfies it.
@@ -294,6 +298,9 @@ func handleServiceError(c *gin.Context, err error) {
 		apierror.NotFound(c, "No such job search.", "id")
 	case errors.Is(err, jobsearchsvc.ErrDisabled):
 		apierror.Conflict(c, CodeJobSearchDisabled, "The job search is disabled. Enable it before running it.", "")
+	case errors.Is(err, jobsearchsvc.ErrTooManySearches):
+		apierror.Conflict(c, CodeTooManySearches,
+			fmt.Sprintf("You can have at most %d job searches. Delete one before adding another.", jobsearchsvc.MaxSearchesPerUser), "")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		apierror.GatewayTimeout(c)
 	default:
