@@ -109,6 +109,9 @@ type Config struct {
 	// set, rate limits are shared by every API replica; otherwise each
 	// process keeps its own.
 	RedisURL string
+	// WebDir is WEB_DIR: a built web app for the API to serve. When set,
+	// the API moves under /api. Empty serves only the API, at the root.
+	WebDir string
 	// TrustedProxies is TRUSTED_PROXIES: comma-separated proxy IPs or CIDRs
 	// whose X-Forwarded-For is believed. Empty trusts none.
 	TrustedProxies []string
@@ -155,6 +158,7 @@ func Load(opts ...Option) (*Config, error) {
 		JWTSecret:       env("JWT_SECRET"),
 		TrustedProxies:  list(env("TRUSTED_PROXIES")),
 		RedisURL:        env("REDIS_URL"),
+		WebDir:          env("WEB_DIR"),
 		MigrateOnStart:  !strings.EqualFold(env("MIGRATE_ON_START"), "false"),
 		Telemetry: Telemetry{
 			OTLPEndpoint:   env("OTEL_EXPORTER_OTLP_ENDPOINT"),
