@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +13,9 @@ import (
 	"cv-evaluator/internal/llm/prompts"
 	"cv-evaluator/internal/telemetry"
 )
+
+// maxErrorBody caps how much of an error response is read.
+const maxErrorBody = 64 << 10
 
 type Service struct {
 	baseURl string
@@ -55,7 +60,7 @@ func (s *Service) CleanupCV(ctx context.Context, content string) (string, error)
 }
 
 func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float32, error) {
-	slog.DebugContext(ctx, "Creating embedding with Ollama", "content", content)
+	slog.DebugContext(ctx, "creating embedding with Ollama", "content_length", len(content))
 	req := Request{
 		Model:  "nomic-embed-text",
 		Prompt: content,
@@ -74,6 +79,10 @@ func (s *Service) CreateEmbedding(ctx context.Context, content string) ([]float3
 		return nil, err
 	}
 
+	if len(response.Embedding) == 0 {
+		return nil, errors.New("ollama embeddings: empty embedding in response")
+	}
+
 	return response.Embedding, nil
 }
 
@@ -82,7 +91,7 @@ func (s *Service) loadPrompt(fileName string) ([]byte, error) {
 }
 
 func (s *Service) callLLM(ctx context.Context, url string, content Request) ([]byte, error) {
-	slog.DebugContext(ctx, "calling ollama", "content", content)
+	slog.DebugContext(ctx, "calling ollama", "path", url, "model", content.Model, "prompt_length", len(content.Prompt))
 	payload, err := json.Marshal(content)
 	if err != nil {
 		return nil, err
@@ -100,5 +109,22 @@ func (s *Service) callLLM(ctx context.Context, url string, content Request) ([]b
 		_ = res.Body.Close()
 	}()
 
+	if res.StatusCode != http.StatusOK {
+		return nil, statusError(url, res)
+	}
+
 	return io.ReadAll(res.Body)
+}
+
+// statusError describes a non-200 response, using Ollama's error message
+// when the body has one.
+func statusError(url string, res *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(res.Body, maxErrorBody))
+	var e struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &e); err == nil && e.Error != "" {
+		return fmt.Errorf("ollama %s: status %d: %s", url, res.StatusCode, e.Error)
+	}
+	return fmt.Errorf("ollama %s: status %s", url, res.Status)
 }

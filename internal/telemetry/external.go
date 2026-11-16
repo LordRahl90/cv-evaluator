@@ -16,6 +16,7 @@ import (
 const (
 	PeerDeepSeek = "deepseek"
 	PeerOllama   = "ollama"
+	PeerOpenAI   = "openai"
 	PeerLinkedIn = "linkedin"
 	PeerJobindex = "jobindex"
 )

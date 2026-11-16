@@ -7,9 +7,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"cv-evaluator/internal/config"
+	"cv-evaluator/internal/llm"
 	"cv-evaluator/internal/llm/ollama"
+	"cv-evaluator/internal/llm/openai"
 	"cv-evaluator/internal/scraper/linkedin"
 	"cv-evaluator/internal/services/jobs"
 
@@ -33,7 +37,16 @@ func main() {
 	client := &http.Client{
 		Timeout: 30 * time.Minute,
 	}
-	embeddingLLMService := ollama.New(client, os.Getenv("OLLAMA_BASE_URL"))
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("EMBEDDING_PROVIDER")))
+	if provider == "" {
+		provider = config.EmbeddingProviderOpenAI
+	}
+	embeddingLLMService, err := llm.NewEmbedder(provider,
+		openai.New(client, os.Getenv("OPENAI_API_KEY"), ""),
+		ollama.New(client, os.Getenv("OLLAMA_BASE_URL")))
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	jobService := jobs.New(dbase, embeddingLLMService)
 

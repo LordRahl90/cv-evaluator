@@ -20,6 +20,9 @@ const (
 	CleanupProviderDeepSeek = "deepseek"
 	CleanupProviderOllama   = "ollama"
 
+	EmbeddingProviderOpenAI = "openai"
+	EmbeddingProviderOllama = "ollama"
+
 	defaultPort = "8080"
 
 	// OTLPProtocolHTTP is the only OTLP transport the exporters support.
@@ -93,14 +96,22 @@ func (t Telemetry) Enabled() bool {
 
 // Config is the application configuration, read once at startup.
 type Config struct {
-	Environment     string
-	Port            string
-	Database        Database
+	Environment string
+	Port        string
+	Database    Database
+	// OllamaBaseURL is OLLAMA_BASE_URL, required only when Ollama embeds
+	// or cleans up CVs.
 	OllamaBaseURL   string
 	DeepSeekAPIKey  string
 	CleanupProvider string
-	JWTSecret       string
-	Telemetry       Telemetry
+	// EmbeddingProvider is EMBEDDING_PROVIDER: openai (default) or ollama.
+	// Vectors from different models are not comparable, so switching means
+	// recomputing every stored embedding.
+	EmbeddingProvider string
+	// OpenAIAPIKey is OPENAI_API_KEY, required when EmbeddingProvider is openai.
+	OpenAIAPIKey string
+	JWTSecret    string
+	Telemetry    Telemetry
 	// MigrateOnStart is MIGRATE_ON_START (default true): whether the API and
 	// worker migrate the database when they start. Deployments with several
 	// replicas set it to false and run `cv-api migrate` once per release.
@@ -152,14 +163,16 @@ func Load(opts ...Option) (*Config, error) {
 			Password: env("DB_PASSWORD"),
 			SSLMode:  strings.ToLower(envOr("DB_SSLMODE", DefaultSSLMode(environment))),
 		},
-		OllamaBaseURL:   strings.TrimRight(env("OLLAMA_BASE_URL"), "/"),
-		DeepSeekAPIKey:  env("DEEPSEEK_API_KEY"),
-		CleanupProvider: strings.ToLower(envOr("CV_CLEANUP_PROVIDER", CleanupProviderDeepSeek)),
-		JWTSecret:       env("JWT_SECRET"),
-		TrustedProxies:  list(env("TRUSTED_PROXIES")),
-		RedisURL:        env("REDIS_URL"),
-		WebDir:          env("WEB_DIR"),
-		MigrateOnStart:  !strings.EqualFold(env("MIGRATE_ON_START"), "false"),
+		OllamaBaseURL:     strings.TrimRight(env("OLLAMA_BASE_URL"), "/"),
+		DeepSeekAPIKey:    env("DEEPSEEK_API_KEY"),
+		CleanupProvider:   strings.ToLower(envOr("CV_CLEANUP_PROVIDER", CleanupProviderDeepSeek)),
+		EmbeddingProvider: strings.ToLower(envOr("EMBEDDING_PROVIDER", EmbeddingProviderOpenAI)),
+		OpenAIAPIKey:      env("OPENAI_API_KEY"),
+		JWTSecret:         env("JWT_SECRET"),
+		TrustedProxies:    list(env("TRUSTED_PROXIES")),
+		RedisURL:          env("REDIS_URL"),
+		WebDir:            env("WEB_DIR"),
+		MigrateOnStart:    !strings.EqualFold(env("MIGRATE_ON_START"), "false"),
 		Telemetry: Telemetry{
 			OTLPEndpoint:   env("OTEL_EXPORTER_OTLP_ENDPOINT"),
 			OTLPProtocol:   strings.ToLower(envOr("OTEL_EXPORTER_OTLP_PROTOCOL", OTLPProtocolHTTP)),
@@ -196,8 +209,13 @@ func (c *Config) Validate() error {
 		{"DB_PORT", c.Database.Port},
 		{"DB_NAME", c.Database.Name},
 		{"DB_USER", c.Database.User},
-		{"OLLAMA_BASE_URL", c.OllamaBaseURL},
 		{"DEEPSEEK_API_KEY", c.DeepSeekAPIKey},
+	}
+	if c.EmbeddingProvider == EmbeddingProviderOpenAI {
+		required = append(required, struct{ key, value string }{"OPENAI_API_KEY", c.OpenAIAPIKey})
+	}
+	if c.usesOllama() {
+		required = append(required, struct{ key, value string }{"OLLAMA_BASE_URL", c.OllamaBaseURL})
 	}
 	for _, r := range required {
 		if r.value == "" {
@@ -227,9 +245,21 @@ func (c *Config) Validate() error {
 			CleanupProviderDeepSeek, CleanupProviderOllama, c.CleanupProvider))
 	}
 
+	switch c.EmbeddingProvider {
+	case EmbeddingProviderOpenAI, EmbeddingProviderOllama:
+	default:
+		errs = append(errs, fmt.Errorf("EMBEDDING_PROVIDER must be %q or %q, got %q",
+			EmbeddingProviderOpenAI, EmbeddingProviderOllama, c.EmbeddingProvider))
+	}
+
 	errs = append(errs, c.Telemetry.validate())
 
 	return errors.Join(errs...)
+}
+
+// usesOllama reports whether Ollama embeds or cleans up CVs.
+func (c *Config) usesOllama() bool {
+	return c.EmbeddingProvider == EmbeddingProviderOllama || c.CleanupProvider == CleanupProviderOllama
 }
 
 func (t Telemetry) validate() error {
