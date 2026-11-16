@@ -48,7 +48,10 @@ jobs:
       - name: Lint and Vet
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.10
+          version: v2.15
+          # Build it with this job's Go: the prebuilt binary is built with an
+          # older Go and refuses to lint a newer go.mod.
+          install-mode: goinstall
           args: --timeout=3m
 
   test:
