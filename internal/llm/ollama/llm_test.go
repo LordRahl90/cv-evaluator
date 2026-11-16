@@ -3,11 +3,13 @@ package ollama
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,6 +85,61 @@ func TestService_CreateEmbedding(t *testing.T) {
 	embedding, err := svc.CreateEmbedding(t.Context(), content)
 	require.NoError(t, err)
 	require.NotEmpty(t, embedding)
+}
+
+func TestService_CreateEmbeddingErrorStatus(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"model \"nomic-embed-text\" not found, try pulling it first"}`))
+	}))
+	defer api.Close()
+
+	svc := New(&http.Client{Timeout: 5 * time.Second}, api.URL)
+
+	embedding, err := svc.CreateEmbedding(t.Context(), "text")
+	require.Error(t, err)
+	assert.Nil(t, embedding)
+	assert.Contains(t, err.Error(), "404")
+	assert.Contains(t, err.Error(), "not found, try pulling it first")
+}
+
+func TestService_CreateEmbeddingErrorStatusWithoutJSON(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer api.Close()
+
+	svc := New(&http.Client{Timeout: 5 * time.Second}, api.URL)
+
+	_, err := svc.CreateEmbedding(t.Context(), "text")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "500")
+}
+
+func TestService_CreateEmbeddingEmptyResponse(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer api.Close()
+
+	svc := New(&http.Client{Timeout: 5 * time.Second}, api.URL)
+
+	_, err := svc.CreateEmbedding(t.Context(), "text")
+	require.Error(t, err)
+}
+
+func TestService_CleanupCVErrorStatus(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"out of memory"}`))
+	}))
+	defer api.Close()
+
+	svc := New(&http.Client{Timeout: 5 * time.Second}, api.URL)
+
+	_, err := svc.CleanupCV(t.Context(), "cv")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "out of memory")
 }
 
 type mockClient struct {

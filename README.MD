@@ -129,7 +129,7 @@ The same target runs the cover letter cases in `internal/services/coverletter/te
 
 ## Models used
 
-- **Embeddings**: Ollama `nomic-embed-text` (768 dimensions, matching the `vector(768)` columns).
+- **Embeddings**: OpenAI `text-embedding-3-small` by default, requested at 768 dimensions to match the `vector(768)` columns. With `EMBEDDING_PROVIDER=ollama`, Ollama `nomic-embed-text` (also 768 dimensions). Input longer than 20,000 characters is truncated before it is sent to OpenAI (the model takes at most 8192 tokens).
 - **Job matching**: DeepSeek `deepseek-chat` with JSON response format.
 - **CV cleanup / sectioning**: DeepSeek by default, or Ollama `qwen3:8b` with `CV_CLEANUP_PROVIDER=ollama`.
 
@@ -152,6 +152,7 @@ internal/
   integrations/extractor/ PDF text extraction
   llm/                    CV cleanup provider selection
   llm/ollama/             embeddings and CV cleanup via Ollama
+  llm/openai/             embeddings via the OpenAI API
   llm/deepseek/           CV cleanup and job matching via DeepSeek
   llm/prompts/            embedded prompt files
   scraper/linkedin/       LinkedIn search and job detail scraping
@@ -177,7 +178,7 @@ internal/
 
 - Go `1.25+` (CI runs on Go `1.26`)
 - Docker (for local Postgres and for the integration tests, which use testcontainers)
-- Ollama, reachable via `OLLAMA_BASE_URL`
+- An OpenAI API key for embeddings, or Ollama reachable via `OLLAMA_BASE_URL` with `EMBEDDING_PROVIDER=ollama` (the local default in `.env.example`)
 - A DeepSeek API key (needed for matching)
 - Optional tools:
   - `golangci-lint` (for `make lint`)
@@ -197,6 +198,8 @@ Env keys:
 ENVIRONMENT=development
 PORT=8080
 DEEPSEEK_API_KEY=your-deepseek-api-key
+EMBEDDING_PROVIDER=ollama
+OPENAI_API_KEY=
 OLLAMA_BASE_URL=http://localhost:11434
 CV_CLEANUP_PROVIDER=deepseek
 DB_HOST=localhost
@@ -219,6 +222,9 @@ Notes:
 - `cmd/api` and `cmd/seed` read settings through `internal/config`, which fails at startup if a required value is missing. The other CLI entrypoints load `.env` with `godotenv.Load()` and exit if it is missing; `cmd/api` treats `.env` as optional.
 - `ENVIRONMENT` defaults to `production`. Outside `development`, `JWT_SECRET` is required; in `development` a random secret is generated when it is empty, and tokens will not survive a restart. The worker (`cmd/worker`) never issues or checks tokens, so it doesn't need `JWT_SECRET`.
 - `CV_CLEANUP_PROVIDER` is `deepseek` (default) or `ollama`.
+- `EMBEDDING_PROVIDER` is `openai` (default) or `ollama`. `OPENAI_API_KEY` is required with `openai`. `.env.example` sets `ollama`, so local development against the docker-compose Ollama needs no OpenAI key.
+- `OLLAMA_BASE_URL` is required only when `EMBEDDING_PROVIDER` or `CV_CLEANUP_PROVIDER` is `ollama`.
+- Embeddings from different models are not comparable. After switching `EMBEDDING_PROVIDER` on a database that already has embeddings, recompute them all (CV section embeddings and job embeddings); old and new vectors must not be mixed.
 - `PORT` defaults to `8080`.
 - The `.env.example` DB values match `docker-compose.yml`.
 - Telemetry is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set (see [Observability](#observability)).
@@ -245,7 +251,7 @@ API keys can't manage API keys or change the profile (`/api-keys`, `PATCH /me`);
    docker compose up -d
    ```
 
-2. Pull the embedding model:
+2. Pull the embedding model (only with `EMBEDDING_PROVIDER=ollama`; docker-compose's `ollama-models` service does this for you):
 
    ```bash
    ollama pull nomic-embed-text
@@ -524,7 +530,7 @@ What is recorded:
 
 - **HTTP requests**: a server span per request from `otelgin` (`/healthz` is skipped), plus otelgin's standard HTTP server metrics. Request logs include `trace_id`.
 - **`cv_evaluator.background_run.duration`** (histogram, seconds), attributes `run.kind` and `run.outcome` (`success`|`error`), with a span `background_run <kind>`. Use `telemetry.StartRun(ctx, kind)`, or `telemetry.RunObserver{}` where an observer hook (`RunStarted`/`RunFinished`) is expected. `cmd/seed` records `seed.process_cv`.
-- **`cv_evaluator.external_request.duration`** (histogram, seconds), attributes `peer.service`, `operation`, `outcome` (and `llm.task` for DeepSeek), with a client span `<peer.service> <operation>`. Ollama (`embedding`, `cv_cleanup`) and DeepSeek (`chat_completion`, `llm.task=cv_cleanup|job_match`) are instrumented. HTTP clients use `telemetry.NewHTTPClient(peer, client)` with `telemetry.WithOperation(ctx, op)`; other SDK calls use `telemetry.TrackExternal(ctx, peer, op)`. `telemetry.NewJobBoardTransport(nil)` is one transport for the scrapers that labels `peer.service` (`linkedin`, `jobindex`) from the host and `operation` (`search`, `details`) from the path.
+- **`cv_evaluator.external_request.duration`** (histogram, seconds), attributes `peer.service`, `operation`, `outcome` (and `llm.task` for DeepSeek), with a client span `<peer.service> <operation>`. OpenAI (`embedding`), Ollama (`embedding`, `cv_cleanup`) and DeepSeek (`chat_completion`, `llm.task=cv_cleanup|job_match`) are instrumented. HTTP clients use `telemetry.NewHTTPClient(peer, client)` with `telemetry.WithOperation(ctx, op)`; other SDK calls use `telemetry.TrackExternal(ctx, peer, op)`. `telemetry.NewJobBoardTransport(nil)` is one transport for the scrapers that labels `peer.service` (`linkedin`, `jobindex`) from the host and `operation` (`search`, `details`) from the path.
 
 ### Viewing locally
 

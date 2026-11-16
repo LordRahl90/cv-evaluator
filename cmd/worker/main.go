@@ -18,8 +18,10 @@ import (
 
 	"cv-evaluator/db"
 	"cv-evaluator/internal/config"
+	"cv-evaluator/internal/llm"
 	"cv-evaluator/internal/llm/deepseek"
 	"cv-evaluator/internal/llm/ollama"
+	"cv-evaluator/internal/llm/openai"
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/pipeline"
 	pipelinesources "cv-evaluator/internal/pipeline/sources"
@@ -103,9 +105,9 @@ func run(opts options) error {
 		transport = http.DefaultTransport
 	}
 	// Keep these well below WORKER_STALE_TIMEOUT, so a row is only
-	// reclaimed when its worker is really gone. ollama.New instruments its
-	// own client; DeepSeek and the portal fetcher are wrapped here, so no
-	// request is recorded twice.
+	// reclaimed when its worker is really gone. ollama.New and openai.New
+	// instrument their own clients; DeepSeek and the portal fetcher are
+	// wrapped here, so no request is recorded twice.
 	llmClient := &http.Client{Timeout: llmTimeout, Transport: transport}
 	fetchClient := &http.Client{Timeout: fetchTimeout, Transport: telemetry.NewJobBoardTransport(transport)}
 	if settings.staleTimeout <= llmTimeout {
@@ -113,7 +115,12 @@ func run(opts options) error {
 			settings.staleTimeout, llmTimeout)
 	}
 
-	ollamaLLM := ollama.New(llmClient, cfg.OllamaBaseURL)
+	embedder, err := llm.NewEmbedder(cfg.EmbeddingProvider,
+		openai.New(llmClient, cfg.OpenAIAPIKey, ""),
+		ollama.New(llmClient, cfg.OllamaBaseURL))
+	if err != nil {
+		return err
+	}
 	deepseekClient, err := deepseekLib.NewClientWithOptions(cfg.DeepSeekAPIKey, deepseekLib.WithHTTPClient(telemetry.NewHTTPClient(telemetry.PeerDeepSeek, llmClient)))
 	if err != nil {
 		return fmt.Errorf("deepseek client: %w", err)
@@ -126,7 +133,7 @@ func run(opts options) error {
 		DB:                dbase,
 		Searches:          searches,
 		Fetcher:           fetcher,
-		Embedder:          ollamaLLM,
+		Embedder:          embedder,
 		Evaluator:         matcher.New(dbase, deepseekLLM),
 		SearchConcurrency: settings.searchConcurrency,
 		EmbedWorkers:      settings.embedConcurrency,

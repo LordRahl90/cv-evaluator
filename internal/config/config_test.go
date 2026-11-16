@@ -22,6 +22,8 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/")
 	t.Setenv("DEEPSEEK_API_KEY", "key")
 	t.Setenv("CV_CLEANUP_PROVIDER", "")
+	t.Setenv("EMBEDDING_PROVIDER", "")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("JWT_SECRET", testJWTSecret)
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "")
@@ -38,9 +40,59 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, EnvProduction, cfg.Environment)
 	assert.Equal(t, "8080", cfg.Port)
 	assert.Equal(t, CleanupProviderDeepSeek, cfg.CleanupProvider)
+	assert.Equal(t, EmbeddingProviderOpenAI, cfg.EmbeddingProvider)
+	assert.Equal(t, "sk-test", cfg.OpenAIAPIKey)
 	assert.Equal(t, "http://localhost:11434", cfg.OllamaBaseURL)
 	assert.Equal(t, testJWTSecret, cfg.JWTSecret)
 	assert.Equal(t, "postgres://postgres:postgres@localhost:5432/cv_evaluator?sslmode=require", cfg.Database.DSN())
+}
+
+func TestLoad_EmbeddingProviders(t *testing.T) {
+	tests := map[string]struct {
+		env     map[string]string
+		wantErr []string
+	}{
+		"openai without ollama": {
+			env: map[string]string{"OLLAMA_BASE_URL": ""},
+		},
+		"openai without key": {
+			env:     map[string]string{"OPENAI_API_KEY": ""},
+			wantErr: []string{"OPENAI_API_KEY is required"},
+		},
+		"ollama without openai key": {
+			env: map[string]string{"EMBEDDING_PROVIDER": "Ollama", "OPENAI_API_KEY": ""},
+		},
+		"ollama without base url": {
+			env:     map[string]string{"EMBEDDING_PROVIDER": "ollama", "OLLAMA_BASE_URL": ""},
+			wantErr: []string{"OLLAMA_BASE_URL is required"},
+		},
+		"ollama cleanup without base url": {
+			env:     map[string]string{"CV_CLEANUP_PROVIDER": "ollama", "OLLAMA_BASE_URL": ""},
+			wantErr: []string{"OLLAMA_BASE_URL is required"},
+		},
+		"unknown provider": {
+			env:     map[string]string{"EMBEDDING_PROVIDER": "cohere"},
+			wantErr: []string{"EMBEDDING_PROVIDER"},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			setValidEnv(t)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+
+			_, err := Load()
+			if len(tc.wantErr) == 0 {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tc.wantErr {
+				assert.Contains(t, err.Error(), want)
+			}
+		})
+	}
 }
 
 func TestLoad_SSLModeDefaultsToDisableInDevelopment(t *testing.T) {

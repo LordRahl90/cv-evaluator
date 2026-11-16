@@ -16,6 +16,7 @@ import (
 	"cv-evaluator/internal/llm"
 	"cv-evaluator/internal/llm/deepseek"
 	"cv-evaluator/internal/llm/ollama"
+	"cv-evaluator/internal/llm/openai"
 	"cv-evaluator/internal/migrator"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/users"
@@ -83,8 +84,13 @@ func run(opts options) error {
 	if err != nil {
 		return err
 	}
+	openaiLLM := openai.New(&http.Client{Timeout: 2 * time.Minute}, cfg.OpenAIAPIKey, "")
+	embedder, err := llm.NewEmbedder(cfg.EmbeddingProvider, openaiLLM, ollamaLLM)
+	if err != nil {
+		return err
+	}
 
-	svc := users.NewWithAuth(dbase, cleaner, ollamaLLM, cfg.JWTSecret, time.Hour)
+	svc := users.NewWithAuth(dbase, cleaner, embedder, cfg.JWTSecret, time.Hour)
 
 	userID, created, err := ensureUser(ctx, dbase, svc, opts.user)
 	if err != nil {

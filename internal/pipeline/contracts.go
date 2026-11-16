@@ -94,7 +94,7 @@ type CVSelector interface {
 	SelectCV(ctx context.Context, userID ulid.ULID) (*models.CV, error)
 }
 
-// Embedder embeds a job description. The Ollama client satisfies it.
+// Embedder embeds a job description. The OpenAI and Ollama clients satisfy it.
 type Embedder interface {
 	CreateEmbedding(ctx context.Context, text string) ([]float32, error)
 }
