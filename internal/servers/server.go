@@ -45,6 +45,9 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	// MaxBodyBytes caps request bodies; DefaultMaxBodyBytes when zero.
 	MaxBodyBytes int64
+	// WebDir is a built web app (web/dist) to serve. When set, the API is
+	// served under /api and every other path serves the app; see Handler.
+	WebDir string
 	// TrustedProxies are the proxy IPs or CIDRs whose X-Forwarded-For is
 	// believed when working out the client IP. Empty trusts none, so the
 	// client IP is the connection's peer address.
@@ -102,9 +105,13 @@ func (s *Server) Router() *gin.Engine {
 // Start serves HTTP until ctx is cancelled, then shuts down gracefully,
 // letting in-flight requests finish within the shutdown timeout.
 func (s *Server) Start(ctx context.Context) error {
+	handler, err := s.Handler()
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              ":" + s.config.Port,
-		Handler:           s.router,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

@@ -120,6 +120,7 @@ func run() error {
 		Port:           cfg.Port,
 		HealthCheck:    sqlDB.PingContext,
 		TrustedProxies: cfg.TrustedProxies,
+		WebDir:         cfg.WebDir,
 	})
 	if err != nil {
 		return err

@@ -226,6 +226,7 @@ Notes:
 - Outside `development`, `JWT_SECRET` must be at least 32 bytes and not the example value. Generate one with `openssl rand -hex 32`.
 - `REDIS_URL` (Redis or Valkey) shares the API's rate limits across replicas. Without it, each process counts on its own and the counts reset on restart. If the store is unreachable, requests are allowed and the error is logged.
 - `TRUSTED_PROXIES` lists the proxy IPs or CIDRs whose `X-Forwarded-For` is believed when working out the client IP for per-IP limits. Empty trusts none.
+- `WEB_DIR` is a built web app (`web/dist`) for the API to serve. When set, the API moves under `/api`; see [Container image](#container-image).
 - `MIGRATE_ON_START` (default `true`) makes the API and worker migrate at startup. With several replicas, set it to `false` and run `cv-api migrate` (the API binary with the `migrate` argument) once per release.
 
 ### Limits
@@ -490,6 +491,21 @@ Job searches (`/searches`, `/searches/new`, `/searches/:id/edit`) list, create, 
 Quick match (`/quick-match`) can write a cover letter for the job it just scored (`POST /match/cover-letter`, via `web/src/api/coverLetter.ts`): a banner offers it for scores of 80 or more, a secondary button below that. The letter's subject and text are editable, Copy puts "Subject: …" and the letter on the clipboard (or selects it for Ctrl/Cmd+C when the browser refuses), and Regenerate asks first when the letter was edited. Letters, like quick matches, live only on the page. The three progress steps while it is written are time-based, since the API answers in one call (`mockCoverLetter` mocks it in tests).
 
 Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per component and page), not in `.vue` files. API calls go through `web/src/api`. CI for the web app is `.github/workflows/web.yaml`; it only runs when `web/` changes, and the Go workflows ignore `web/`.
+
+## Container image
+
+One image holds the whole app: the API (`cv-api`, the default command), which also serves the built web app, and the background worker (`cv-worker`). It is built from the root `Dockerfile` (web build, Go build, then a distroless, non-root runtime of about 70 MB) and runs with a read-only root filesystem.
+
+```bash
+docker build -t cv-evaluator .
+docker run --env-file .env -p 8080:8080 cv-evaluator              # API + web app on :8080
+docker run --env-file .env cv-evaluator migrate                    # migrations, then exit
+docker run --env-file .env --entrypoint cv-worker cv-evaluator     # background worker
+```
+
+In the image `WEB_DIR` points at the built app, so the server answers API calls under `/api` (for example `/api/cv/`), serves `/healthz` at the root for probes, and sends every other path to the web app. That is the same split the Vite dev server makes, so the web app works unchanged. Without `WEB_DIR` (local runs, tests) the API is served at the root as before.
+
+`.github/workflows/image.yaml` builds the image for `linux/amd64` and `linux/arm64` on every push to `main` and pushes it to `ghcr.io/lordrahl90/cv-evaluator` with the tags `main` and `sha-<commit>`.
 
 ## Observability
 
