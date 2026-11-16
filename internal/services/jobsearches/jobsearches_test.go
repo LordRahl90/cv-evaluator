@@ -247,3 +247,19 @@ func TestService_Validation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
 }
+
+func TestService_CapsSearchesPerUser(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	userID := ulid.Make()
+
+	for range MaxSearchesPerUser {
+		_, err := svc.Create(ctx, userID, validParams())
+		require.NoError(t, err)
+	}
+	_, err := svc.Create(ctx, userID, validParams())
+	require.ErrorIs(t, err, ErrTooManySearches)
+
+	_, err = svc.Create(ctx, ulid.Make(), validParams())
+	require.NoError(t, err, "the cap is per user")
+}

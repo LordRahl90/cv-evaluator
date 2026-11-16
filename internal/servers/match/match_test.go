@@ -160,5 +160,5 @@ func TestMatchByJobDescription_NoCV(t *testing.T) {
 		`{"job_description":"We are looking for a Go engineer"}`)
 
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
-	assert.JSONEq(t, `{"error":"upload a CV before matching"}`, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"cv_required"`)
 }

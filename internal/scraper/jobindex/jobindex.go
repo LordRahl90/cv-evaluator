@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"cv-evaluator/internal/entities"
@@ -100,7 +102,18 @@ func extractJobIndexJobID(detailsURL string) string {
 	return ""
 }
 
+// ErrDetailsURLNotAllowed is returned for a job details URL that is not on
+// Jobindex (or in Service.AllowedHosts).
+var ErrDetailsURLNotAllowed = errors.New("jobindex: details URL is not on jobindex.dk")
+
+// portalDomain is the registrable domain details URLs must be on; any of
+// its subdomains is accepted too.
+const portalDomain = "jobindex.dk"
+
 type Service struct {
+	// AllowedHosts are extra hosts (host or host:port) that details URLs may
+	// point at, for tests against a local server. Empty in production.
+	AllowedHosts   []string
 	SearchLinkPage string
 	MaxPages       int
 	// Transport performs the HTTP requests. Nil means http.DefaultTransport.
@@ -326,14 +339,13 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 	if err != nil {
 		return nil, err
 	}
+	// The URL comes from scraped HTML: only ever fetch the portal itself,
+	// never a host a crafted listing points at (such as an in-cluster one).
+	if !s.detailsURLAllowed(parsedURL) {
+		return nil, fmt.Errorf("%w: %q", ErrDetailsURLNotAllowed, detailsURL)
+	}
 
-	allowedDomains := []string{baseDomain}
-	if hostname := parsedURL.Hostname(); hostname != "" {
-		allowedDomains = append(allowedDomains, hostname)
-	}
-	if host := parsedURL.Host; host != "" {
-		allowedDomains = append(allowedDomains, host)
-	}
+	allowedDomains := []string{baseDomain, parsedURL.Hostname(), parsedURL.Host}
 
 	c := colly.NewCollector(
 		colly.AllowedDomains(allowedDomains...),
@@ -398,4 +410,17 @@ func (s *Service) GetJobDetails(ctx context.Context, job *entities.JobPost) (*en
 	}
 
 	return details, nil
+}
+
+// detailsURLAllowed reports whether u is an http(s) URL on the portal's
+// domain or one of its subdomains, or on one of AllowedHosts.
+func (s *Service) detailsURLAllowed(u *url.URL) bool {
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return false
+	}
+	if s != nil && slices.Contains(s.AllowedHosts, u.Host) {
+		return true
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == portalDomain || strings.HasSuffix(host, "."+portalDomain)
 }

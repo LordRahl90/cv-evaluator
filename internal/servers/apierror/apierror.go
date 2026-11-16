@@ -52,6 +52,8 @@ const (
 	CodeInternal           = "internal_error"
 	CodeTimeout            = "timeout"
 	CodeRateLimited        = "rate_limited"
+	CodeBodyTooLarge       = "body_too_large"
+	CodeSessionRequired    = "session_required"
 )
 
 // Error is the body of the "error" object.

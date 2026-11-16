@@ -204,7 +204,11 @@ DB_PORT=5432
 DB_NAME=cv_evaluator
 DB_USER=postgres
 DB_PASSWORD=postgres
+DB_SSLMODE=disable
 JWT_SECRET=change-me-with-a-long-random-value
+REDIS_URL=
+TRUSTED_PROXIES=
+MIGRATE_ON_START=true
 OTEL_EXPORTER_OTLP_ENDPOINT=
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 SERVICE_VERSION=dev
@@ -218,6 +222,19 @@ Notes:
 - `PORT` defaults to `8080`.
 - The `.env.example` DB values match `docker-compose.yml`.
 - Telemetry is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set (see [Observability](#observability)).
+- `DB_SSLMODE` is `disable`, `require`, `verify-ca` or `verify-full`. It defaults to `require`, or to `disable` in `development` (the docker-compose Postgres has no TLS). Hosted databases such as Neon need TLS.
+- Outside `development`, `JWT_SECRET` must be at least 32 bytes and not the example value. Generate one with `openssl rand -hex 32`.
+- `REDIS_URL` (Redis or Valkey) shares the API's rate limits across replicas. Without it, each process counts on its own and the counts reset on restart. If the store is unreachable, requests are allowed and the error is logged.
+- `TRUSTED_PROXIES` lists the proxy IPs or CIDRs whose `X-Forwarded-For` is believed when working out the client IP for per-IP limits. Empty trusts none.
+- `MIGRATE_ON_START` (default `true`) makes the API and worker migrate at startup. With several replicas, set it to `false` and run `cv-api migrate` (the API binary with the `migrate` argument) once per release.
+
+### Limits
+
+The API caps request bodies at 6 MB. CV uploads must be PDFs of at most 5 MB and 30 pages. They are parsed in a child process with a 20-second timeout and a memory cap, and the text kept is cut at 20,000 characters. Job descriptions sent to match are capped at 20,000 characters, and each user can keep at most 10 job searches.
+
+Per-user rate limits apply to routes that cost money or check passwords: 10 CV uploads an hour, 30 matches an hour (by description and by job id together), 30 re-evaluations an hour, 20 new job searches a day, 10 search runs an hour, 10 portal suggestions a day, 5 cover letters a minute, and 5 password checks (`POST /me/password`, `DELETE /me`) per 15 minutes. Sign-in allows 10 attempts per email per 15 minutes and 60 per client IP a minute; sign-up allows 20 per client IP an hour. A limited request gets `429` with a `Retry-After` header. The limits are defined in `cmd/api/limits.go`, and the API refuses to start if one names a route that doesn't exist.
+
+API keys can't manage API keys or change the profile (`/api-keys`, `PATCH /me`); those need a signed-in session and answer `403` with code `session_required` otherwise.
 
 ## Quick start
 
@@ -331,7 +348,7 @@ Accounts and API keys: `POST /auth/signup`, `POST /auth/signin`, `GET /me`, and 
 - **Prompt.** `internal/llm/prompts/coverletter.tpl` keeps the rules in the system message and the name, job, CV and evaluation in the user message, inside `<job_description>`, `<cv>` and `<evaluation>` tags that are stripped from every input first. It asks for a formal English letter of 250-350 words in 3-4 paragraphs, "Dear Hiring Manager," (unless the posting names a person), built around the 2-3 most important requirements the CV meets, each backed by a concrete CV fact, a gap mentioned only for an unmet must-have and never apologetically, and none of the banned clichés (`entities.CoverLetterBannedPhrases`). It is sent at temperature 0.4 and recorded with `llm.task=cover_letter`.
 - **Checks.** Before a letter is returned the server checks it (`coverletter.Check`): 200-400 words, a one-line subject, a `Dear ...,` salutation, a closing (`Kind regards,` and similar) followed by the user's full name, and no profanity (word list in `profanity.go`, whole words only), banned clichés, exclamation marks, links, brackets or placeholders, or email addresses and phone numbers other than the user's own. A letter that fails is sent back to the LLM once with the list of failed checks; if the rewrite fails too the response is `502 cover_letter_failed`, and the names of the failed checks (never the letter) are logged.
 - **Errors.** `400` for a missing or longer than 20,000 characters `job_description`, `422 cv_missing` without a CV, `429 rate_limited` (with `Retry-After`), `502 cover_letter_failed`, `504 timeout`.
-- **Rate limit.** 5 letters per user per minute (`coverletter.DefaultLimit`), counted for well-formed requests only. The limiter (`internal/servers/ratelimit`) is in memory, so it applies per API process and resets on restart; running several API instances multiplies the limit, and a shared store would be needed then.
+- **Rate limit.** 5 letters per user per minute (`coverletter.DefaultLimit`), counted for well-formed requests only. It is shared across API replicas when `REDIS_URL` is set (see [Limits](#limits)).
 - **Reuse.** `Service.Write` takes the CV, candidate, job and evaluation directly, so a later `POST /results/:id/cover-letter` can pass a stored result's job, evaluation and CV.
 
 ```bash

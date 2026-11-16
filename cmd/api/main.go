@@ -14,6 +14,7 @@ import (
 
 	"cv-evaluator/db"
 	"cv-evaluator/internal/config"
+	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/llm"
 	"cv-evaluator/internal/llm/deepseek"
 	"cv-evaluator/internal/llm/ollama"
@@ -29,6 +30,7 @@ import (
 	"cv-evaluator/internal/servers/match"
 	"cv-evaluator/internal/servers/middleware"
 	portalhttp "cv-evaluator/internal/servers/portalsuggestions"
+	"cv-evaluator/internal/servers/ratelimit"
 	resulthttp "cv-evaluator/internal/servers/results"
 	accountsvc "cv-evaluator/internal/services/account"
 	apikeysvc "cv-evaluator/internal/services/apikeys"
@@ -45,6 +47,9 @@ import (
 )
 
 func main() {
+	// Uploaded PDFs are parsed in a child process running this binary.
+	extractor.RunChildIfRequested()
+
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
@@ -83,8 +88,16 @@ func run() error {
 		_ = sqlDB.Close()
 	}()
 
-	if err := migrator.Migrate(dbase); err != nil {
-		return err
+	// `cv-api migrate` migrates and exits: deployments run it once per
+	// release (a Job) instead of in every replica at startup.
+	migrateOnly := len(os.Args) > 1 && os.Args[1] == "migrate"
+	if migrateOnly || cfg.MigrateOnStart {
+		if err := migrator.Migrate(dbase); err != nil {
+			return err
+		}
+	}
+	if migrateOnly {
+		return nil
 	}
 
 	ollamaLLM := ollama.New(&http.Client{Timeout: 30 * time.Minute}, cfg.OllamaBaseURL)
@@ -94,32 +107,48 @@ func run() error {
 		return err
 	}
 
-	usersService := users.NewWithAuth(dbase, cleaner, ollamaLLM, cfg.JWTSecret, 0)
+	pdfExtractor, err := extractor.NewIsolated()
+	if err != nil {
+		return err
+	}
+	usersService := users.NewWithAuth(dbase, cleaner, ollamaLLM, cfg.JWTSecret, 0).WithPDFExtractor(pdfExtractor)
 	matchService := matcher.New(dbase, deepseekLLM)
 	apiKeyService := apikeysvc.New(dbase)
 	apiKeyVerifier := apikeyhttp.NewVerifier(apiKeyService)
 
-	server := servers.New(&servers.Config{
-		Port:        cfg.Port,
-		HealthCheck: sqlDB.PingContext,
+	server, err := servers.New(&servers.Config{
+		Port:           cfg.Port,
+		HealthCheck:    sqlDB.PingContext,
+		TrustedProxies: cfg.TrustedProxies,
 	})
+	if err != nil {
+		return err
+	}
 	router := server.Router()
 	jwtSecret := []byte(cfg.JWTSecret)
+
+	lim, closeLimits, err := newLimits(context.Background(), cfg)
+	if err != nil {
+		return err
+	}
+	defer closeLimits()
+	router.Use(ratelimit.ByClientIP(lim.perIP...))
 	// Every authenticated route accepts API keys as well as JWTs, and rejects
 	// JWTs issued before the user's last password change (or for a deleted
 	// user). API keys stay valid across password changes.
 	authOpts := []middleware.Option{
 		middleware.WithAPIKeyVerifier(apiKeyVerifier),
 		middleware.WithSessionValidator(authhttp.NewSessionValidator(usersService)),
+		middleware.WithAfterAuth(ratelimit.ByUser(lim.perUser...)),
 	}
-	authhttp.New(router, usersService, jwtSecret, authOpts...)
+	authhttp.New(router, usersService, jwtSecret, authOpts...).LimitSigninPerEmail(lim.signinPerEmail)
 	accounthttp.New(router, usersService, accountsvc.New(dbase), jwtSecret, authOpts...)
 	apikeyhttp.New(router, apiKeyService, jwtSecret, authOpts...)
 	cv.New(router, usersService, jwtSecret, authOpts...)
 	match.New(router, matchService, jwtSecret, authOpts...)
 	// Cover letters are written from the newest CV and signed with the
-	// profile's name; the per-user rate limit is in memory (per process).
-	coverletterhttp.New(router, coverlettersvc.New(matchService, usersService, deepseekLLM), jwtSecret, authOpts...)
+	// profile's name, with their own per-user rate limit.
+	coverletterhttp.NewWithLimiter(router, coverlettersvc.New(matchService, usersService, deepseekLLM), lim.coverLetters, jwtSecret, authOpts...)
 
 	// Job searches run against every supported portal; users can suggest more.
 	// Pass providers.WithTransport(rt) to Default to instrument scraper requests.
@@ -127,6 +156,10 @@ func run() error {
 	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, authOpts...)
 	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, authOpts...)
 	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, authOpts...)
+
+	if err := lim.checkRoutes(router.Routes()); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

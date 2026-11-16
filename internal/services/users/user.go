@@ -18,6 +18,7 @@ import (
 	"cv-evaluator/internal/models"
 
 	jwt "github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/oklog/ulid/v2"
 	"github.com/pgvector/pgvector-go"
 	"golang.org/x/crypto/bcrypt"
@@ -26,7 +27,34 @@ import (
 
 const (
 	defaultTokenTTL = 24 * time.Hour
+
+	// maxCVChars caps the CV text that is stored, embedded and sent to the
+	// LLM. Real CVs are far shorter; it matches the matcher's cap.
+	maxCVChars = 20000
 )
+
+// dummyPasswordHash is compared against on sign-in for an unknown email.
+var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("not-a-real-password"), bcrypt.DefaultCost)
+
+// cvSections are the sections of the cleanup prompt's JSON that get an
+// embedding. Any other key the LLM returns is ignored, so a CV cannot make
+// us embed an unbounded number of sections.
+var cvSections = map[string]bool{
+	"title": true, "summary": true, "skills": true, "experience": true,
+	"education": true, "certifications": true, "languages": true, "projects": true,
+}
+
+// PDFExtractor returns the plain text of a PDF. extractor.Isolated runs it
+// in a child process; the default runs extractor.Text in process.
+type PDFExtractor interface {
+	Text(ctx context.Context, data []byte) (string, error)
+}
+
+type inProcessPDF struct{}
+
+func (inProcessPDF) Text(_ context.Context, data []byte) (string, error) {
+	return extractor.Text(data)
+}
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
@@ -51,6 +79,40 @@ type Service struct {
 	embeddingLLM EmbeddingLLMService
 	jwtSecret    []byte
 	tokenTTL     time.Duration
+	pdf          PDFExtractor
+}
+
+// WithPDFExtractor makes the service extract CV text with e and returns it.
+func (s *Service) WithPDFExtractor(e PDFExtractor) *Service {
+	s.pdf = e
+	return s
+}
+
+// uniqueViolation is Postgres's SQLSTATE for a unique index violation.
+const uniqueViolation = "23505"
+
+// alreadyUsed turns a unique-index violation on users into
+// ErrEmailAlreadyUsed or ErrPhoneAlreadyUsed: the index catches the
+// concurrent requests that slip past the check before the write.
+func alreadyUsed(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		switch pgErr.ConstraintName {
+		case models.UserEmailUniqueIndex:
+			return ErrEmailAlreadyUsed
+		case models.UserPhoneUniqueIndex:
+			return ErrPhoneAlreadyUsed
+		}
+	}
+	return err
+}
+
+// truncateRunes cuts s to at most n characters.
+func truncateRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 func New(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMService) *Service {
@@ -72,6 +134,7 @@ func NewWithAuth(db *gorm.DB, llm ChatLLMService, embeddingLLM EmbeddingLLMServi
 		embeddingLLM: embeddingLLM,
 		jwtSecret:    []byte(jwtSecret),
 		tokenTTL:     tokenTTL,
+		pdf:          inProcessPDF{},
 	}
 }
 
@@ -113,6 +176,9 @@ func (s *Service) Signin(ctx context.Context, req SigninRequest) (*AuthResponse,
 	var existing models.User
 	err := s.db.WithContext(ctx).Where("email = ?", email).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Spend the same bcrypt time as for a real account, so response
+		// times do not reveal which emails have one.
+		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -160,9 +226,13 @@ func (s *Service) GetProfile(ctx context.Context, userID ulid.ULID) (*Profile, e
 	return &profile, nil
 }
 
+// UploadCV processes an uploaded PDF CV. See ProcessCV.
 func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.FileHeader) error {
 	if cv == nil {
 		return errors.New("cv file is required")
+	}
+	if cv.Size > extractor.MaxFileBytes {
+		return extractor.ErrTooLarge
 	}
 
 	src, err := cv.Open()
@@ -173,24 +243,7 @@ func (s *Service) UploadCV(ctx context.Context, userID ulid.ULID, cv *multipart.
 		_ = src.Close()
 	}()
 
-	tmp, err := os.CreateTemp("", "cv-upload-*")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-	}()
-
-	if _, err := io.Copy(tmp, src); err != nil {
-		return err
-	}
-
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
-	return s.ProcessCV(ctx, userID, tmp)
+	return s.ProcessCV(ctx, userID, src)
 }
 
 func (s *Service) ListUserCVs(ctx context.Context, userID ulid.ULID) ([]models.CV, error) {
@@ -231,20 +284,29 @@ func (s *Service) DeleteCV(ctx context.Context, userID, cvID ulid.ULID) error {
 	return nil
 }
 
-func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) error {
-	cvContent, err := extractor.ExtractFromFile(cv)
+// ProcessCV extracts the text of the PDF CV in r, embeds it, stores it as
+// the user's newest CV and embeds each known section. Errors for which
+// extractor.IsInvalidPDF is true mean the file itself was rejected.
+func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, r io.Reader) error {
+	data, err := io.ReadAll(io.LimitReader(r, extractor.MaxFileBytes+1))
 	if err != nil {
 		return err
 	}
+	cvContent, err := s.pdf.Text(ctx, data)
+	if err != nil {
+		return err
+	}
+	cvContent = truncateRunes(strings.TrimSpace(cvContent), maxCVChars)
+	if cvContent == "" {
+		return fmt.Errorf("%w: it has no text", extractor.ErrUnreadable)
+	}
 
-	slog.DebugContext(ctx, "CV content extracted", "content", cvContent)
+	slog.DebugContext(ctx, "CV content extracted", "length", len(cvContent))
 
 	cvEmbedding, err := s.embeddingLLM.CreateEmbedding(ctx, cvContent)
 	if err != nil {
 		return err
 	}
-
-	slog.DebugContext(ctx, "CV embedding created", "embedding", cvEmbedding)
 
 	cvModel := &models.CV{
 		UserID:           userID,
@@ -274,7 +336,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 	for heading, v := range sectionMap {
 		// Optional sections the CV doesn't have come back empty; an
 		// embedding of "" or [] would only add noise.
-		if isEmptySection(v) {
+		if !cvSections[heading] || isEmptySection(v) {
 			continue
 		}
 		// let's parse the content back to string
@@ -296,7 +358,7 @@ func (s *Service) ProcessCV(ctx context.Context, userID ulid.ULID, cv *os.File) 
 			Section:        string(b),
 			Embedding:      pgvector.NewVector(sectionEmbedding),
 		})
-		slog.DebugContext(ctx, "Section embedding created", "heading", heading, "embedding", sectionEmbedding)
+		slog.DebugContext(ctx, "Section embedding created", "heading", heading)
 	}
 
 	return s.db.WithContext(ctx).Create(&sectionEmbeddings).Error
@@ -343,7 +405,7 @@ func (s *Service) createUser(ctx context.Context, req SignupRequest) (*models.Us
 	}
 
 	if err := s.db.WithContext(ctx).Create(newUser).Error; err != nil {
-		return nil, err
+		return nil, alreadyUsed(err)
 	}
 
 	return newUser, nil

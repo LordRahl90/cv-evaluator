@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -24,6 +26,12 @@ const (
 	OTLPProtocolHTTP = "http/protobuf"
 
 	defaultServiceVersion = "dev"
+
+	// minJWTSecretBytes is the shortest JWT_SECRET accepted outside
+	// development: HS256 is only as strong as its key.
+	minJWTSecretBytes = 32
+	// exampleJWTSecret is the placeholder from .env.example and the README.
+	exampleJWTSecret = "change-me-with-a-long-random-value"
 )
 
 // Database holds the Postgres connection settings.
@@ -33,12 +41,33 @@ type Database struct {
 	Name     string
 	User     string
 	Password string
+	// SSLMode is DB_SSLMODE. It defaults to require, or to disable in
+	// development, where Postgres runs in docker-compose without TLS.
+	SSLMode string
 }
 
-// DSN returns the Postgres connection string for these settings.
+// SSL modes accepted in DB_SSLMODE.
+var sslModes = []string{"disable", "require", "verify-ca", "verify-full"}
+
+// DefaultSSLMode returns the DB_SSLMODE used when none is set.
+func DefaultSSLMode(environment string) string {
+	if strings.EqualFold(environment, EnvDevelopment) {
+		return "disable"
+	}
+	return "require"
+}
+
+// DSN returns the Postgres connection URL for these settings. Every part is
+// escaped, so passwords may contain any character.
 func (d Database) DSN() string {
-	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		d.Host, d.Port, d.User, d.Password, d.Name)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(d.User, d.Password),
+		Host:     net.JoinHostPort(d.Host, d.Port),
+		Path:     "/" + d.Name,
+		RawQuery: url.Values{"sslmode": {d.SSLMode}}.Encode(),
+	}
+	return u.String()
 }
 
 // Telemetry holds the OpenTelemetry export settings. The exporters also read
@@ -72,6 +101,17 @@ type Config struct {
 	CleanupProvider string
 	JWTSecret       string
 	Telemetry       Telemetry
+	// MigrateOnStart is MIGRATE_ON_START (default true): whether the API and
+	// worker migrate the database when they start. Deployments with several
+	// replicas set it to false and run `cv-api migrate` once per release.
+	MigrateOnStart bool
+	// RedisURL is REDIS_URL, e.g. redis://default:pw@valkey:6379/0. When
+	// set, rate limits are shared by every API replica; otherwise each
+	// process keeps its own.
+	RedisURL string
+	// TrustedProxies is TRUSTED_PROXIES: comma-separated proxy IPs or CIDRs
+	// whose X-Forwarded-For is believed. Empty trusts none.
+	TrustedProxies []string
 
 	// jwtSecretOptional is set by WithoutJWTSecret for processes that never
 	// issue or verify tokens.
@@ -97,8 +137,9 @@ func (c *Config) IsDevelopment() bool {
 // Outside development, JWT_SECRET is required; in development a random
 // secret is generated when it is empty. WithoutJWTSecret drops both.
 func Load(opts ...Option) (*Config, error) {
+	environment := strings.ToLower(envOr("ENVIRONMENT", EnvProduction))
 	cfg := &Config{
-		Environment: strings.ToLower(envOr("ENVIRONMENT", EnvProduction)),
+		Environment: environment,
 		Port:        envOr("PORT", defaultPort),
 		Database: Database{
 			Host:     env("DB_HOST"),
@@ -106,11 +147,15 @@ func Load(opts ...Option) (*Config, error) {
 			Name:     env("DB_NAME"),
 			User:     env("DB_USER"),
 			Password: env("DB_PASSWORD"),
+			SSLMode:  strings.ToLower(envOr("DB_SSLMODE", DefaultSSLMode(environment))),
 		},
 		OllamaBaseURL:   strings.TrimRight(env("OLLAMA_BASE_URL"), "/"),
 		DeepSeekAPIKey:  env("DEEPSEEK_API_KEY"),
 		CleanupProvider: strings.ToLower(envOr("CV_CLEANUP_PROVIDER", CleanupProviderDeepSeek)),
 		JWTSecret:       env("JWT_SECRET"),
+		TrustedProxies:  list(env("TRUSTED_PROXIES")),
+		RedisURL:        env("REDIS_URL"),
+		MigrateOnStart:  !strings.EqualFold(env("MIGRATE_ON_START"), "false"),
 		Telemetry: Telemetry{
 			OTLPEndpoint:   env("OTEL_EXPORTER_OTLP_ENDPOINT"),
 			OTLPProtocol:   strings.ToLower(envOr("OTEL_EXPORTER_OTLP_PROTOCOL", OTLPProtocolHTTP)),
@@ -156,8 +201,19 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.JWTSecret == "" && !c.IsDevelopment() && !c.jwtSecretOptional {
-		errs = append(errs, fmt.Errorf("JWT_SECRET is required when ENVIRONMENT is %q", c.Environment))
+	if !c.IsDevelopment() && !c.jwtSecretOptional {
+		switch {
+		case c.JWTSecret == "":
+			errs = append(errs, fmt.Errorf("JWT_SECRET is required when ENVIRONMENT is %q", c.Environment))
+		case c.JWTSecret == exampleJWTSecret:
+			errs = append(errs, errors.New("JWT_SECRET is the example value; generate one with: openssl rand -hex 32"))
+		case len(c.JWTSecret) < minJWTSecretBytes:
+			errs = append(errs, fmt.Errorf("JWT_SECRET must be at least %d bytes when ENVIRONMENT is %q", minJWTSecretBytes, c.Environment))
+		}
+	}
+
+	if !slices.Contains(sslModes, c.Database.SSLMode) {
+		errs = append(errs, fmt.Errorf("DB_SSLMODE must be one of %s, got %q", strings.Join(sslModes, ", "), c.Database.SSLMode))
 	}
 
 	switch c.CleanupProvider {
@@ -188,6 +244,17 @@ func (t Telemetry) validate() error {
 
 func env(key string) string {
 	return strings.TrimSpace(os.Getenv(key))
+}
+
+// list splits a comma-separated value, dropping empty items.
+func list(v string) []string {
+	var out []string
+	for item := range strings.SplitSeq(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func envOr(key, fallback string) string {

@@ -3,11 +3,15 @@ package cv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"time"
 
+	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/models"
+	"cv-evaluator/internal/servers/apierror"
 	"cv-evaluator/internal/servers/middleware"
 	"cv-evaluator/internal/services/users"
 
@@ -66,7 +70,12 @@ func (h *Handler) uploadCV(c *gin.Context) {
 
 	fileHeader, err := c.FormFile("cv")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, errorResponse("cv file is required"))
+		if maxBytesErr := new(http.MaxBytesError); errors.As(err, &maxBytesErr) {
+			apierror.Write(c, http.StatusRequestEntityTooLarge, apierror.InvalidRequest(apierror.CodeBodyTooLarge,
+				fmt.Sprintf("The CV must be a PDF of at most %d MB.", extractor.MaxFileBytes>>20), "cv"))
+			return
+		}
+		apierror.BadRequest(c, apierror.CodeParameterMissing, "The cv file is required.", "cv")
 		return
 	}
 
@@ -176,14 +185,39 @@ func getUserID(c *gin.Context) (ulid.ULID, bool) {
 	return ulid.ULID{}, false
 }
 
+// handleServiceError maps well-known service errors to HTTP responses.
+// Anything else is logged and answered with a generic 500, so internal
+// details (database, embedding or parser errors) never reach the client.
 func handleServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, users.ErrCVNotFound):
-		c.JSON(http.StatusNotFound, errorResponse(err.Error()))
+		apierror.NotFound(c, "No CV has that id.", "id")
+	case errors.Is(err, extractor.ErrTooLarge):
+		apierror.Write(c, http.StatusRequestEntityTooLarge, apierror.InvalidRequest(apierror.CodeBodyTooLarge,
+			fmt.Sprintf("The CV must be a PDF of at most %d MB.", extractor.MaxFileBytes>>20), "cv"))
+	case extractor.IsInvalidPDF(err):
+		slog.InfoContext(c.Request.Context(), "cv upload rejected", "error", err)
+		apierror.Write(c, http.StatusUnprocessableEntity, apierror.InvalidRequest(CodeInvalidPDF, invalidPDFMessage(err), "cv"))
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		c.JSON(http.StatusGatewayTimeout, errorResponse(err.Error()))
+		apierror.GatewayTimeout(c)
 	default:
-		c.JSON(http.StatusInternalServerError, errorResponse(err.Error()))
+		slog.ErrorContext(c.Request.Context(), "cv request failed", "error", err)
+		apierror.InternalServerError(c)
+	}
+}
+
+// CodeInvalidPDF is the error code for an upload that is not a usable PDF.
+const CodeInvalidPDF = "invalid_pdf"
+
+// invalidPDFMessage explains a rejected upload without parser details.
+func invalidPDFMessage(err error) string {
+	switch {
+	case errors.Is(err, extractor.ErrNotPDF):
+		return "The CV must be a PDF file."
+	case errors.Is(err, extractor.ErrTooManyPages):
+		return fmt.Sprintf("The CV must have at most %d pages.", extractor.MaxPages)
+	default:
+		return "We could not read text from this PDF. Export it again as a text-based PDF and retry."
 	}
 }
 

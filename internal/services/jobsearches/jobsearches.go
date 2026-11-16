@@ -32,7 +32,14 @@ var (
 	ErrNotFound = errors.New("job search not found")
 	// ErrDisabled is returned by RunNow for a disabled search.
 	ErrDisabled = errors.New("job search is disabled")
+	// ErrTooManySearches is returned by Create when the user already has
+	// MaxSearchesPerUser searches.
+	ErrTooManySearches = errors.New("too many job searches")
 )
+
+// MaxSearchesPerUser caps a user's saved searches. Every search is scraped
+// on a schedule and each new job it finds costs an LLM evaluation.
+const MaxSearchesPerUser = 10
 
 // ValidationError describes an invalid or missing parameter.
 type ValidationError struct {
@@ -102,6 +109,14 @@ func (s *Service) Create(ctx context.Context, userID ulid.ULID, p CreateParams) 
 	if rec.Enabled {
 		now := s.now()
 		rec.NextRunAt = &now
+	}
+
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&models.JobSearch{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("count job searches: %w", err)
+	}
+	if count >= MaxSearchesPerUser {
+		return nil, ErrTooManySearches
 	}
 
 	if err := s.db.WithContext(ctx).Create(rec).Error; err != nil {

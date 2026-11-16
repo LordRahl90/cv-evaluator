@@ -87,6 +87,8 @@ type Jobindex struct {
 	transport http.RoundTripper
 	// searchBase is where built search URLs point; tests override it.
 	searchBase string
+	// allowedHosts lets tests fetch details from a local server.
+	allowedHosts []string
 }
 
 // NewJobindex returns the Jobindex provider.
@@ -111,5 +113,5 @@ func (p *Jobindex) Search(ctx context.Context, c Criteria) ([]entities.JobPost, 
 }
 
 func (p *Jobindex) Details(ctx context.Context, job *entities.JobPost) (*entities.JobDetails, error) {
-	return (&jobindex.Service{Transport: p.transport}).GetJobDetails(ctx, job)
+	return (&jobindex.Service{Transport: p.transport, AllowedHosts: p.allowedHosts}).GetJobDetails(ctx, job)
 }

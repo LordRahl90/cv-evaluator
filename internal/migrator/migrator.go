@@ -37,12 +37,26 @@ func Migrate(db *gorm.DB) error {
 		}
 	}
 
+	for _, stmt := range uniqueIndexes {
+		if err := db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("create unique index: %w", err)
+		}
+	}
+
 	if err := backfillCurrentEvaluations(db); err != nil {
 		return err
 	}
 
 	slog.Info("migrated database")
 	return nil
+}
+
+// uniqueIndexes stop two accounts sharing an email (in any case) or a
+// phone number. The services check first for a friendly error; these make
+// concurrent sign-ups and email changes safe too.
+var uniqueIndexes = []string{
+	`CREATE UNIQUE INDEX IF NOT EXISTS ` + models.UserEmailUniqueIndex + ` ON users (lower(email)) WHERE deleted_at IS NULL`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ` + models.UserPhoneUniqueIndex + ` ON users (phone) WHERE phone <> '' AND deleted_at IS NULL`,
 }
 
 // backfillCurrentEvaluationsSQL points each evaluated search result that has

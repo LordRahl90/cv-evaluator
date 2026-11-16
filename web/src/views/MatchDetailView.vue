@@ -30,6 +30,7 @@ import {
   formatDateTime,
   isEvaluating,
   providerLabel,
+  safePostingUrl,
   scoreTone,
 } from '../utils/matches'
 
@@ -142,6 +143,8 @@ const evalBadge = computed(() =>
   detail.value ? evaluationLabel(detail.value.evaluation_status, score.value !== null) : null,
 )
 
+const postingUrl = computed(() => safePostingUrl(detail.value?.job.details_url))
+
 const meta = computed(() => {
   const d = detail.value
   if (!d) return ''
@@ -246,8 +249,8 @@ const visibleDescription = computed(() =>
           </div>
           <div class="match-hero-actions">
             <a
-              v-if="detail.job.details_url"
-              :href="detail.job.details_url"
+              v-if="postingUrl"
+              :href="postingUrl"
               class="btn btn-secondary"
               target="_blank"
               rel="noopener noreferrer"

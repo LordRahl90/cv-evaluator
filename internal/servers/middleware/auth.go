@@ -72,8 +72,20 @@ func (f SessionValidatorFunc) ValidateSession(ctx context.Context, userID ulid.U
 type Option func(*authConfig)
 
 type authConfig struct {
-	apiKeys  APIKeyVerifier
-	sessions SessionValidator
+	apiKeys   APIKeyVerifier
+	sessions  SessionValidator
+	afterAuth []gin.HandlerFunc
+}
+
+// WithAfterAuth runs h after a request is authenticated, before the route's
+// handler, with the user ID already set. h may abort the request (for
+// example when a rate limit is hit) and must not call c.Next.
+func WithAfterAuth(h gin.HandlerFunc) Option {
+	return func(cfg *authConfig) {
+		if h != nil {
+			cfg.afterAuth = append(cfg.afterAuth, h)
+		}
+	}
 }
 
 // WithAPIKeyVerifier enables API key authentication. Bearer credentials that
@@ -122,7 +134,9 @@ func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 		}
 
 		if strings.HasPrefix(credential, APIKeyPrefix) {
-			authenticateAPIKey(c, cfg.apiKeys, credential)
+			if authenticateAPIKey(c, cfg.apiKeys, credential) {
+				cfg.next(c)
+			}
 			return
 		}
 
@@ -137,6 +151,35 @@ func Authenticate(jwtSecret []byte, opts ...Option) gin.HandlerFunc {
 
 		c.Set(UserIDKey, userID)
 		c.Set(AuthMethodKey, AuthMethodJWT)
+		cfg.next(c)
+	}
+}
+
+// next runs the after-auth hooks and then the rest of the chain, unless a
+// hook aborted the request.
+func (cfg *authConfig) next(c *gin.Context) {
+	for _, h := range cfg.afterAuth {
+		h(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+	c.Next()
+}
+
+// SessionOnly rejects requests authenticated with an API key. Put it after
+// Authenticate on routes that control the account itself (API keys, email),
+// so a leaked key cannot mint more keys or lock the owner out.
+func SessionOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString(AuthMethodKey) != AuthMethodJWT {
+			apierror.Abort(c, http.StatusForbidden, apierror.Error{
+				Type:    apierror.TypeAuthentication,
+				Code:    apierror.CodeSessionRequired,
+				Message: "This endpoint needs a signed-in session; API keys are not accepted.",
+			})
+			return
+		}
 		c.Next()
 	}
 }
@@ -157,32 +200,34 @@ func validateSession(c *gin.Context, v SessionValidator, userID ulid.ULID, issue
 	return false
 }
 
-func authenticateAPIKey(c *gin.Context, verifier APIKeyVerifier, rawKey string) {
+// authenticateAPIKey verifies rawKey and stores its user. When the key is
+// rejected it aborts the request and reports false.
+func authenticateAPIKey(c *gin.Context, verifier APIKeyVerifier, rawKey string) bool {
 	const invalidKeyMsg = "The API key provided is invalid or has been revoked."
 
 	if verifier == nil {
 		apierror.Unauthorized(c, apierror.CodeInvalidAPIKey, "API keys are not accepted on this endpoint.")
-		return
+		return false
 	}
 
 	userID, err := verifier.VerifyAPIKey(c.Request.Context(), rawKey)
 	if err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			apierror.Unauthorized(c, apierror.CodeInvalidAPIKey, invalidKeyMsg)
-			return
+			return false
 		}
 		slog.ErrorContext(c.Request.Context(), "verify api key", "error", err)
 		apierror.Abort(c, http.StatusInternalServerError, apierror.Internal())
-		return
+		return false
 	}
 	if userID == (ulid.ULID{}) {
 		apierror.Unauthorized(c, apierror.CodeInvalidAPIKey, invalidKeyMsg)
-		return
+		return false
 	}
 
 	c.Set(UserIDKey, userID)
 	c.Set(AuthMethodKey, AuthMethodAPIKey)
-	c.Next()
+	return true
 }
 
 // UserID returns the authenticated user ULID stored by Authenticate.
@@ -229,7 +274,7 @@ func parseUserID(rawToken string, secret []byte) (ulid.ULID, time.Time, error) {
 			return nil, ErrInvalidToken
 		}
 		return secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
 		return ulid.ULID{}, time.Time{}, ErrInvalidToken
 	}

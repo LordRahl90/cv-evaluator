@@ -2,10 +2,12 @@ package cv
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/users"
 
@@ -57,7 +59,34 @@ func TestUploadCV_ServiceError(t *testing.T) {
 	w := doMultipartUpload(newTestRouter(svc), authHeader(t, userID), "bad content")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.NotContains(t, w.Body.String(), "extraction failed", "internal errors must not reach the client")
 	svc.AssertExpectations(t)
+}
+
+func TestUploadCV_RejectedPDF(t *testing.T) {
+	tests := map[string]struct {
+		err    error
+		status int
+	}{
+		"not a pdf":      {err: extractor.ErrNotPDF, status: http.StatusUnprocessableEntity},
+		"too many pages": {err: extractor.ErrTooManyPages, status: http.StatusUnprocessableEntity},
+		"unreadable":     {err: fmt.Errorf("%w: xref offset 123 out of range", extractor.ErrUnreadable), status: http.StatusUnprocessableEntity},
+		"too large":      {err: extractor.ErrTooLarge, status: http.StatusRequestEntityTooLarge},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			svc := new(MockCVService)
+			userID := ulid.Make()
+			svc.On("UploadCV", mock.Anything, userID, mock.AnythingOfType("*multipart.FileHeader")).
+				Return(tt.err).Once()
+
+			w := doMultipartUpload(newTestRouter(svc), authHeader(t, userID), "content")
+
+			assert.Equal(t, tt.status, w.Code)
+			assert.Contains(t, w.Body.String(), `"param":"cv"`)
+			assert.NotContains(t, w.Body.String(), "xref", "parser details must not reach the client")
+		})
+	}
 }
 
 // ── GET /cv/ ─────────────────────────────────────────────────────────────────

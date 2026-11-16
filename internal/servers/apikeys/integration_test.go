@@ -58,8 +58,13 @@ func TestEndToEnd_SignupKeyLifecycle(t *testing.T) {
 	assert.Equal(t, session.User.ID, me.ID)
 	assert.Equal(t, "e2e@example.com", me.Email)
 
+	// The key cannot manage keys, so it cannot mint a replacement for itself.
+	w = doRequest(r, http.MethodPost, "/api-keys", keyHeader, `{"name":"from a key"}`)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, "session_required", decodeError(t, w).Error.Code)
+
 	// List shows the key, with last_used_at populated and no secret.
-	w = doRequest(r, http.MethodGet, "/api-keys", keyHeader, "")
+	w = doRequest(r, http.MethodGet, "/api-keys", jwtHeader, "")
 	require.Equal(t, http.StatusOK, w.Code)
 	var list ListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))

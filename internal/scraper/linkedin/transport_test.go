@@ -28,7 +28,7 @@ func TestTransport_IsUsed(t *testing.T) {
 	defer server.Close()
 
 	rt := &countingTransport{}
-	s := &Service{Transport: rt}
+	s := &Service{Transport: rt, AllowedHosts: []string{server.Listener.Addr().String()}}
 
 	_, err := s.SearchJobs(t.Context(), server.URL+"/result-1.html", 1)
 	require.NoError(t, err)

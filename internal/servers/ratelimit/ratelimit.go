@@ -1,14 +1,15 @@
-// Package ratelimit limits how often a key (such as a user id) may do
-// something within a sliding time window.
+// Package ratelimit limits how often a key (such as a user id or client IP)
+// may do something within a time window.
 //
-// The limiter is in memory: limits apply per API process and reset when it
-// restarts. That is enough while the API runs as a single instance; running
-// several instances multiplies the effective limit by the number of
-// instances, and a shared store (for example Postgres or Redis) would be
-// needed to enforce one limit across them.
+// New keeps a sliding window in memory: limits apply per API process and
+// reset when it restarts. That suits development and tests. NewShared keeps
+// a fixed window in a Store such as Redis or Valkey, so one limit holds
+// across every API replica and survives restarts.
 package ratelimit
 
 import (
+	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -18,12 +19,24 @@ import (
 // number of recently active keys.
 const sweepEvery = 1024
 
-// Limiter allows at most Limit events per key in any Window. It is safe for
+// Store counts events in a shared, expiring counter.
+type Store interface {
+	// Incr adds one to key, creating it with a lifetime of window when it
+	// does not exist, and returns the new count and the time left.
+	Incr(ctx context.Context, key string, window time.Duration) (count int64, ttl time.Duration, err error)
+}
+
+// Limiter allows at most Limit events per key in a Window. It is safe for
 // concurrent use.
 type Limiter struct {
 	limit  int
 	window time.Duration
 	now    func() time.Time
+
+	// store and name are set for a shared limiter; otherwise hits are
+	// kept in memory below.
+	store Store
+	name  string
 
 	mu    sync.Mutex
 	hits  map[string][]time.Time
@@ -40,16 +53,56 @@ func New(limit int, window time.Duration) *Limiter {
 	}
 }
 
+// NewShared returns a limiter that keeps its counts in store, under keys
+// prefixed with name. The window starts at a key's first event. When store
+// fails, events are allowed and the error is logged: an outage of the
+// store must not lock everyone out.
+func NewShared(store Store, name string, limit int, window time.Duration) *Limiter {
+	l := New(limit, window)
+	l.store = store
+	l.name = name
+	return l
+}
+
 // Limit and Window return the configured limit.
 func (l *Limiter) Limit() int { return l.limit }
 
 // Window is the time window the limit applies to.
 func (l *Limiter) Window() time.Duration { return l.window }
 
-// Allow records an event for key and reports whether it is within the
-// limit. When it is not, nothing is recorded and retryAfter says when the
-// next event will be allowed.
+// Allow is AllowContext with a background context.
 func (l *Limiter) Allow(key string) (ok bool, retryAfter time.Duration) {
+	return l.AllowContext(context.Background(), key)
+}
+
+// AllowContext records an event for key and reports whether it is within
+// the limit. When it is not, retryAfter says when the next event will be
+// allowed.
+func (l *Limiter) AllowContext(ctx context.Context, key string) (ok bool, retryAfter time.Duration) {
+	if l.store != nil {
+		return l.allowShared(ctx, key)
+	}
+	return l.allowLocal(key)
+}
+
+func (l *Limiter) allowShared(ctx context.Context, key string) (bool, time.Duration) {
+	count, ttl, err := l.store.Incr(ctx, "ratelimit:"+l.name+":"+key, l.window)
+	if err != nil {
+		slog.ErrorContext(ctx, "rate limit store failed; allowing the request", "limiter", l.name, "error", err)
+		return true, 0
+	}
+	if count > int64(l.limit) {
+		if ttl <= 0 {
+			ttl = l.window
+		}
+		return false, ttl
+	}
+	return true, 0
+}
+
+// allowLocal applies a sliding window in memory. A rejected event is not
+// recorded.
+func (l *Limiter) allowLocal(key string) (ok bool, retryAfter time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 

@@ -68,7 +68,7 @@ type Handler struct {
 // New registers the account routes on router, all authenticated and scoped
 // to the caller:
 //
-//	PATCH  /me           update the profile
+//	PATCH  /me           update the profile (session only, not API keys)
 //	POST   /me/password  change the password (returns a fresh session)
 //	DELETE /me           delete the account and everything it owns
 //	GET    /me/export    download everything stored about the caller
@@ -81,7 +81,8 @@ func New(router gin.IRouter, profiles Profiles, data Data, jwtSecret []byte, opt
 	h := &Handler{profiles: profiles, data: data}
 
 	authn := middleware.Authenticate(jwtSecret, opts...)
-	router.PATCH("/me", authn, h.update)
+	// Changing the email changes who can sign in, so an API key may not.
+	router.PATCH("/me", authn, middleware.SessionOnly(), h.update)
 	router.DELETE("/me", authn, h.delete)
 	router.POST("/me/password", authn, h.changePassword)
 	router.GET("/me/export", authn, h.export)
