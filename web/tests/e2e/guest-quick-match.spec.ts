@@ -75,6 +75,41 @@ test('missing fields and bad files are caught before calling the API', async ({ 
   expect(requests).toHaveLength(0)
 })
 
+// Runs on desktop and at 375px (the "mobile" project).
+test('a short job description is caught before calling the API', async ({ page }) => {
+  const requests = await mockGuestMatch(page)
+  await page.goto('/try')
+  const hint = page.getByTestId('guest-description-hint')
+  await expect(hint).toHaveText('At least 40 words')
+
+  await fileInput(page).setInputFiles(pdfFile())
+  await textarea(page).fill('Senior Go engineer, remote, PostgreSQL and Kubernetes.')
+  await expect(hint).toHaveText('At least 40 words · 7 so far')
+  await submit(page).click()
+
+  const error = page.getByText(
+    'This job description is too short (7 words). Paste the full posting, at least 40 words.',
+  )
+  await expect(error).toBeVisible()
+  await expect(textarea(page)).toHaveAttribute('aria-invalid', 'true')
+  await expect(textarea(page)).toHaveAttribute('aria-describedby', 'guest-description-error')
+  await expectNoHorizontalScroll(page)
+
+  // 40 words but under 200 characters is still too short.
+  await textarea(page).fill(Array.from({ length: 40 }, (_, i) => `w${i}`).join(' '))
+  await expect(error).toBeHidden()
+  await expect(hint).toHaveText('At least 40 words · 40 so far')
+  await submit(page).click()
+  await expect(page.getByText('This job description is too short (40 words).')).toBeVisible()
+  expect(requests).toHaveLength(0)
+
+  // The full posting goes through.
+  await textarea(page).fill(sampleJobDescription)
+  await submit(page).click()
+  await expect(page.getByTestId('qm-result')).toBeVisible()
+  expect(requests).toHaveLength(1)
+})
+
 test('scoring state, then the result with a sign-up call to action', async ({ page }) => {
   const hold = deferred()
   const requests = await mockGuestMatch(page, { gate: hold.promise })
@@ -129,7 +164,7 @@ const limitCases = [
   {
     name: "the visitor's own limit",
     reply: guestMatchErrors.visitorLimit,
-    text: 'You have used your guest matches for now (at most 5 per hour).',
+    text: 'You have used your guest matches for now (at most 2 per hour).',
   },
   {
     name: 'all guests together',

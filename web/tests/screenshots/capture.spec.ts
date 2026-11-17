@@ -518,6 +518,15 @@ for (const [prefix, viewport] of [
     await shoot(page, `${prefix}-quick-match-empty`)
 
     await page.getByTestId('cv-file-input').setInputFiles(pdfFile())
+    await page
+      .getByLabel('Job description')
+      .fill('Senior Go engineer, remote, PostgreSQL and Kubernetes.')
+    await expect(page.getByTestId('guest-description-hint')).toContainText('7 so far')
+    await shoot(page, `${prefix}-quick-match-word-count`)
+    await page.getByRole('button', { name: 'Score this job' }).click()
+    await expect(page.getByText('This job description is too short')).toBeVisible()
+    await shoot(page, `${prefix}-quick-match-too-short`)
+
     await page.getByLabel('Job description').fill(sampleJobDescription)
     await page.getByRole('button', { name: 'Score this job' }).click()
     await expect(page.getByTestId('qm-scoring')).toBeVisible()

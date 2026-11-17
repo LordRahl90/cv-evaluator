@@ -14,6 +14,17 @@ export function titleFrom(text: string): string {
 
 export const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length
 
+/** The shortest job description a guest match accepts, as the API checks it. */
+export const MIN_GUEST_JOB_WORDS = 40
+export const MIN_GUEST_JOB_CHARS = 200
+
+/** Why a trimmed job description is too short for a guest match, or ''. */
+export function guestJobProblem(text: string): string {
+  const words = wordCount(text)
+  if (words >= MIN_GUEST_JOB_WORDS && [...text].length >= MIN_GUEST_JOB_CHARS) return ''
+  return `This job description is too short (${words} ${words === 1 ? 'word' : 'words'}). Paste the full posting, at least ${MIN_GUEST_JOB_WORDS} words.`
+}
+
 /** "Pasted description · 42 words", the meta line under a result's title. */
 export const pastedMeta = (words: number) =>
   `Pasted description · ${words} ${words === 1 ? 'word' : 'words'}`

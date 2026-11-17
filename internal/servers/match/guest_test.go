@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cv-evaluator/internal/integrations/extractor"
+	"cv-evaluator/internal/servers/ratelimit"
 	"cv-evaluator/internal/services/matcher"
 
 	"github.com/gin-gonic/gin"
@@ -112,22 +115,22 @@ func TestGuestMatch_SuccessWithoutAuth(t *testing.T) {
 	}
 	m := &fakeGuestMatcher{resp: want}
 
-	rec := postGuest(t, newGuestRouter(m, inProcessPDF{}), readDummyResume(t), "  We need a Go engineer  ")
+	rec := postGuest(t, newGuestRouter(m, inProcessPDF{}), readDummyResume(t), "  "+validJob+"  ")
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var got matcher.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Equal(t, *want, got)
 	assert.Equal(t, 1, m.calls)
-	assert.Equal(t, "We need a Go engineer", m.job)
+	assert.Equal(t, validJob, m.job)
 	assert.NotEmpty(t, strings.TrimSpace(m.cvText), "the PDF's text is matched")
 }
 
 func TestGuestMatch_MissingFields(t *testing.T) {
 	m := &fakeGuestMatcher{}
-	r := newGuestRouter(m, stubPDF{text: "cv"})
+	r := newGuestRouter(m, stubPDF{text: validCV})
 
-	rec := postGuest(t, r, nil, "a job")
+	rec := postGuest(t, r, nil, validJob)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Equal(t, "cv", decodeError(t, rec).Error.Param)
 
@@ -143,7 +146,7 @@ func TestGuestMatch_MissingFields(t *testing.T) {
 
 func TestGuestMatch_JobDescriptionTooLong(t *testing.T) {
 	m := &fakeGuestMatcher{}
-	rec := postGuest(t, newGuestRouter(m, stubPDF{text: "cv"}), []byte("%PDF-1.4"),
+	rec := postGuest(t, newGuestRouter(m, stubPDF{text: validCV}), []byte("%PDF-1.4"),
 		strings.Repeat("é", matcher.MaxJobDescriptionChars+1))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -155,7 +158,7 @@ func TestGuestMatch_JobDescriptionTooLong(t *testing.T) {
 
 func TestGuestMatch_RejectsANonPDF(t *testing.T) {
 	m := &fakeGuestMatcher{}
-	rec := postGuest(t, newGuestRouter(m, inProcessPDF{}), []byte("just some text"), "a job")
+	rec := postGuest(t, newGuestRouter(m, inProcessPDF{}), []byte("just some text"), validJob)
 
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	body := decodeError(t, rec)
@@ -174,7 +177,7 @@ func TestGuestMatch_RejectedPDFMessagesAreSafe(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			rec := postGuest(t, newGuestRouter(&fakeGuestMatcher{}, stubPDF{err: tc.err}), []byte("%PDF-1.4"), "a job")
+			rec := postGuest(t, newGuestRouter(&fakeGuestMatcher{}, stubPDF{err: tc.err}), []byte("%PDF-1.4"), validJob)
 			assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 			assert.Contains(t, decodeError(t, rec).Error.Message, tc.want)
 			assert.NotContains(t, rec.Body.String(), "xref")
@@ -183,7 +186,7 @@ func TestGuestMatch_RejectedPDFMessagesAreSafe(t *testing.T) {
 }
 
 func TestGuestMatch_PDFWithoutText(t *testing.T) {
-	rec := postGuest(t, newGuestRouter(&fakeGuestMatcher{err: matcher.ErrNoCV}, stubPDF{text: "  "}), []byte("%PDF-1.4"), "a job")
+	rec := postGuest(t, newGuestRouter(&fakeGuestMatcher{err: matcher.ErrNoCV}, stubPDF{text: "  "}), []byte("%PDF-1.4"), validJob)
 
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	assert.Equal(t, "invalid_pdf", decodeError(t, rec).Error.Code)
@@ -193,7 +196,7 @@ func TestGuestMatch_TooLarge(t *testing.T) {
 	m := &fakeGuestMatcher{}
 	big := append([]byte("%PDF-1.4\n"), bytes.Repeat([]byte("a"), extractor.MaxFileBytes)...)
 
-	rec := postGuest(t, newGuestRouter(m, inProcessPDF{}), big, "a job")
+	rec := postGuest(t, newGuestRouter(m, inProcessPDF{}), big, validJob)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 	assert.Equal(t, "cv", decodeError(t, rec).Error.Param)
@@ -209,13 +212,13 @@ func TestGuestMatch_BodyOverTheServerLimit(t *testing.T) {
 	})
 	NewGuest(r, &fakeGuestMatcher{}, inProcessPDF{})
 
-	rec := postGuest(t, r, bytes.Repeat([]byte("a"), 4<<10), "a job")
+	rec := postGuest(t, r, bytes.Repeat([]byte("a"), 4<<10), validJob)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 }
 
 func TestGuestMatch_InternalErrorsAreGeneric(t *testing.T) {
 	m := &fakeGuestMatcher{err: errors.New("deepseek: 401 invalid api key sk-secret")}
-	rec := postGuest(t, newGuestRouter(m, stubPDF{text: "Go engineer"}), []byte("%PDF-1.4"), "a job")
+	rec := postGuest(t, newGuestRouter(m, stubPDF{text: validCV}), []byte("%PDF-1.4"), validJob)
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "sk-secret")
@@ -224,7 +227,7 @@ func TestGuestMatch_InternalErrorsAreGeneric(t *testing.T) {
 
 func TestGuestMatch_Timeout(t *testing.T) {
 	m := &fakeGuestMatcher{err: context.DeadlineExceeded}
-	rec := postGuest(t, newGuestRouter(m, stubPDF{text: "Go engineer"}), []byte("%PDF-1.4"), "a job")
+	rec := postGuest(t, newGuestRouter(m, stubPDF{text: validCV}), []byte("%PDF-1.4"), validJob)
 	assert.Equal(t, http.StatusGatewayTimeout, rec.Code)
 }
 
@@ -233,10 +236,161 @@ func TestGuestMatch_OtherMatchRoutesStillNeedAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	New(r, new(MockJobMatcher), testJWTSecret)
-	NewGuest(r, &fakeGuestMatcher{resp: &matcher.Response{}}, stubPDF{text: "cv"})
+	NewGuest(r, &fakeGuestMatcher{resp: &matcher.Response{}}, stubPDF{text: validCV})
 
 	rec := performRequest(r, http.MethodPost, "/match/job-description", `{"job_description":"x"}`)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 
-	assert.Equal(t, http.StatusOK, postGuest(t, r, []byte("%PDF-1.4"), "a job").Code)
+	assert.Equal(t, http.StatusOK, postGuest(t, r, []byte("%PDF-1.4"), validJob).Code)
+}
+
+// validJob and validCV pass the guest content checks.
+const validJob = `Senior Go Engineer
+
+We are hiring a backend engineer to build and run the services behind our hiring platform.
+You will design APIs in Go, model data in PostgreSQL, and work with product and design on new features.
+
+Requirements: four or more years of Go in production, solid SQL, experience with Kubernetes and observability.
+Nice to have: TypeScript, Vue, and event streaming with Kafka.`
+
+const validCV = `Jane Doe, backend engineer. Five years building Go services at Routewise and Parcelly:
+payment APIs, a PostgreSQL schema serving two million users, and the move from a monolith to services on Kubernetes.
+Led on-call for the platform team, added tracing with OpenTelemetry and cut p99 latency by forty percent.
+Skills: Go, SQL, PostgreSQL, Kubernetes, Terraform, TypeScript. Degree in computer science, University of Lagos.`
+
+// countingStore is a ratelimit.Store that counts every request it sees.
+type countingStore struct{ calls int }
+
+func (s *countingStore) Incr(_ context.Context, _ string, window time.Duration) (int64, time.Duration, error) {
+	s.calls++
+	return int64(s.calls), window, nil
+}
+
+// newCappedGuestRouter is newGuestRouter with a total cap of limit guest
+// matches, counted in the returned store.
+func newCappedGuestRouter(m GuestMatcher, pdf PDFExtractor, limit int) (*gin.Engine, *countingStore) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	store := &countingStore{}
+	NewGuest(r, m, pdf).CapTotal(ratelimit.Rule{
+		Method: http.MethodPost, Path: GuestPath, What: "guest matches", Message: "Guest matching is busy right now.",
+		Limiter: ratelimit.NewShared(store, "guest-matches", limit, 24*time.Hour),
+	})
+	return r, store
+}
+
+// words returns n different words, so only the count is too low.
+func words(n int) string {
+	w := make([]string, n)
+	for i := range w {
+		w[i] = fmt.Sprintf("requirement%d", i)
+	}
+	return strings.Join(w, " ")
+}
+
+// aWords is 50 different words made almost only of the letter a.
+func aWords() string {
+	w := make([]string, 50)
+	for i := range w {
+		w[i] = strings.Repeat("a", 3+i%10) + string(rune('b'+i%20))
+	}
+	return strings.Join(w, " ")
+}
+
+func TestGuestMatch_RejectionsDoNotUseTheTotalCapOrTheModel(t *testing.T) {
+	pdf := []byte("%PDF-1.4")
+	ok := stubPDF{text: validCV}
+	cases := map[string]struct {
+		pdf    PDFExtractor
+		cv     []byte
+		job    string
+		status int
+		param  string
+		msg    string
+	}{
+		"no cv":  {pdf: ok, job: validJob, status: http.StatusBadRequest, param: "cv"},
+		"no job": {pdf: ok, cv: pdf, status: http.StatusBadRequest, param: "job_description"},
+		"job under 40 words": {pdf: ok, cv: pdf, job: words(39),
+			status: http.StatusBadRequest, param: "job_description", msg: "too short"},
+		"job under 200 chars": {pdf: ok, cv: pdf, job: strings.Repeat("go be ", 25),
+			status: http.StatusBadRequest, param: "job_description", msg: "too short"},
+		"job without letters": {pdf: ok, cv: pdf, job: strings.Repeat("12345 !!! 678 ", 20),
+			status: http.StatusBadRequest, param: "job_description", msg: "does not look like a job posting"},
+		"one word repeated": {pdf: ok, cv: pdf, job: strings.Repeat("engineer ", 60),
+			status: http.StatusBadRequest, param: "job_description", msg: "does not look like a job posting"},
+		"a few words repeated": {pdf: ok, cv: pdf, job: strings.Repeat("we need a great go engineer now ", 10),
+			status: http.StatusBadRequest, param: "job_description", msg: "does not look like a job posting"},
+		"one character repeated": {pdf: ok, cv: pdf, job: aWords(),
+			status: http.StatusBadRequest, param: "job_description", msg: "does not look like a job posting"},
+		"job too long": {pdf: ok, cv: pdf, job: strings.Repeat("é", matcher.MaxJobDescriptionChars+1),
+			status: http.StatusBadRequest, param: "job_description"},
+		"not a pdf": {pdf: inProcessPDF{}, cv: []byte("just some text"), job: validJob,
+			status: http.StatusUnprocessableEntity, param: "cv"},
+		"unreadable pdf": {pdf: stubPDF{err: extractor.ErrUnreadable}, cv: pdf, job: validJob,
+			status: http.StatusUnprocessableEntity, param: "cv"},
+		"cv too large": {pdf: inProcessPDF{}, cv: append([]byte("%PDF-1.4\n"), bytes.Repeat([]byte("a"), extractor.MaxFileBytes)...), job: validJob,
+			status: http.StatusRequestEntityTooLarge, param: "cv"},
+		"cv without text": {pdf: stubPDF{text: "  "}, cv: pdf, job: validJob,
+			status: http.StatusUnprocessableEntity, param: "cv", msg: "We couldn't read enough text from this PDF"},
+		"cv under 50 words": {pdf: stubPDF{text: words(49)}, cv: pdf, job: validJob,
+			status: http.StatusUnprocessableEntity, param: "cv", msg: "We couldn't read enough text from this PDF"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := &fakeGuestMatcher{resp: &matcher.Response{}}
+			r, store := newCappedGuestRouter(m, tc.pdf, 300)
+
+			rec := postGuest(t, r, tc.cv, tc.job)
+
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			body := decodeError(t, rec)
+			assert.Equal(t, tc.param, body.Error.Param)
+			assert.Contains(t, body.Error.Message, tc.msg)
+			if tc.status == http.StatusUnprocessableEntity {
+				assert.Equal(t, "invalid_pdf", body.Error.Code)
+			}
+			assert.Zero(t, store.calls, "the total cap is not used")
+			assert.Zero(t, m.calls, "the model is not called")
+		})
+	}
+}
+
+func TestGuestMatch_ValidRequestUsesTheTotalCap(t *testing.T) {
+	m := &fakeGuestMatcher{resp: &matcher.Response{OverallScore: 70}}
+	r, store := newCappedGuestRouter(m, stubPDF{text: validCV}, 1)
+
+	require.Equal(t, http.StatusOK, postGuest(t, r, []byte("%PDF-1.4"), validJob).Code)
+	assert.Equal(t, 1, store.calls)
+	assert.Equal(t, 1, m.calls)
+
+	rec := postGuest(t, r, []byte("%PDF-1.4"), validJob)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.Equal(t, "Guest matching is busy right now.", decodeError(t, rec).Error.Message)
+	assert.NotEmpty(t, rec.Header().Get("Retry-After"))
+	assert.Equal(t, 2, store.calls)
+	assert.Equal(t, 1, m.calls, "over the cap, the model is not called")
+}
+
+func TestJobDescriptionProblem_AcceptsRealPostings(t *testing.T) {
+	postings := map[string]string{
+		"english": validJob,
+		"french": `Ingénieur logiciel Go (H/F), Paris. Nous recherchons une personne pour concevoir nos services
+de paiement, écrire des API robustes et améliorer la fiabilité de notre plateforme. Vous travaillerez avec
+les équipes produit et données. Profil : trois ans d'expérience en Go, bonne maîtrise de PostgreSQL et de
+Kubernetes, goût pour la qualité du code et les revues. Télétravail partiel possible, salaire selon profil.`,
+		"bullets": `Data Analyst – Remote
+- Build dashboards in Looker and keep them accurate
+- Write SQL against BigQuery to answer product questions
+- Work with marketing on campaign measurement
+- Present findings to leadership every month
+Requirements:
+- 2+ years in analytics, ideally in a consumer product company
+- Strong SQL and spreadsheets
+- Python is a plus`,
+	}
+	for name, text := range postings {
+		t.Run(name, func(t *testing.T) {
+			assert.Empty(t, jobDescriptionProblem(text))
+		})
+	}
 }

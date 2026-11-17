@@ -41,15 +41,16 @@ func ByClientIP(rules ...Rule) gin.HandlerFunc {
 	return enforce(rules, func(c *gin.Context) string { return c.ClientIP() })
 }
 
-// globalKey is the one key Global counts under.
+// globalKey is the one key AllowGlobal counts under.
 const globalKey = "all"
 
-// Global enforces rules across all callers together: every request to a
-// rule's route counts against the same limit. It bounds the total cost of a
-// public route whatever the callers' IPs. Register it after ByClientIP, so
-// requests one caller is refused do not use up everyone's allowance.
-func Global(rules ...Rule) gin.HandlerFunc {
-	return enforce(rules, func(*gin.Context) string { return globalKey })
+// AllowGlobal counts one request against r across all callers together and
+// reports whether it is within the limit; when it is not, it writes the 429
+// and aborts. It bounds the total cost of a public route whatever the
+// callers' IPs. Handlers call it themselves, right before the request costs
+// money, so malformed requests never use up everyone's allowance.
+func (r Rule) AllowGlobal(c *gin.Context) bool {
+	return r.allow(c, globalKey)
 }
 
 func enforce(rules []Rule, keyOf func(*gin.Context) string) gin.HandlerFunc {
@@ -67,17 +68,27 @@ func enforce(rules []Rule, keyOf func(*gin.Context) string) gin.HandlerFunc {
 			return
 		}
 		for _, r := range matching {
-			if ok, retryAfter := r.Limiter.AllowContext(c.Request.Context(), key); !ok {
-				if r.Message != "" {
-					apierror.TooManyRequests(c, r.Message, retryAfter)
-					c.Abort()
-					return
-				}
-				Reject(c, r.Limiter, r.What, retryAfter)
+			if !r.allow(c, key) {
 				return
 			}
 		}
 	}
+}
+
+// allow counts one event for key. Over the limit it aborts with a 429 that
+// carries r.Message, or the standard message when that is empty.
+func (r Rule) allow(c *gin.Context, key string) bool {
+	ok, retryAfter := r.Limiter.AllowContext(c.Request.Context(), key)
+	if ok {
+		return true
+	}
+	if r.Message != "" {
+		apierror.TooManyRequests(c, r.Message, retryAfter)
+		c.Abort()
+		return false
+	}
+	Reject(c, r.Limiter, r.What, retryAfter)
+	return false
 }
 
 // Reject aborts the request with a 429 that says how long to wait.
