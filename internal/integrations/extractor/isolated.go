@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -18,9 +20,14 @@ const (
 	// extraction child (see RunChildIfRequested).
 	ChildArg = "extract-pdf"
 
-	// childMemoryBytes caps the child's memory: a soft Go heap limit
-	// everywhere, plus a hard address-space limit on Linux.
+	// childMemoryBytes is the child's soft Go heap limit. The hard limit is
+	// the container's memory limit: the child is the largest process in it,
+	// so it is the one the kernel kills. An address-space limit (RLIMIT_AS)
+	// is not used: the Go runtime reserves far more virtual memory than it
+	// touches, and failed intermittently under one even for tiny files.
 	childMemoryBytes = 512 << 20
+	// childProcs caps the child's OS threads running Go code.
+	childProcs = 2
 
 	defaultTimeout     = 20 * time.Second
 	defaultConcurrency = 2
@@ -101,7 +108,10 @@ func (x *Isolated) Text(ctx context.Context, data []byte) (string, error) {
 		case exitUnreadable:
 			return "", fmt.Errorf("%w: %s", ErrUnreadable, strings.TrimSpace(stderr.String()))
 		}
-		// Killed (for example out of memory) or crashed.
+		// Killed (for example out of memory) or crashed. The child's stderr
+		// says why; it goes to the server log, never to the client.
+		slog.WarnContext(ctx, "pdf extraction child failed", "exit_code", exitErr.ExitCode(),
+			"stderr", firstLines(stderr.String(), 5))
 		return "", fmt.Errorf("%w: extraction failed: %v", ErrUnreadable, err)
 	}
 	if err != nil {
@@ -122,10 +132,7 @@ func RunChildIfRequested() {
 
 func runChild(stdin io.Reader, stdout, stderr io.Writer) int {
 	debug.SetMemoryLimit(childMemoryBytes)
-	if err := limitAddressSpace(childMemoryBytes * 2); err != nil {
-		_, _ = fmt.Fprintln(stderr, "limit memory:", err)
-		return 1
-	}
+	runtime.GOMAXPROCS(childProcs)
 
 	data, err := io.ReadAll(io.LimitReader(stdin, MaxFileBytes+1))
 	if err != nil {
@@ -150,6 +157,15 @@ func runChild(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// firstLines returns at most n lines of s.
+func firstLines(s string, n int) string {
+	lines := strings.SplitN(strings.TrimSpace(s), "\n", n+1)
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // limitedWriter keeps the first n bytes written and drops the rest, so a
