@@ -6,6 +6,7 @@ import {
   apiError,
   coverLetterErrors,
   deferred,
+  guestMatchErrors,
   mockAccount,
   mockApi,
   mockApiKeys,
@@ -498,6 +499,47 @@ test('mobile cvs and quick match', async ({ page }) => {
   await expect(page.getByTestId('qm-result')).toBeVisible()
   await shoot(page, 'mobile-quick-match-result')
 })
+
+for (const [prefix, viewport] of [
+  ['guest', desktop],
+  ['mobile-guest', phone],
+] as const) {
+  test(`${prefix} quick match: form, scoring, result and errors`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    let reply: { status: number; body: unknown } = { status: 200, body: sampleMatch }
+    const hold = deferred()
+    let gate: Promise<void> | undefined = hold.promise
+    await page.route('**/api/match/guest', async (route) => {
+      if (gate) await gate
+      await route.fulfill({ status: reply.status, json: reply.body })
+    })
+    await page.goto('/try')
+    await expect(page.getByLabel('Job description')).toBeVisible()
+    await shoot(page, `${prefix}-quick-match-empty`)
+
+    await page.getByTestId('cv-file-input').setInputFiles(pdfFile())
+    await page.getByLabel('Job description').fill(sampleJobDescription)
+    await page.getByRole('button', { name: 'Score this job' }).click()
+    await expect(page.getByTestId('qm-scoring')).toBeVisible()
+    await shoot(page, `${prefix}-quick-match-scoring`)
+    hold.release()
+    gate = undefined
+    await expect(page.getByTestId('qm-result')).toBeVisible()
+    await shoot(page, `${prefix}-quick-match-result`)
+
+    reply = guestMatchErrors.busy
+    await page.getByRole('button', { name: 'Score another job' }).click()
+    await page.getByLabel('Job description').fill(sampleJobDescription)
+    await page.getByRole('button', { name: 'Score this job' }).click()
+    await expect(page.getByTestId('guest-error')).toBeVisible()
+    await shoot(page, `${prefix}-quick-match-busy`)
+
+    reply = guestMatchErrors.invalidPDF
+    await page.getByRole('button', { name: 'Score this job' }).click()
+    await expect(page.getByText('We could not read text from this PDF.')).toBeVisible()
+    await shoot(page, `${prefix}-quick-match-invalid-pdf`)
+  })
+}
 
 test('mobile cvs empty', async ({ page }) => {
   await page.setViewportSize(phone)

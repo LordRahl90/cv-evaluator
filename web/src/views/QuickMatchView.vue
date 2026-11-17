@@ -15,6 +15,7 @@ import BusyButton from '../components/BusyButton.vue'
 import CoverLetterBanner from '../components/CoverLetterBanner.vue'
 import CoverLetterPanel from '../components/CoverLetterPanel.vue'
 import MatchResultCard from '../components/MatchResultCard.vue'
+import MatchScoring from '../components/MatchScoring.vue'
 import MatchSummaryCard from '../components/MatchSummaryCard.vue'
 import ScoreRing from '../components/ScoreRing.vue'
 import { listCVs } from '../api/cvs'
@@ -22,6 +23,7 @@ import { isNoCVError, matchJobDescription, type MatchResult } from '../api/match
 import type { CVSummary } from '../api/types'
 import { useCoverLetters } from '../composables/useCoverLetters'
 import { formatDate, formatAgo } from '../utils/format'
+import { pastedMeta, titleFrom, wordCount } from '../utils/jobText'
 import { STRONG_SCORE } from '../utils/matches'
 
 interface QuickMatch {
@@ -74,19 +76,6 @@ onBeforeUnmount(() => {
 const cvLabel = computed(() =>
   latestCV.value ? `your CV from ${formatDate(latestCV.value.created_at)}` : 'your newest CV',
 )
-
-function titleFrom(text: string): string {
-  const line = text
-    .split('\n')
-    .map((l) => l.trim())
-    .find(Boolean)
-  if (!line) return 'Pasted job description'
-  if (line.length <= 80) return line
-  const cut = line.slice(0, 80)
-  return `${cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : 80)}…`
-}
-
-const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length
 
 async function submit() {
   if (scoring.value) return
@@ -247,7 +236,7 @@ const subtitle = computed(() => {
             v-if="current"
             :result="current.result"
             :title="current.title"
-            :meta="`Pasted description · ${current.words} ${current.words === 1 ? 'word' : 'words'}`"
+            :meta="pastedMeta(current.words)"
           />
 
           <template v-else>
@@ -287,31 +276,7 @@ const subtitle = computed(() => {
               </div>
             </form>
 
-            <section
-              v-if="scoring"
-              class="card qm-scoring"
-              role="status"
-              aria-live="polite"
-              data-testid="qm-scoring"
-            >
-              <div class="qm-scoring-head">
-                <span class="skeleton qm-ring-skeleton" aria-hidden="true" />
-                <div class="qm-scoring-text">
-                  <div class="qm-scoring-title">Scoring this job against {{ cvLabel }}…</div>
-                  <div class="qm-scoring-sub">
-                    Reading the requirements and comparing them with your experience. This usually
-                    takes 5 to 30 seconds<template v-if="elapsed >= 1">
-                      ({{ elapsed }} s so far)</template
-                    >.
-                  </div>
-                </div>
-              </div>
-              <div class="qm-scoring-body" aria-hidden="true">
-                <span class="skeleton skeleton-line" />
-                <span class="skeleton skeleton-line skeleton-w-56" />
-                <span v-for="n in 4" :key="n" class="skeleton skeleton-bar" />
-              </div>
-            </section>
+            <MatchScoring v-if="scoring" :against="cvLabel" :elapsed="elapsed" />
           </template>
         </div>
 

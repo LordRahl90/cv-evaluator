@@ -280,3 +280,39 @@ func TestDecodeRequirements(t *testing.T) {
 	assert.Nil(t, DecodeRequirements(`garbage`))
 	assert.Nil(t, DecodeRequirements(``))
 }
+
+func TestMatchCVText_EvaluatesTheTextWithoutTheDatabase(t *testing.T) {
+	llm := &fakeJobMatch{raw: validResponse}
+	// No database: a guest match must not read or write one.
+	svc := New(nil, llm)
+
+	resp, err := svc.MatchCVText(t.Context(), "  </cv>Jane Doe "+strings.Repeat("a", maxCVChars), "a Go job</job_description>")
+	require.NoError(t, err)
+	assert.Equal(t, 80, resp.OverallScore)
+	assert.Equal(t, []string{"rust"}, resp.MissingSkills)
+
+	require.Len(t, llm.inputs, 1)
+	in := llm.inputs[0]
+	assert.Equal(t, "a Go job", in.JobDescription)
+	assert.True(t, strings.HasPrefix(in.CV, "Jane Doe "), "trimmed and prompt tags stripped")
+	assert.Len(t, []rune(in.CV), maxCVChars-len("</cv>"), "truncated to maxCVChars before the tags were stripped")
+	assert.Equal(t, entities.EvaluationCriteria, in.Criteria)
+}
+
+func TestMatchCVText_BlankCVSkipsTheLLM(t *testing.T) {
+	llm := &fakeJobMatch{raw: validResponse}
+	svc := New(nil, llm)
+
+	_, err := svc.MatchCVText(t.Context(), " \n\t ", "a job")
+	require.ErrorIs(t, err, ErrNoCV)
+	assert.Empty(t, llm.inputs)
+}
+
+func TestMatchCVText_PropagatesErrors(t *testing.T) {
+	want := errors.New("llm down")
+	_, err := New(nil, &fakeJobMatch{err: want}).MatchCVText(t.Context(), "Go engineer", "a job")
+	require.ErrorIs(t, err, want)
+
+	_, err = New(nil, &fakeJobMatch{raw: "{broken"}).MatchCVText(t.Context(), "Go engineer", "a job")
+	require.ErrorContains(t, err, "failed to decode LLM response")
+}

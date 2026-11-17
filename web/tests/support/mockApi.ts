@@ -1212,3 +1212,74 @@ export const coverLetterErrors = {
     ),
   },
 } satisfies Record<string, Reply>
+
+// ---------------------------------------------------------------------------
+// Guest quick match (POST /match/guest, no account)
+
+export interface GuestMatchRequest {
+  /** The Authorization header, which a guest request must not send. */
+  authorization: string | null
+  contentType: string
+  /** The raw multipart body, to check the fields it carries. */
+  body: string
+}
+
+export interface GuestMatchOptions {
+  gate?: Promise<void>
+  reply?: Reply
+}
+
+/** Mocks POST /match/guest; returns the requests it saw. */
+export async function mockGuestMatch(page: Page, options: GuestMatchOptions = {}) {
+  const requests: GuestMatchRequest[] = []
+  await page.route('**/api/match/guest', async (route) => {
+    const req = route.request()
+    requests.push({
+      authorization: await req.headerValue('authorization'),
+      contentType: (await req.headerValue('content-type')) ?? '',
+      body: req.postDataBuffer()?.toString('latin1') ?? '',
+    })
+    if (options.gate) await options.gate
+    const reply = options.reply ?? { status: 200, body: sampleMatch }
+    return json(route, reply.status, reply.body)
+  })
+  return requests
+}
+
+/** The API's guest match errors, as the Go handler and rate limits write them. */
+export const guestMatchErrors = {
+  visitorLimit: {
+    status: 429,
+    body: apiError(
+      'rate_limit_error',
+      'rate_limited',
+      'You have used your guest matches for now (at most 5 per hour). Create an account to keep matching.',
+    ),
+  },
+  busy: {
+    status: 429,
+    body: apiError(
+      'rate_limit_error',
+      'rate_limited',
+      'Guest matching is busy right now. Try again later, or create an account to keep matching.',
+    ),
+  },
+  invalidPDF: {
+    status: 422,
+    body: apiError(
+      'invalid_request_error',
+      'invalid_pdf',
+      'We could not read text from this PDF. Export it again as a text-based PDF and retry.',
+      'cv',
+    ),
+  },
+  tooLarge: {
+    status: 413,
+    body: apiError(
+      'invalid_request_error',
+      'body_too_large',
+      'The CV must be a PDF of at most 5 MB.',
+      'cv',
+    ),
+  },
+} satisfies Record<string, Reply>

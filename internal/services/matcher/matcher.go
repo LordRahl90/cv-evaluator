@@ -94,6 +94,20 @@ func (s *Service) MatchByJobDescription(ctx context.Context, userID ulid.ULID, j
 	return resp, err
 }
 
+// MatchCVText evaluates cvText against jobDescription without loading or
+// storing anything: guest matches use it with the text of an uploaded PDF.
+// The CV text is cut to maxCVChars. It returns ErrNoCV when cvText is blank.
+func (s *Service) MatchCVText(ctx context.Context, cvText, jobDescription string) (*Response, error) {
+	cvText = strings.TrimSpace(cvText)
+	if cvText == "" {
+		return nil, ErrNoCV
+	}
+	slog.DebugContext(ctx, "matching CV text with job description", "cv_chars", len([]rune(cvText)), "job_chars", len([]rune(jobDescription)))
+
+	resp, _, err := s.evaluate(ctx, truncateRunes(cvText, maxCVChars), &models.Job{Detail: jobDescription})
+	return resp, err
+}
+
 // LatestCVText returns the full extracted text of the user's newest CV, the
 // CV quick matches evaluate. It returns ErrNoCV when the user has none.
 func (s *Service) LatestCVText(ctx context.Context, userID ulid.ULID) (string, error) {

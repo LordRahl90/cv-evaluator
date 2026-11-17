@@ -197,7 +197,7 @@ func handleServiceError(c *gin.Context, err error) {
 			fmt.Sprintf("The CV must be a PDF of at most %d MB.", extractor.MaxFileBytes>>20), "cv"))
 	case extractor.IsInvalidPDF(err):
 		slog.InfoContext(c.Request.Context(), "cv upload rejected", "error", err)
-		apierror.Write(c, http.StatusUnprocessableEntity, apierror.InvalidRequest(CodeInvalidPDF, invalidPDFMessage(err), "cv"))
+		apierror.Write(c, http.StatusUnprocessableEntity, apierror.InvalidRequest(CodeInvalidPDF, InvalidPDFMessage(err), "cv"))
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		apierror.GatewayTimeout(c)
 	default:
@@ -209,8 +209,8 @@ func handleServiceError(c *gin.Context, err error) {
 // CodeInvalidPDF is the error code for an upload that is not a usable PDF.
 const CodeInvalidPDF = "invalid_pdf"
 
-// invalidPDFMessage explains a rejected upload without parser details.
-func invalidPDFMessage(err error) string {
+// InvalidPDFMessage explains a rejected upload without parser details.
+func InvalidPDFMessage(err error) string {
 	switch {
 	case errors.Is(err, extractor.ErrNotPDF):
 		return "The CV must be a PDF file."
