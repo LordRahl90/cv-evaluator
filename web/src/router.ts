@@ -5,6 +5,7 @@ import SignInView from './views/SignInView.vue'
 import SignUpView from './views/SignUpView.vue'
 import DashboardView from './views/DashboardView.vue'
 import GuestComingSoonView from './views/GuestComingSoonView.vue'
+import GuestQuickMatchView from './views/GuestQuickMatchView.vue'
 import MatchesView from './views/MatchesView.vue'
 import MatchDetailView from './views/MatchDetailView.vue'
 import JobSearchesView from './views/JobSearchesView.vue'
@@ -58,8 +59,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/try',
     name: 'guest-quick-match',
-    component: GuestComingSoonView,
+    component: GuestQuickMatchView,
     meta: { public: true, title: 'Quick match' },
+    // Signed-in users have their CV on file: the full quick match is better.
+    beforeEnter: () => (isSignedIn() ? { name: 'quick-match' } : true),
   },
   {
     path: '/',

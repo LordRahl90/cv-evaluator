@@ -1,0 +1,180 @@
+/*
+ * guest-quick-match.css — Quick match without an account (/try): the top
+ * bar with the brand and the sign-in / create-account links, the chosen-CV
+ * row in the form, the sign-up call to action above a result and the "With
+ * an account" panel beside the form. The form, scoring placeholder and
+ * result reuse quick-match.css and match-result.css.
+ */
+@layer components {
+  .guest {
+    @apply flex flex-col bg-canvas;
+    min-height: 100vh;
+  }
+
+  /* Top bar */
+  .guest-bar {
+    @apply flex items-center justify-between bg-surface;
+    gap: 12px;
+    min-height: 60px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .guest-brand {
+    @apply text-ink;
+    min-width: 0;
+    text-decoration: none;
+  }
+
+  .guest-nav {
+    @apply flex items-center;
+    gap: 8px;
+  }
+
+  /* CV field */
+  .guest-field {
+    @apply flex flex-col;
+    gap: 8px;
+  }
+
+  .guest-file {
+    @apply flex flex-wrap items-center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px dashed var(--color-drop-line);
+    border-radius: 12px;
+    background: var(--color-drop-bg);
+  }
+
+  .guest-file.has-error {
+    border-color: var(--color-danger);
+    border-style: solid;
+  }
+
+  .guest-file-icon {
+    @apply flex items-center justify-center bg-accent-soft text-accent;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 10px;
+  }
+
+  .guest-file-body {
+    @apply flex min-w-0 flex-1 flex-col;
+    flex-basis: 140px;
+  }
+
+  .guest-file-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .guest-file-size,
+  .guest-file-empty {
+    @apply text-muted;
+    font-size: 13px;
+  }
+
+  .guest-file-hint {
+    margin: 0;
+  }
+
+  /* Sign-up call to action above a result */
+  .guest-cta {
+    @apply flex flex-wrap items-center bg-success-soft;
+    gap: 18px;
+    padding: 20px 24px;
+    border: 1px solid var(--color-success-line);
+    border-radius: var(--radius-card);
+  }
+
+  .guest-cta-icon {
+    @apply flex items-center justify-center bg-accent text-white;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 12px;
+  }
+
+  .guest-cta-icon .icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .guest-cta-text {
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+
+  .guest-cta-title {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .guest-cta-sub {
+    @apply text-muted;
+    margin: 2px 0 0;
+  }
+
+  /* "With an account" panel */
+  .guest-pitch {
+    @apply flex flex-col;
+    flex: 1 1 260px;
+    min-width: 0;
+    gap: 14px;
+    padding: 22px;
+  }
+
+  .guest-pitch-list {
+    @apply flex flex-col;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .guest-pitch-list li {
+    @apply flex items-start text-ink-soft;
+    gap: 10px;
+    font-size: 14px;
+  }
+
+  .guest-pitch-list .icon {
+    @apply text-accent;
+    margin-top: 1px;
+  }
+
+  .guest-pitch-note {
+    @apply text-muted;
+    margin: 0;
+    font-size: 13px;
+  }
+
+  @media (max-width: 639px) {
+    /* The panel's link covers sign-up on phones; keep the bar to one button. */
+    .guest-nav-signup {
+      display: none;
+    }
+
+    .guest-cta {
+      padding: 18px;
+    }
+
+    .guest-cta-action {
+      width: 100%;
+    }
+
+    .guest-file .file-picker,
+    .guest-file .file-picker .btn {
+      width: 100%;
+    }
+  }
+
+  @media (min-width: 768px) {
+    .guest-bar {
+      padding: 0 32px;
+    }
+  }
+}

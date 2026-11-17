@@ -139,7 +139,9 @@ func run() error {
 		return err
 	}
 	defer closeLimits()
-	router.Use(ratelimit.ByClientIP(lim.perIP...))
+	// Per IP first, so a caller over their own limit does not use up the
+	// global allowance.
+	router.Use(ratelimit.ByClientIP(lim.perIP...), ratelimit.Global(lim.global...))
 	// Every authenticated route accepts API keys as well as JWTs, and rejects
 	// JWTs issued before the user's last password change (or for a deleted
 	// user). API keys stay valid across password changes.
@@ -153,6 +155,9 @@ func run() error {
 	apikeyhttp.New(router, apiKeyService, jwtSecret, authOpts...)
 	cv.New(router, usersService, jwtSecret, authOpts...)
 	match.New(router, matchService, jwtSecret, authOpts...)
+	// Guest matches need no account: the uploaded CV is scored and dropped,
+	// and the route's limits in limits.go bound what it can cost.
+	match.NewGuest(router, matchService, pdfExtractor)
 	// Cover letters are written from the newest CV and signed with the
 	// profile's name, with their own per-user rate limit.
 	coverletterhttp.NewWithLimiter(router, coverlettersvc.New(matchService, usersService, deepseekLLM), lim.coverLetters, jwtSecret, authOpts...)

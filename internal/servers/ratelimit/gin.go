@@ -13,12 +13,14 @@ import (
 
 // Rule limits one route: Method and Path as registered with gin (for
 // example "POST" and "/job-searches/:id/run"). What names the action in the
-// error message, for example "matches".
+// error message, for example "matches". Message, when set, replaces the
+// whole error message.
 type Rule struct {
 	Method  string
 	Path    string
 	Limiter *Limiter
 	What    string
+	Message string
 }
 
 // ByUser enforces rules per authenticated user. Pass it to
@@ -39,6 +41,17 @@ func ByClientIP(rules ...Rule) gin.HandlerFunc {
 	return enforce(rules, func(c *gin.Context) string { return c.ClientIP() })
 }
 
+// globalKey is the one key Global counts under.
+const globalKey = "all"
+
+// Global enforces rules across all callers together: every request to a
+// rule's route counts against the same limit. It bounds the total cost of a
+// public route whatever the callers' IPs. Register it after ByClientIP, so
+// requests one caller is refused do not use up everyone's allowance.
+func Global(rules ...Rule) gin.HandlerFunc {
+	return enforce(rules, func(*gin.Context) string { return globalKey })
+}
+
 func enforce(rules []Rule, keyOf func(*gin.Context) string) gin.HandlerFunc {
 	byRoute := make(map[string][]Rule, len(rules))
 	for _, r := range rules {
@@ -55,6 +68,11 @@ func enforce(rules []Rule, keyOf func(*gin.Context) string) gin.HandlerFunc {
 		}
 		for _, r := range matching {
 			if ok, retryAfter := r.Limiter.AllowContext(c.Request.Context(), key); !ok {
+				if r.Message != "" {
+					apierror.TooManyRequests(c, r.Message, retryAfter)
+					c.Abort()
+					return
+				}
 				Reject(c, r.Limiter, r.What, retryAfter)
 				return
 			}

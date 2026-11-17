@@ -1304,6 +1304,131 @@ paths:
                   code: timeout
                   message: The request timed out.
 
+  /match/guest:
+    post:
+      operationId: guestMatch
+      tags: [Matching]
+      summary: Score a CV against a job without an account
+      description: |
+        Scores an uploaded PDF CV against a pasted job description and
+        returns the same evaluation as `POST /match/job-description`. No
+        account is needed and nothing is stored: the CV is read, scored and
+        dropped.
+
+        The CV follows the CV upload rules (a PDF of at most 5 MB and 30
+        pages, read in an isolated process); its text is cut at 20,000
+        characters. Each client IP can run 5 guest matches an hour, and all
+        guests together 300 a day; sign up to match more.
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [cv, job_description]
+              properties:
+                cv:
+                  type: string
+                  format: binary
+                  description: The CV, as a PDF.
+                job_description:
+                  type: string
+                  minLength: 1
+                  maxLength: 20000
+                  description: The job posting, as text. Surrounding whitespace is trimmed.
+      responses:
+        '200':
+          description: The evaluation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuickMatchEvaluation'
+              example:
+                overall_score: 74
+                requirements:
+                  - requirement: 3+ years of Go
+                    importance: must
+                    met: 'yes'
+                    evidence: 4 years of Go at Routewise
+                breakdown:
+                  - criterion: skills
+                    score: 80
+                    reason: Go and PostgreSQL match; no Kafka.
+                strengths: [Production Go]
+                missing_skills: [Kafka]
+                summary: A solid match apart from event streaming.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '413':
+          description: The CV is larger than 5 MB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: invalid_request_error
+                  code: body_too_large
+                  message: The CV must be a PDF of at most 5 MB.
+                  param: cv
+        '422':
+          description: |
+            The CV is not a usable PDF (`invalid_pdf`): not a PDF, over 30
+            pages, or without readable text.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: invalid_request_error
+                  code: invalid_pdf
+                  message: The CV must be a PDF file.
+                  param: cv
+        '429':
+          description: |
+            This client IP has used its guest matches for the hour, or all
+            guests together have used the day's allowance. The message says
+            which.
+          headers:
+            Retry-After:
+              description: Seconds until the next guest match is allowed.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                visitor:
+                  summary: This visitor's limit
+                  value:
+                    error:
+                      type: rate_limit_error
+                      code: rate_limited
+                      message: You have used your guest matches for now (at most 5 per hour). Create an account to keep matching.
+                busy:
+                  summary: All guests' limit
+                  value:
+                    error:
+                      type: rate_limit_error
+                      code: rate_limited
+                      message: Guest matching is busy right now. Try again later, or create an account to keep matching.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          description: The language model took too long to answer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  type: api_error
+                  code: timeout
+                  message: The request timed out.
+
 components:
   securitySchemes:
     sessionToken:

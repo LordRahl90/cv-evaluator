@@ -239,7 +239,7 @@ Notes:
 
 The API caps request bodies at 6 MB. CV uploads must be PDFs of at most 5 MB and 30 pages. They are parsed in a child process with a 20-second timeout and a memory cap, and the text kept is cut at 20,000 characters. Job descriptions sent to match are capped at 20,000 characters, and each user can keep at most 10 job searches.
 
-Per-user rate limits apply to routes that cost money or check passwords: 10 CV uploads an hour, 30 matches an hour (by description and by job id together), 30 re-evaluations an hour, 20 new job searches a day, 10 search runs an hour, 10 portal suggestions a day, 5 cover letters a minute, and 5 password checks (`POST /me/password`, `DELETE /me`) per 15 minutes. Sign-in allows 10 attempts per email per 15 minutes and 60 per client IP a minute; sign-up allows 20 per client IP an hour. A limited request gets `429` with a `Retry-After` header. The limits are defined in `cmd/api/limits.go`, and the API refuses to start if one names a route that doesn't exist.
+Per-user rate limits apply to routes that cost money or check passwords: 10 CV uploads an hour, 30 matches an hour (by description and by job id together), 30 re-evaluations an hour, 20 new job searches a day, 10 search runs an hour, 10 portal suggestions a day, 5 cover letters a minute, and 5 password checks (`POST /me/password`, `DELETE /me`) per 15 minutes. Sign-in allows 10 attempts per email per 15 minutes and 60 per client IP a minute; sign-up allows 20 per client IP an hour. Guest matches (`POST /match/guest`, no account) allow 5 per client IP an hour and 300 a day across all guests together; the global cap bounds what anonymous traffic can cost even when client IPs are not known (behind a proxy not listed in `TRUSTED_PROXIES` every visitor shares one IP), and its `429` says guest matching is busy rather than that the visitor did too much. A limited request gets `429` with a `Retry-After` header. The limits are defined in `cmd/api/limits.go`, and the API refuses to start if one names a route that doesn't exist.
 
 API keys can't manage API keys or change the profile (`/api-keys`, `PATCH /me`); those need a signed-in session and answer `403` with code `session_required` otherwise.
 
@@ -345,6 +345,8 @@ Match routes (`internal/servers/match`), authenticated the same way:
 | POST   | `/match/job/:id`          | Match against a stored job                   |
 | POST   | `/match/job-link`         | Not implemented (501)                        |
 | POST   | `/match/cover-letter`     | Write a cover letter, see [Cover letters](#cover-letters) |
+
+`POST /match/guest` is public: it scores a CV without an account. It takes a multipart form with a PDF in `cv` and the job in `job_description`, applies the CV upload rules to the PDF, and answers with the same body as `/match/job-description`. Nothing is stored (no user, no CV, no embeddings), and only the lengths of the CV and job are logged. See [Limits](#limits) for its rate limits.
 
 Accounts and API keys: `POST /auth/signup`, `POST /auth/signin`, `GET /me`, and `POST`/`GET /api-keys`, `DELETE /api-keys/:id`. The full reference, with request and response examples, is in [`api/openapi.yaml`](api/openapi.yaml).
 
@@ -495,6 +497,8 @@ npm run test:e2e     # Playwright, desktop and 375px mobile; the API is mocked
 Job searches (`/searches`, `/searches/new`, `/searches/:id/edit`) list, create, edit, pause, run and delete saved searches, show the portals every search runs on (`GET /providers`) and let users suggest new portals (`/portal-suggestions`). Playwright mocks the API per test with `web/tests/support/mockApi.ts` (`mockApi` for the shell and overview, `mockJobSearchesApi` for job searches, providers and portal suggestions).
 
 Quick match (`/quick-match`) can write a cover letter for the job it just scored (`POST /match/cover-letter`, via `web/src/api/coverLetter.ts`): a banner offers it for scores of 80 or more, a secondary button below that. The letter's subject and text are editable, Copy puts "Subject: …" and the letter on the clipboard (or selects it for Ctrl/Cmd+C when the browser refuses), and Regenerate asks first when the letter was edited. Letters, like quick matches, live only on the page. The three progress steps while it is written are time-based, since the API answers in one call (`mockCoverLetter` mocks it in tests).
+
+Visitors without an account can try a quick match at `/try` (linked from the sign-in page): they pick a PDF CV, paste a job and get the same result card, with a call to sign up. It calls `POST /match/guest` (`matchAsGuest` in `web/src/api/match.ts`, mocked in tests by `mockGuestMatch`) and shows the API's `429`, `422` and `413` messages. Signed-in users visiting `/try` go to `/quick-match`.
 
 Styles live in `web/src/styles` (design tokens in `tokens.css`, one file per component and page), not in `.vue` files. API calls go through `web/src/api`. CI for the web app is `.github/workflows/web.yaml`; it only runs when `web/` changes, and the Go workflows ignore `web/`.
 
