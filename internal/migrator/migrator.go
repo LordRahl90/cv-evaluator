@@ -43,7 +43,16 @@ func Migrate(db *gorm.DB) error {
 		}
 	}
 
+	for _, stmt := range indexes {
+		if err := db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("create index: %w", err)
+		}
+	}
+
 	if err := backfillCurrentEvaluations(db); err != nil {
+		return err
+	}
+	if err := backfillEvaluatedAt(db); err != nil {
 		return err
 	}
 
@@ -57,6 +66,17 @@ func Migrate(db *gorm.DB) error {
 var uniqueIndexes = []string{
 	`CREATE UNIQUE INDEX IF NOT EXISTS ` + models.UserEmailUniqueIndex + ` ON users (lower(email)) WHERE deleted_at IS NULL`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ` + models.UserPhoneUniqueIndex + ` ON users (phone) WHERE phone <> '' AND deleted_at IS NULL`,
+}
+
+// indexes are the ones GORM tags cannot express.
+//
+// idx_search_results_claim serves the worker's claim (see
+// pipeline.claimCandidateSQL): it walks results waiting for evaluation in
+// claim order and stops at the first one it may take.
+var indexes = []string{
+	`CREATE INDEX IF NOT EXISTS idx_search_results_claim ON search_results
+		(forced DESC, similarity DESC NULLS LAST, next_attempt_at ASC NULLS FIRST, created_at ASC, id ASC)
+		WHERE evaluation_status IN ('pending', 'processing')`,
 }
 
 // backfillCurrentEvaluationsSQL points each evaluated search result that has
@@ -82,6 +102,26 @@ func backfillCurrentEvaluations(db *gorm.DB) error {
 	}
 	if res.RowsAffected > 0 {
 		slog.Info("backfilled current evaluations", "search_results", res.RowsAffected)
+	}
+	return nil
+}
+
+// backfillEvaluatedAtSQL sets when each evaluated search result was last
+// sent to the LLM, from its current evaluation, for results evaluated
+// before search_results had the column. The worker's daily cap counts it.
+const backfillEvaluatedAtSQL = `
+UPDATE search_results sr
+SET evaluated_at = e.updated_at
+FROM evaluations e
+WHERE e.id = sr.evaluation_id AND sr.evaluated_at IS NULL`
+
+func backfillEvaluatedAt(db *gorm.DB) error {
+	res := db.Exec(backfillEvaluatedAtSQL)
+	if res.Error != nil {
+		return fmt.Errorf("backfill evaluated_at: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		slog.Info("backfilled evaluated_at", "search_results", res.RowsAffected)
 	}
 	return nil
 }

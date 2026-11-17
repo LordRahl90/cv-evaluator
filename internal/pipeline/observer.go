@@ -11,6 +11,7 @@ const (
 	KindEmbedJob     = "embed_job"     // fetch a job's details if needed and embed it
 	KindEvaluateJob  = "evaluate_job"  // evaluate one search result
 	KindScheduleTick = "schedule_tick" // one scheduler pass over due searches
+	KindRankResults  = "rank_results"  // update the similarity of a batch of waiting results
 )
 
 // RunObserver is told about every background run: each step (kind

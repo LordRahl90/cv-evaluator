@@ -129,7 +129,7 @@ The same target runs the cover letter cases in `internal/services/coverletter/te
 
 ### Embedding similarity
 
-Before each evaluation the worker computes the cosine similarity between the CV's full embedding and the job's embedding in SQL, `1 - (cvs.full_embedding <=> jobs.embedding)` (1 is identical, 0 unrelated), and records it on the search result (`search_results.similarity`, with the CV it was computed against in `similarity_cv_id`) and on the evaluation (`evaluations.similarity`). It is `NULL` when either embedding is missing or a zero vector. Computing it never fails or delays an evaluation: an error is logged and the evaluation goes ahead without it.
+Before each evaluation the worker computes the cosine similarity between the CV's full embedding and the job's embedding in SQL, `1 - (cvs.full_embedding <=> jobs.embedding)` (1 is identical, 0 unrelated), and records it on the search result (`search_results.similarity`, with the CV it was computed against in `similarity_cv_id`) and on the evaluation (`evaluations.similarity`). It is `NULL` when either embedding is missing or a zero vector. Computing it never fails or delays an evaluation: an error is logged and the evaluation goes ahead without it. The worker uses it to rank results and, optionally, to hold dissimilar ones (see [Background worker](#background-worker)).
 
 `make eval-similarity` embeds the CV and job of every prompt evaluation case with the real OpenAI API (needs `OPENAI_API_KEY`) and prints each case's similarity next to its expected score band, highest similarity first, with a rank agreement figure: of the case pairs whose bands do not overlap, the share where the higher band also has the higher similarity (1 is perfect, 0.5 is chance). Like `eval-prompt` it is behind the `eval` build tag.
 
@@ -448,7 +448,7 @@ A result is a job one of the user's searches found, with its current evaluation 
 | GET    | `/results/summary`            | Dashboard counts: new this week, strong matches (80+), by status, by search |
 | GET    | `/results/:id`                | One result with the job description and the full evaluation      |
 | PATCH  | `/results/:id`                | Set the user's triage `status`: `new`, `saved`, `applied`, `dismissed` |
-| POST   | `/results/:id/re-evaluate`    | Queue it for evaluation again, returns 202; 409 if already queued or running |
+| POST   | `/results/:id/re-evaluate`    | Score it now (again, or for the first time), skipping the daily cap and the similarity floor; returns 202; 409 if already requested or running |
 
 The lists take `min_score`, `status` and `evaluation_status` (repeat them or separate values with commas), `since` (RFC 3339), `criterion` with `min_criterion_score` (e.g. `criterion=skills&min_criterion_score=80`), `sort` (`score`, the default: best first and unscored last; or `newest`) and cursor pagination with `limit` (default 20, at most 100) and `starting_after` (the last `id` of the previous page). The response is `{"object":"list","data":[...],"has_more":...,"total_count":...}`. Each listed result has its search, the job (without its description) and, once it has a completed evaluation, `overall_score` and its top three missing skills. A single result adds the description and the evaluation's breakdown (in the criteria order), strengths, missing skills, summary, requirements (`null` for evaluations made before requirements were asked for), CV, model and prompt version.
 
@@ -468,7 +468,7 @@ There is no separate queue table. Progress is tracked on the rows themselves (`i
 |------------------|---------------------|-----------------------------------------------------------------------|
 | `job_searches`   | `next_run_at`       | due → claimed (`next_run_at` pushed out as a lease) → run → next run |
 | `jobs`           | `status`            | `new` → `described` → `embedded` (or `failed`); `processing` while a worker has it |
-| `search_results` | `evaluation_status` | `pending` → `done` (or `failed`); `processing` while a worker has it  |
+| `search_results` | `evaluation_status` | `pending` → `done` (or `failed`, or `held` below the similarity floor); `processing` while a worker has it |
 
 Each step goes **claim → release → work → write**:
 
@@ -480,7 +480,15 @@ If a worker dies, its row stays `processing`. Once it is older than `WORKER_STAL
 
 Searches are claimed with a conditional update of `next_run_at`, so with several worker processes each run happens once. A claimed search runs all portals concurrently. Each portal has its own rate limit and a few retries, and a portal that keeps failing is logged without affecting the others.
 
-Evaluations use the user's most recent CV. Users without a CV are checked again an hour later. Each evaluation records the CV-to-job embedding similarity (see [Embedding similarity](#embedding-similarity)). Re-evaluating a result means setting its `evaluation_status` back to `pending`.
+Evaluations use the user's most recent CV. Users without a CV are checked again an hour later. Each evaluation records the CV-to-job embedding similarity (see [Embedding similarity](#embedding-similarity)). Re-evaluating a result means setting its `evaluation_status` back to `pending`; the re-evaluate endpoint also sets `forced` (see below).
+
+**Ranking, daily cap and similarity floor.** Search results can arrive faster than they are worth paying DeepSeek for, so the worker decides what to evaluate first and how much:
+
+- **Ranking.** A ranking loop keeps `search_results.similarity` current for every `pending` or `held` result whose job is embedded: computed against the user's newest CV, and recomputed when `similarity_cv_id` is not that CV (they uploaded a new one). It updates up to 500 results per statement (one `UPDATE … FROM`), goes straight on while batches are full and otherwise waits 30s. It is its own loop rather than part of the evaluate step so one statement covers a whole batch, it runs while every evaluation worker is busy (a new CV re-orders the queue before the next claims), and the claim stays one indexed lookup. Results evaluated before they are ranked get their similarity in the evaluate step anyway.
+- **Claim order.** Results the user asked to score (`forced`) first, then highest similarity first. Results with no similarity (an embedding is missing, e.g. no OpenAI credit) come after every ranked one but are still evaluated, never dropped. Ties keep the old order: never-tried before retries, oldest first. The partial index `idx_search_results_claim` serves this order.
+- **Daily cap** (`WORKER_EVAL_DAILY_CAP`). A user who already had that many results sent to the LLM in the last 24 hours (`search_results.evaluated_at`, plus results being evaluated right now) gets nothing more claimed. Their results stay `pending` and are picked up as the 24-hour window moves on; other users are not held up. With several workers, each claim re-counts the user's evaluations under a per-user advisory lock before taking the result, so concurrent workers cannot overshoot the cap.
+- **Similarity floor** (`WORKER_SIMILARITY_FLOOR`). When set, a result whose similarity is below it is moved to `held` instead of being sent to DeepSeek (not counted as an attempt). Results with no similarity are never held. A held result goes back to `pending` when the user uploads a new CV (it is ranked again) or when the floor is lowered below it or turned off. Use the query in [Embedding similarity](#embedding-similarity) to choose a value.
+- **The user's own request** (`POST /results/:id/re-evaluate`) sets `forced`: the result is claimed before others and skips both the cap and the floor, including a `held` one or one waiting behind the cap. It still counts toward the cap. `forced` is cleared when the evaluation is done or has failed for good.
 
 Settings (all optional):
 
@@ -494,6 +502,8 @@ Settings (all optional):
 | `SCHEDULER_INTERVAL`        | `1m`    | How often due searches are looked for                      |
 | `WORKER_SHUTDOWN_GRACE`     | `30s`   | Time in-flight steps get on shutdown                       |
 | `WORKER_DB_MAX_OPEN_CONNS`  | `10`    | Database pool size. No connection is held during slow work, so this need not match the concurrency |
+| `WORKER_EVAL_DAILY_CAP`     | `30`    | Results per user sent to the LLM in any 24 hours; `0` turns the cap off |
+| `WORKER_SIMILARITY_FLOOR`   | `0`     | CV-to-job similarity (0 to 1) below which results are `held` instead of evaluated; `0` turns it off |
 
 The worker reads due searches from `job_searches` and fetches from every portal in `internal/providers` (adapter: `internal/pipeline/sources`). It never issues or checks tokens, so it doesn't need `JWT_SECRET`.
 

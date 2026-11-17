@@ -356,9 +356,27 @@ func TestReEvaluate(t *testing.T) {
 	assert.Equal(t, 0, got.Attempts)
 	assert.Nil(t, got.NextAttemptAt)
 	assert.Empty(t, got.LastError)
+	assert.True(t, got.Forced, "a user's request skips the daily cap and the floor")
 
 	_, err = svc.ReEvaluate(ctx, user, done.ID)
 	require.ErrorIs(t, err, ErrEvaluationInProgress, "already due")
+
+	// Waiting for its first evaluation (e.g. behind the daily cap): forced.
+	queued := s.result(js, resultOpts{evalStatus: models.EvaluationPending})
+	_, err = svc.ReEvaluate(ctx, user, queued.ID)
+	require.NoError(t, err)
+	var forced models.SearchResult
+	require.NoError(t, db.Take(&forced, "id = ?", queued.ID).Error)
+	assert.True(t, forced.Forced)
+	assert.Equal(t, models.EvaluationPending, forced.EvaluationStatus)
+
+	held := s.result(js, resultOpts{evalStatus: models.EvaluationHeld})
+	_, err = svc.ReEvaluate(ctx, user, held.ID)
+	require.NoError(t, err)
+	var released models.SearchResult
+	require.NoError(t, db.Take(&released, "id = ?", held.ID).Error)
+	assert.Equal(t, models.EvaluationPending, released.EvaluationStatus, "a held result can be scored on request")
+	assert.True(t, released.Forced)
 
 	processing := s.result(js, resultOpts{evalStatus: models.EvaluationProcessing})
 	_, err = svc.ReEvaluate(ctx, user, processing.ID)

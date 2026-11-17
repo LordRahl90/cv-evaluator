@@ -246,6 +246,7 @@ type fakeEvaluator struct {
 	mu       sync.Mutex
 	calls    int
 	cvs      []ulid.ULID
+	jobs     []ulid.ULID                    // in the order they were evaluated
 	fail     func(call int) (string, error) // non-nil error fails the call
 	resp     *matcher.Response
 	delay    time.Duration
@@ -268,7 +269,7 @@ func defaultResponse() *matcher.Response {
 	}
 }
 
-func (f *fakeEvaluator) MatchJob(ctx context.Context, cvID ulid.ULID, _ *models.Job) (*matcher.Response, string, error) {
+func (f *fakeEvaluator) MatchJob(ctx context.Context, cvID ulid.ULID, job *models.Job) (*matcher.Response, string, error) {
 	n := f.inFlight.Add(1)
 	defer f.inFlight.Add(-1)
 	for {
@@ -282,6 +283,7 @@ func (f *fakeEvaluator) MatchJob(ctx context.Context, cvID ulid.ULID, _ *models.
 	f.calls++
 	call := f.calls
 	f.cvs = append(f.cvs, cvID)
+	f.jobs = append(f.jobs, job.ID)
 	fail, resp := f.fail, f.resp
 	f.mu.Unlock()
 
@@ -299,6 +301,12 @@ func (f *fakeEvaluator) MatchJob(ctx context.Context, cvID ulid.ULID, _ *models.
 		resp = defaultResponse()
 	}
 	return resp, goodRaw, nil
+}
+
+func (f *fakeEvaluator) evaluatedJobs() []ulid.ULID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ulid.ULID(nil), f.jobs...)
 }
 
 func (f *fakeEvaluator) callCount() int {

@@ -44,7 +44,7 @@ func (s *LatestCVSelector) SelectCV(ctx context.Context, userID ulid.ULID) (*mod
 	return &cvs[0], nil
 }
 
-// Claiming is one short statement (its own transaction): pick a ready row
+// Claiming is one short statement or transaction: pick a ready row
 // with FOR UPDATE SKIP LOCKED, mark it processing and count the attempt,
 // and return it. No transaction or connection is held while the slow work
 // (scraping, embedding, the LLM) runs; the outcome is written afterwards.
@@ -89,37 +89,146 @@ func claimJob(db *gorm.DB, now, stale time.Time) (*models.Job, error) {
 	return &jobs[0], nil
 }
 
+// A search result is claimed in one short transaction rather than one
+// statement, because of the daily cap:
+//
+//  1. claimCandidateSQL picks the first ready result in claim order and
+//     locks it (FOR UPDATE SKIP LOCKED). Order: results the user asked to
+//     evaluate (forced) first, then by similarity, highest first, with
+//     unranked results (NULL) after every ranked one, then the old order:
+//     never-tried before retries, oldest first. Users who are at the cap
+//     are left out, so their results never block other users'.
+//  2. Unless the result is forced, its user's evaluations are counted again
+//     under a per-user advisory lock. Two workers may both pick a result of
+//     the same user that is one below the cap; the lock makes them count
+//     one after the other, and since each count is a new statement it sees
+//     the other worker's committed claim. The one that would go over the
+//     cap claims nothing.
+//  3. The result is marked processing and its attempt counted.
+//
+// The cap counts results sent to the LLM in the window (evaluated_at) and
+// results being evaluated now (processing and not stale), so a burst of
+// claims cannot overshoot it before any evaluation is written.
+
+// capWindow is the period the daily cap counts evaluations over.
+const capWindow = 24 * time.Hour
+
+// capLockNamespace is the first key of the per-user advisory lock taken
+// while checking the daily cap, so it cannot collide with other advisory
+// locks.
+const capLockNamespace = 0x63766576 // "cvev"
+
+// capCountSQL counts, per user, the results that use up the cap. The two
+// branches are disjoint so a row is never counted twice, and each is served
+// by an index (evaluated_at; evaluation_status).
+const capCountSQL = `
+SELECT user_id FROM search_results WHERE evaluated_at > @window
+UNION ALL
+SELECT user_id FROM search_results
+WHERE evaluation_status = @processing AND claimed_at >= @stale
+	AND (evaluated_at IS NULL OR evaluated_at <= @window)`
+
+const claimCandidateSQL = `
+SELECT sr.id, sr.user_id, sr.forced FROM search_results sr
+JOIN jobs j ON j.id = sr.job_id AND j.deleted_at IS NULL AND j.status = @embedded
+WHERE ((sr.evaluation_status = @pending AND (sr.next_attempt_at IS NULL OR sr.next_attempt_at <= @now))
+		OR (sr.evaluation_status = @processing AND sr.claimed_at < @stale))
+	AND (sr.forced OR @cap = 0 OR sr.user_id NOT IN (
+		SELECT user_id FROM (` + capCountSQL + `) used GROUP BY user_id HAVING count(*) >= @cap
+	))
+ORDER BY sr.forced DESC, sr.similarity DESC NULLS LAST, sr.next_attempt_at ASC NULLS FIRST, sr.created_at ASC, sr.id ASC
+LIMIT 1
+FOR UPDATE OF sr SKIP LOCKED`
+
+const capUsedSQL = `
+SELECT count(*) FROM (` + capCountSQL + `) used WHERE user_id = @user`
+
 const claimResultSQL = `
 UPDATE search_results SET evaluation_status = @processing, claimed_at = @now, attempts = attempts + 1, updated_at = @now
-WHERE id = (
-	SELECT sr.id FROM search_results sr
-	JOIN jobs j ON j.id = sr.job_id AND j.deleted_at IS NULL AND j.status = @embedded
-	WHERE (sr.evaluation_status = @pending AND (sr.next_attempt_at IS NULL OR sr.next_attempt_at <= @now))
-		OR (sr.evaluation_status = @processing AND sr.claimed_at < @stale)
-	ORDER BY sr.next_attempt_at ASC NULLS FIRST, sr.created_at ASC, sr.id ASC
-	LIMIT 1
-	FOR UPDATE OF sr SKIP LOCKED
-)
+WHERE id = @id
 RETURNING *`
+
+// claimTries bounds how many candidates one claimResult looks at. A
+// candidate is only passed over when a concurrent claim took its user to
+// the cap, and the next candidate query already leaves that user out.
+const claimTries = 3
+
+// claimOptions are the limits a claim applies.
+type claimOptions struct {
+	now, stale time.Time
+	// dailyCap is how many results per user may be sent to the LLM in
+	// capWindow; 0 means no cap.
+	dailyCap int
+}
 
 // claimResult claims one search result whose job is embedded and that
 // waits for evaluation, or nil when none is ready.
-func claimResult(db *gorm.DB, now, stale time.Time) (*models.SearchResult, error) {
-	var results []models.SearchResult
-	err := db.Raw(claimResultSQL, map[string]any{
+func claimResult(db *gorm.DB, opts claimOptions) (*models.SearchResult, error) {
+	for range claimTries {
+		result, retry, err := claimResultOnce(db, opts)
+		if err != nil || !retry {
+			return result, err
+		}
+	}
+	return nil, nil
+}
+
+// claimResultOnce runs one claim transaction. retry reports that the
+// candidate's user reached the cap meanwhile, so another may be ready.
+func claimResultOnce(db *gorm.DB, opts claimOptions) (result *models.SearchResult, retry bool, err error) {
+	args := map[string]any{
 		"processing": models.EvaluationProcessing,
 		"pending":    models.EvaluationPending,
 		"embedded":   models.JobStatusEmbedded,
-		"now":        now,
-		"stale":      stale,
-	}).Scan(&results).Error
+		"now":        opts.now,
+		"stale":      opts.stale,
+		"window":     opts.now.Add(-capWindow),
+		"cap":        opts.dailyCap,
+	}
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var candidates []struct {
+			ID     ulid.ULID
+			UserID ulid.ULID
+			Forced bool
+		}
+		if err := tx.Raw(claimCandidateSQL, args).Scan(&candidates).Error; err != nil {
+			return err
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		c := candidates[0]
+
+		if opts.dailyCap > 0 && !c.Forced {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(?, hashtext(?))",
+				capLockNamespace, c.UserID.String()).Error; err != nil {
+				return err
+			}
+			args["user"] = c.UserID
+			var used int64
+			if err := tx.Raw(capUsedSQL, args).Scan(&used).Error; err != nil {
+				return err
+			}
+			if used >= int64(opts.dailyCap) {
+				retry = true
+				return nil
+			}
+		}
+
+		args["id"] = c.ID
+		var results []models.SearchResult
+		if err := tx.Raw(claimResultSQL, args).Scan(&results).Error; err != nil {
+			return err
+		}
+		if len(results) == 1 {
+			result = &results[0]
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("claim search result: %w", err)
+		return nil, false, fmt.Errorf("claim search result: %w", err)
 	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-	return &results[0], nil
+	return result, retry, nil
 }
 
 // upsertSearchResult records that search found job, once. A result that
