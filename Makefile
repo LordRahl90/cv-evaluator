@@ -34,3 +34,6 @@ eval-prompt:
 
 eval-cover-letter:
 	@go test -tags eval -run TestCoverLetterEval -count=1 -v ./internal/services/coverletter/
+
+eval-similarity:
+	@go test -tags eval -run TestSimilarityEval -count=1 -v ./internal/services/matcher/

@@ -185,7 +185,7 @@ func saveEvaluation(tx *gorm.DB, e *models.Evaluation, breakdown []matcher.Crite
 		Columns: []clause.Column{{Name: "search_result_id"}, {Name: "cv_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"updated_at", "overall_score", "strengths", "missing_skills", "summary",
-			"raw_response", "model", "prompt_version", "status", "error",
+			"raw_response", "model", "prompt_version", "status", "error", "similarity",
 		}),
 	}).Create(e).Error
 	if err != nil {

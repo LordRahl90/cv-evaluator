@@ -18,7 +18,9 @@ import (
 // The per-criterion scores live in EvaluationScore rows. Status is
 // StatusCompleted or StatusFailed; Error holds the failure reason.
 // RawResponse keeps the LLM output verbatim, including output that failed
-// to parse.
+// to parse. Similarity is the CV-to-job embedding similarity when the
+// evaluation was made (see SearchResult.Similarity), nil when it could not
+// be computed.
 type Evaluation struct {
 	ID             ulid.ULID `gorm:"type:bytea;primaryKey"`
 	CreatedAt      time.Time
@@ -34,6 +36,7 @@ type Evaluation struct {
 	PromptVersion  string
 	Status         string `gorm:"not null;index"`
 	Error          string `gorm:"type:text"`
+	Similarity     *float64
 }
 
 // EvaluationScore is one criterion's score (0-100) and the LLM's reason for

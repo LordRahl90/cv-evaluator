@@ -127,6 +127,30 @@ Scores are integers from 0 to 100. A criterion the LLM could not assess is left 
 
 The same target runs the cover letter cases in `internal/services/coverletter/testdata/cover_letter_eval.json` (also alone with `make eval-cover-letter`): a strong fit, a missing must-have and a prompt-injection attempt in the job description. Each letter must pass every server-side check, use at least three facts from the CV and leave out what the injection asks for. `EVAL_SHOW=1` logs the letters.
 
+### Embedding similarity
+
+Before each evaluation the worker computes the cosine similarity between the CV's full embedding and the job's embedding in SQL, `1 - (cvs.full_embedding <=> jobs.embedding)` (1 is identical, 0 unrelated), and records it on the search result (`search_results.similarity`, with the CV it was computed against in `similarity_cv_id`) and on the evaluation (`evaluations.similarity`). It is `NULL` when either embedding is missing or a zero vector. Computing it never fails or delays an evaluation: an error is logged and the evaluation goes ahead without it.
+
+`make eval-similarity` embeds the CV and job of every prompt evaluation case with the real OpenAI API (needs `OPENAI_API_KEY`) and prints each case's similarity next to its expected score band, highest similarity first, with a rank agreement figure: of the case pairs whose bands do not overlap, the share where the higher band also has the higher similarity (1 is perfect, 0.5 is chance). Like `eval-prompt` it is behind the `eval` build tag.
+
+Once real evaluations have similarities, this query shows how the LLM's scores spread over similarity buckets of 0.05, and, for each bucket, how many strong matches (80+) a floor at the bucket above it would have skipped:
+
+```sql
+SELECT floor(similarity * 20) / 20                                AS similarity_from,
+       count(*)                                                   AS evaluations,
+       round(avg(overall_score))                                  AS avg_score,
+       percentile_disc(0.9) WITHIN GROUP (ORDER BY overall_score) AS p90_score,
+       count(*) FILTER (WHERE overall_score >= 80)                AS strong,
+       sum(count(*) FILTER (WHERE overall_score >= 80))
+           OVER (ORDER BY floor(similarity * 20) / 20)            AS strong_at_or_below
+FROM evaluations
+WHERE status = 'completed' AND similarity IS NOT NULL
+GROUP BY 1
+ORDER BY 1;
+```
+
+Pick a floor below which `strong` stays at or near 0, and check `strong_at_or_below` for what it would cost. Embeddings from different models are not comparable, so only compare similarities computed with the same embedding provider.
+
 ## Models used
 
 - **Embeddings**: OpenAI `text-embedding-3-small` by default, requested at 768 dimensions to match the `vector(768)` columns. With `EMBEDDING_PROVIDER=ollama`, Ollama `nomic-embed-text` (also 768 dimensions). Input longer than 20,000 characters is truncated before it is sent to OpenAI (the model takes at most 8192 tokens).
@@ -456,7 +480,7 @@ If a worker dies, its row stays `processing`. Once it is older than `WORKER_STAL
 
 Searches are claimed with a conditional update of `next_run_at`, so with several worker processes each run happens once. A claimed search runs all portals concurrently. Each portal has its own rate limit and a few retries, and a portal that keeps failing is logged without affecting the others.
 
-Evaluations use the user's most recent CV. Users without a CV are checked again an hour later. Re-evaluating a result means setting its `evaluation_status` back to `pending`.
+Evaluations use the user's most recent CV. Users without a CV are checked again an hour later. Each evaluation records the CV-to-job embedding similarity (see [Embedding similarity](#embedding-similarity)). Re-evaluating a result means setting its `evaluation_status` back to `pending`.
 
 Settings (all optional):
 
