@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,9 @@ const (
 	OTLPProtocolHTTP = "http/protobuf"
 
 	defaultServiceVersion = "dev"
+
+	// DefaultEvalDailyCap is WORKER_EVAL_DAILY_CAP when it is not set.
+	DefaultEvalDailyCap = 30
 
 	// minJWTSecretBytes is the shortest JWT_SECRET accepted outside
 	// development: HS256 is only as strong as its key.
@@ -126,6 +130,11 @@ type Config struct {
 	// TrustedProxies is TRUSTED_PROXIES: comma-separated proxy IPs or CIDRs
 	// whose X-Forwarded-For is believed. Empty trusts none.
 	TrustedProxies []string
+	// EvalDailyCap is WORKER_EVAL_DAILY_CAP (default DefaultEvalDailyCap):
+	// how many results per user the worker sends to the LLM in any 24
+	// hours, 0 for no cap. The worker applies it; the API reads it to tell
+	// users why a result is still waiting, so set it the same on both.
+	EvalDailyCap int
 
 	// jwtSecretOptional is set by WithoutJWTSecret for processes that never
 	// issue or verify tokens.
@@ -173,6 +182,7 @@ func Load(opts ...Option) (*Config, error) {
 		RedisURL:          env("REDIS_URL"),
 		WebDir:            env("WEB_DIR"),
 		MigrateOnStart:    !strings.EqualFold(env("MIGRATE_ON_START"), "false"),
+		EvalDailyCap:      nonNegativeInt(envOr("WORKER_EVAL_DAILY_CAP", strconv.Itoa(DefaultEvalDailyCap))),
 		Telemetry: Telemetry{
 			OTLPEndpoint:   env("OTEL_EXPORTER_OTLP_ENDPOINT"),
 			OTLPProtocol:   strings.ToLower(envOr("OTEL_EXPORTER_OTLP_PROTOCOL", OTLPProtocolHTTP)),
@@ -252,6 +262,10 @@ func (c *Config) Validate() error {
 			EmbeddingProviderOpenAI, EmbeddingProviderOllama, c.EmbeddingProvider))
 	}
 
+	if c.EvalDailyCap < 0 {
+		errs = append(errs, fmt.Errorf("WORKER_EVAL_DAILY_CAP must be 0 or a positive integer, got %q", env("WORKER_EVAL_DAILY_CAP")))
+	}
+
 	errs = append(errs, c.Telemetry.validate())
 
 	return errors.Join(errs...)
@@ -289,6 +303,16 @@ func list(v string) []string {
 		}
 	}
 	return out
+}
+
+// nonNegativeInt parses v, returning -1 when it is not a non-negative
+// integer so that Validate reports it.
+func nonNegativeInt(v string) int {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return -1
+	}
+	return n
 }
 
 func envOr(key, fallback string) string {

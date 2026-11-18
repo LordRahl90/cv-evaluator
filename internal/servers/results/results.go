@@ -76,6 +76,9 @@ type ResultResponse struct {
 	Search           SearchRefResponse          `json:"search"`
 	Job              JobResponse                `json:"job"`
 	Evaluation       *EvaluationSummaryResponse `json:"evaluation"`
+	// WaitingReason says why a pending or held result is not scored yet:
+	// queued, daily_cap or low_similarity. null otherwise.
+	WaitingReason *string `json:"waiting_reason"`
 }
 
 // ListResponse is one page of results.
@@ -127,6 +130,7 @@ type DetailResponse struct {
 	Search           SearchRefResponse   `json:"search"`
 	Job              JobResponse         `json:"job"`
 	Evaluation       *EvaluationResponse `json:"evaluation"`
+	WaitingReason    *string             `json:"waiting_reason"`
 }
 
 // SearchCountResponse is one search's share of the caller's results.
@@ -145,6 +149,8 @@ type SummaryResponse struct {
 	Scored              int64                 `json:"scored"`
 	Evaluating          int64                 `json:"evaluating"`
 	FailedEvaluation    int64                 `json:"failed_evaluation"`
+	Waiting             int64                 `json:"waiting"`
+	DailyCapReached     bool                  `json:"daily_cap_reached"`
 	NewThisWeek         int64                 `json:"new_this_week"`
 	NewThisWeekSearches int64                 `json:"new_this_week_searches"`
 	StrongScore         int                   `json:"strong_score"`
@@ -251,6 +257,8 @@ func (h *Handler) summary(c *gin.Context) {
 		Scored:              s.Scored,
 		Evaluating:          s.Evaluating,
 		FailedEvaluation:    s.FailedEvaluation,
+		Waiting:             s.Waiting,
+		DailyCapReached:     s.DailyCapReached,
 		NewThisWeek:         s.NewThisWeek,
 		NewThisWeekSearches: s.NewThisWeekSearches,
 		StrongScore:         resultsvc.StrongScore,
@@ -459,6 +467,7 @@ func toResultResponse(r *resultsvc.Result) ResultResponse {
 		UpdatedAt:        r.UpdatedAt,
 		Search:           toSearchRef(r.Search),
 		Job:              toJobResponse(&r.Job, false),
+		WaitingReason:    nullable(r.WaitingReason),
 	}
 	if e := r.Evaluation; e != nil {
 		resp.Evaluation = &EvaluationSummaryResponse{
@@ -480,6 +489,7 @@ func toDetailResponse(d *resultsvc.Detail) DetailResponse {
 		UpdatedAt:        d.UpdatedAt,
 		Search:           toSearchRef(d.Search),
 		Job:              toJobResponse(&d.Job, true),
+		WaitingReason:    nullable(d.WaitingReason),
 	}
 	if e := d.Evaluation; e != nil {
 		breakdown := make([]CriterionScoreResponse, 0, len(e.Breakdown))
@@ -508,4 +518,12 @@ func toDetailResponse(d *resultsvc.Detail) DetailResponse {
 		}
 	}
 	return resp
+}
+
+// nullable returns nil for an empty string, so it is encoded as null.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

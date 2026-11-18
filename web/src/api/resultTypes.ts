@@ -5,8 +5,19 @@
 /** The user's own triage of a result. Every result starts as new. */
 export type ResultStatus = 'new' | 'saved' | 'applied' | 'dismissed'
 
-/** pending → processing → done, or failed after every retry. */
-export type EvaluationStatus = 'pending' | 'processing' | 'done' | 'failed'
+/**
+ * pending → processing → done, or failed after every retry. held: the job is
+ * too far from the CV to be scored automatically (the worker's similarity
+ * floor); it is scored only when the user asks.
+ */
+export type EvaluationStatus = 'pending' | 'processing' | 'done' | 'failed' | 'held'
+
+/**
+ * Why a pending or held result is not scored yet: queued (in turn, closest
+ * to the CV first), daily_cap (the daily scoring limit is reached) or
+ * low_similarity (held).
+ */
+export type WaitingReason = 'queued' | 'daily_cap' | 'low_similarity'
 
 export type ResultSort = 'score' | 'newest'
 
@@ -48,6 +59,8 @@ export interface SearchResult {
   job: ResultJob
   /** null until the result has a completed evaluation. */
   evaluation: EvaluationSummary | null
+  /** Set while the result is pending or held, null otherwise. */
+  waiting_reason: WaitingReason | null
 }
 
 export interface SearchResultPage {
@@ -106,6 +119,10 @@ export interface ResultsSummary {
   scored: number
   evaluating: number
   failed_evaluation: number
+  /** Not scored and not being scored yet (pending or held). */
+  waiting: number
+  /** The daily scoring limit is reached while results wait. */
+  daily_cap_reached: boolean
   new_this_week: number
   new_this_week_searches: number
   strong_score: number

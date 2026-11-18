@@ -137,6 +137,14 @@ const strongNote = computed(() => {
   return s.strong_matches_new > 0 ? `${s.strong_matches_new} still new` : 'All triaged'
 })
 
+// Jobs found but not scored yet (queued, held back by the daily limit, or
+// skipped as far from the CV).
+const waitingNote = computed(() =>
+  matchSummary.value?.daily_cap_reached
+    ? 'Daily limit reached, more within 24 hours'
+    : 'Closest to your CV first',
+)
+
 const recentSearches = computed(() => searches.value.slice(0, 5))
 
 function searchDetail(s: JobSearch): string {
@@ -281,6 +289,18 @@ function searchDetail(s: JobSearch): string {
             </div>
             <div class="stat-note">
               {{ matches.status.value === 'error' ? "Couldn't load" : strongNote }}
+            </div>
+          </div>
+          <div
+            v-if="matchSummary && matchSummary.waiting > 0"
+            class="card stat"
+            data-testid="stat-waiting"
+          >
+            <div class="stat-label">Waiting to be scored</div>
+            <div class="stat-value">{{ matchSummary.waiting }}</div>
+            <div class="stat-note">
+              {{ waitingNote }} ·
+              <RouterLink to="/matches" class="link-strong">See them</RouterLink>
             </div>
           </div>
         </template>

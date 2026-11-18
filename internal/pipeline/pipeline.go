@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cv-evaluator/internal/config"
 	"cv-evaluator/internal/entities"
 	"cv-evaluator/internal/models"
 	"cv-evaluator/internal/services/matcher"
@@ -38,7 +39,7 @@ const (
 	DefaultNoCVRetry         = time.Hour
 	DefaultShutdownGrace     = 30 * time.Second
 	DefaultStaleTimeout      = 5 * time.Minute
-	DefaultEvalDailyCap      = 30
+	DefaultEvalDailyCap      = config.DefaultEvalDailyCap
 	DefaultRankBatch         = 500
 	DefaultRankInterval      = 30 * time.Second
 	DefaultModel             = "deepseek-chat"

@@ -29,6 +29,7 @@ import {
   sampleSuggestions,
   signedIn,
   unscoredResults,
+  waitingResults,
 } from '../support/mockApi'
 
 const OUT = process.env.SCREENSHOT_DIR ?? 'screenshots'
@@ -227,6 +228,86 @@ test('mobile matches', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByTestId('top-match')).toHaveCount(5)
   await shoot(page, 'mobile-dashboard-with-matches')
+})
+
+// ── Rank and cap: jobs not scored yet ───────────────────────────────────────
+
+const RATE_LIMITED = apiError(
+  'rate_limit_error',
+  'rate_limited',
+  'Too many re-evaluations in a short time (at most 30 per 1h0m0s). Try again in 1800 seconds.',
+)
+const [, CAPPED_ID, HELD_ID] = waitingResults().map((r) => r.id)
+
+test('rank and cap: matches with jobs waiting', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: [...sampleResults(), ...waitingResults()] })
+  await page.goto('/matches')
+  await expect(page.getByTestId('match-row')).toHaveCount(9)
+  await shoot(page, 'rank-cap-matches')
+  const held = page.getByTestId('match-row').filter({ hasText: 'Marketing Coordinator' })
+  await held.getByRole('button', { name: /^Score it/ }).click()
+  await expect(held.getByTestId('match-row-reason')).toContainText('Queued to be scored next')
+  await shoot(page, 'rank-cap-matches-queued')
+})
+
+test('rank and cap: Score it rate limited', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: waitingResults() })
+  await page.route(`**/api/results/${CAPPED_ID}/re-evaluate`, (route) =>
+    route.fulfill({ status: 429, json: RATE_LIMITED }),
+  )
+  await page.goto('/matches')
+  await expect(page.getByTestId('daily-cap')).toBeVisible()
+  const capped = page.getByTestId('match-row').filter({ hasText: 'Platform Engineer' })
+  await capped.getByRole('button', { name: /^Score it/ }).click()
+  await expect(capped.getByRole('alert')).toBeVisible()
+  await shoot(page, 'rank-cap-matches-429')
+})
+
+test('rank and cap: held match', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: waitingResults() })
+  await page.goto(`/matches/${HELD_ID}`)
+  await expect(page.getByTestId('match-waiting-reason')).toBeVisible()
+  await shoot(page, 'rank-cap-detail-held')
+  await page.getByTestId('match-unscored').getByRole('button', { name: 'Score it' }).click()
+  await expect(page.getByTestId('match-waiting-reason')).toContainText('Queued to be scored next')
+  await shoot(page, 'rank-cap-detail-queued')
+})
+
+test('rank and cap: match rate limited', async ({ page }) => {
+  await page.setViewportSize(desktop)
+  await withMatches(page, { results: waitingResults() })
+  await page.route(`**/api/results/${CAPPED_ID}/re-evaluate`, (route) =>
+    route.fulfill({ status: 429, json: RATE_LIMITED }),
+  )
+  await page.goto(`/matches/${CAPPED_ID}`)
+  await page.getByTestId('match-unscored').getByRole('button', { name: 'Score it' }).click()
+  await expect(page.getByRole('alert')).toBeVisible()
+  await shoot(page, 'rank-cap-detail-429')
+})
+
+test('rank and cap: overview with jobs waiting', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 940 })
+  await withMatches(page, { results: [...sampleResults(), ...waitingResults()] })
+  await page.goto('/')
+  await expect(page.getByTestId('stat-waiting')).toBeVisible()
+  await shoot(page, 'rank-cap-dashboard')
+})
+
+test('rank and cap: mobile', async ({ page }) => {
+  await page.setViewportSize(phone)
+  await withMatches(page, { results: [...sampleResults(), ...waitingResults()] })
+  await page.goto('/matches')
+  await expect(page.getByTestId('match-row')).toHaveCount(9)
+  await shoot(page, 'mobile-rank-cap-matches')
+  await page.goto(`/matches/${HELD_ID}`)
+  await expect(page.getByTestId('match-waiting-reason')).toBeVisible()
+  await shoot(page, 'mobile-rank-cap-detail-held')
+  await page.goto('/')
+  await expect(page.getByTestId('stat-waiting')).toBeVisible()
+  await shoot(page, 'mobile-rank-cap-dashboard')
 })
 
 // Job searches

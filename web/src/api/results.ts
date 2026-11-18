@@ -14,6 +14,7 @@ import type {
 export type {
   ResultStatus,
   EvaluationStatus,
+  WaitingReason,
   ResultSort,
   ResultSearchRef,
   ResultJob,
@@ -76,7 +77,12 @@ export function updateResultStatus(
   })
 }
 
-/** Queues the result to be scored again; 409 while it already is. */
+/**
+ * Asks for the result to be scored now (again, or for the first time): it
+ * skips the queue, the daily scoring limit and the similarity floor. 409
+ * while it already is queued that way or being scored; 429 past the hourly
+ * limit on these requests.
+ */
 export function reEvaluateResult(
   id: string,
   options?: RequestOptions,
