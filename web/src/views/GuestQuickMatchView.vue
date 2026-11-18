@@ -4,7 +4,7 @@
 // goes up with the request and is not stored. The API limits guest matches
 // per visitor and across all guests, so its 429 messages are shown as they
 // are, next to an invitation to sign up.
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import AlertMessage from '../components/AlertMessage.vue'
 import AppIcon from '../components/AppIcon'
 import BrandMark from '../components/BrandMark.vue'
@@ -15,7 +15,13 @@ import MatchScoring from '../components/MatchScoring.vue'
 import { ApiError } from '../api/client'
 import { matchAsGuest, type MatchResult } from '../api/match'
 import { cvFileProblem, formatBytes } from '../utils/cvFile'
-import { pastedMeta, titleFrom, wordCount } from '../utils/jobText'
+import {
+  guestJobProblem,
+  MIN_GUEST_JOB_WORDS,
+  pastedMeta,
+  titleFrom,
+  wordCount,
+} from '../utils/jobText'
 
 interface GuestMatch {
   title: string
@@ -32,6 +38,7 @@ const limited = ref(false)
 const scoring = ref(false)
 const elapsed = ref(0)
 const current = ref<GuestMatch | null>(null)
+const descriptionWords = computed(() => wordCount(description.value))
 
 let timer: ReturnType<typeof setInterval> | undefined
 let controller: AbortController | null = null
@@ -79,8 +86,11 @@ async function submit() {
   submitError.value = ''
   limited.value = false
   if (!file.value && !fileError.value) fileError.value = 'Choose your CV as a PDF first.'
-  if (!text) descriptionError.value = 'Paste a job description first.'
-  if (!file.value || !text) return
+  // The API refuses short descriptions too; checking here saves a request
+  // that would count against the visitor's guest matches.
+  const textProblem = text ? guestJobProblem(text) : 'Paste a job description first.'
+  if (textProblem) descriptionError.value = textProblem
+  if (!file.value || textProblem) return
 
   scoring.value = true
   elapsed.value = 0
@@ -221,11 +231,23 @@ function scoreAnother() {
                     placeholder="Paste the full job description here: title, responsibilities, requirements, location…"
                     :readonly="scoring"
                     :aria-invalid="descriptionError ? 'true' : undefined"
-                    :aria-describedby="descriptionError ? 'guest-description-error' : undefined"
+                    :aria-describedby="
+                      descriptionError ? 'guest-description-error' : 'guest-description-hint'
+                    "
                     @input="descriptionError = ''"
                   />
                   <p v-if="descriptionError" id="guest-description-error" class="field-error">
                     {{ descriptionError }}
+                  </p>
+                  <p
+                    v-else
+                    id="guest-description-hint"
+                    class="field-hint guest-description-hint"
+                    data-testid="guest-description-hint"
+                  >
+                    At least {{ MIN_GUEST_JOB_WORDS }} words<template v-if="descriptionWords">
+                      · {{ descriptionWords }} so far</template
+                    >
                   </p>
                 </div>
 

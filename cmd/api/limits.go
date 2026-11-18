@@ -20,9 +20,10 @@ import (
 type limits struct {
 	// perIP applies to the public routes, keyed by client IP.
 	perIP []ratelimit.Rule
-	// global applies to public routes across all callers together, to bound
-	// the total cost of routes anyone may call.
-	global []ratelimit.Rule
+	// guestTotal caps guest matches across all callers together, to bound
+	// what anyone without an account can cost. The handler applies it right
+	// before the paid call, so only requests that passed every check count.
+	guestTotal ratelimit.Rule
 	// perUser applies to authenticated routes, keyed by user.
 	perUser []ratelimit.Rule
 	// signinPerEmail caps sign-in attempts per account.
@@ -69,16 +70,16 @@ func newLimits(ctx context.Context, cfg *config.Config) (*limits, func(), error)
 		perIP: []ratelimit.Rule{
 			{Method: http.MethodPost, Path: "/auth/signin", Limiter: newLimiter("signin-ip", 60, time.Minute), What: "sign-in attempts"},
 			{Method: http.MethodPost, Path: "/auth/signup", Limiter: newLimiter("signup-ip", 20, time.Hour), What: "sign-ups"},
-			{Method: http.MethodPost, Path: "/match/guest", Limiter: newLimiter("guest-matches-ip", 5, time.Hour), What: "guest matches",
-				Message: "You have used your guest matches for now (at most 5 per hour). Create an account to keep matching."},
+			// Counts every attempt, malformed ones included, so one sender
+			// of junk is stopped early.
+			{Method: http.MethodPost, Path: "/match/guest", Limiter: newLimiter("guest-matches-ip", 2, time.Hour), What: "guest matches",
+				Message: "You have used your guest matches for now (at most 2 per hour). Create an account to keep matching."},
 		},
 		// Each guest match is a paid LLM call from someone without an
 		// account. Behind a proxy that hides client IPs the per-IP limit acts
 		// almost globally too; this cap bounds the daily cost either way.
-		global: []ratelimit.Rule{
-			{Method: http.MethodPost, Path: "/match/guest", Limiter: newLimiter("guest-matches", 300, 24*time.Hour), What: "guest matches",
-				Message: "Guest matching is busy right now. Try again later, or create an account to keep matching."},
-		},
+		guestTotal: ratelimit.Rule{Method: http.MethodPost, Path: "/match/guest", Limiter: newLimiter("guest-matches", 300, 24*time.Hour), What: "guest matches",
+			Message: "Guest matching is busy right now. Try again later, or create an account to keep matching."},
 		perUser: []ratelimit.Rule{
 			{Method: http.MethodPost, Path: "/cv/", Limiter: newLimiter("cv-uploads", 10, time.Hour), What: "CV uploads"},
 			{Method: http.MethodPost, Path: "/match/job-description", Limiter: matches, What: "matches"},
@@ -104,7 +105,7 @@ func (l *limits) checkRoutes(routes gin.RoutesInfo) error {
 		registered[r.Method+" "+r.Path] = true
 	}
 	var errs []error
-	for _, r := range slices.Concat(l.perIP, l.global, l.perUser) {
+	for _, r := range slices.Concat(l.perIP, []ratelimit.Rule{l.guestTotal}, l.perUser) {
 		if !registered[r.Method+" "+r.Path] {
 			errs = append(errs, fmt.Errorf("rate limit for %s %s: no such route", r.Method, r.Path))
 		}

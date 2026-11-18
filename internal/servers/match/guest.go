@@ -13,6 +13,7 @@ import (
 	"cv-evaluator/internal/integrations/extractor"
 	"cv-evaluator/internal/servers/apierror"
 	"cv-evaluator/internal/servers/cv"
+	"cv-evaluator/internal/servers/ratelimit"
 	"cv-evaluator/internal/services/matcher"
 
 	"github.com/gin-gonic/gin"
@@ -39,12 +40,22 @@ type PDFExtractor interface {
 type GuestHandler struct {
 	matcher GuestMatcher
 	pdf     PDFExtractor
+	// total caps guest matches across all visitors; see CapTotal.
+	total *ratelimit.Rule
 }
 
 // NewGuest registers POST /match/guest on router, without authentication.
 func NewGuest(router *gin.Engine, m GuestMatcher, pdf PDFExtractor) *GuestHandler {
 	h := &GuestHandler{matcher: m, pdf: pdf}
 	router.POST(GuestPath, h.matchGuest)
+	return h
+}
+
+// CapTotal limits guest matches across all visitors together with rule.
+// Only requests that passed every check and are about to call the model
+// count, so junk cannot use up the allowance of real visitors.
+func (h *GuestHandler) CapTotal(rule ratelimit.Rule) *GuestHandler {
+	h.total = &rule
 	return h
 }
 
@@ -74,6 +85,10 @@ func (h *GuestHandler) matchGuest(c *gin.Context) {
 			fmt.Sprintf("The job_description parameter must be at most %d characters long.", matcher.MaxJobDescriptionChars), "job_description")
 		return
 	}
+	if problem := jobDescriptionProblem(jobDescription); problem != "" {
+		apierror.BadRequest(c, apierror.CodeParameterInvalid, problem, "job_description")
+		return
+	}
 	if fileHeader.Size > extractor.MaxFileBytes {
 		writeCVTooLarge(c)
 		return
@@ -87,6 +102,17 @@ func (h *GuestHandler) matchGuest(c *gin.Context) {
 	cvText, err := h.pdf.Text(ctx, data)
 	if err != nil {
 		handleGuestError(c, err)
+		return
+	}
+	if len(strings.Fields(cvText)) < minGuestCVWords {
+		apierror.Write(c, http.StatusUnprocessableEntity, apierror.InvalidRequest(cv.CodeInvalidPDF,
+			"We couldn't read enough text from this PDF to score it. Export your CV again as a text-based PDF and retry.", "cv"))
+		return
+	}
+
+	// Last, as the request is about to cost money: requests rejected above
+	// do not use up the allowance shared by all visitors.
+	if h.total != nil && !h.total.AllowGlobal(c) {
 		return
 	}
 

@@ -1,7 +1,8 @@
 /*
  * guest-quick-match.css — Quick match without an account (/try): the top
  * bar with the brand and the sign-in / create-account links, the chosen-CV
- * row in the form, the sign-up call to action above a result and the "With
+ * row and the job description's word count in the form, the sign-up call
+ * to action above a result and the "With
  * an account" panel beside the form. The form, scoring placeholder and
  * result reuse quick-match.css and match-result.css.
  */
@@ -79,6 +80,11 @@
 
   .guest-file-hint {
     margin: 0;
+  }
+
+  /* Job description: the minimum and a live word count */
+  .guest-description-hint {
+    font-variant-numeric: tabular-nums;
   }
 
   /* Sign-up call to action above a result */

@@ -1317,8 +1317,14 @@ paths:
 
         The CV follows the CV upload rules (a PDF of at most 5 MB and 30
         pages, read in an isolated process); its text is cut at 20,000
-        characters. Each client IP can run 5 guest matches an hour, and all
-        guests together 300 a day; sign up to match more.
+        characters; it must yield at least 50 words. The job description
+        must have at least 40 words and 200 characters of real text (not
+        one word or character repeated).
+
+        Each client IP can make 2 guest match requests an hour, rejected
+        ones included. All guests together get 300 matches a day; only
+        requests that pass every check count against that. Sign up to
+        match more.
       security: []
       requestBody:
         required: true
@@ -1334,9 +1340,11 @@ paths:
                   description: The CV, as a PDF.
                 job_description:
                   type: string
-                  minLength: 1
+                  minLength: 200
                   maxLength: 20000
-                  description: The job posting, as text. Surrounding whitespace is trimmed.
+                  description: |
+                    The job posting, as text, at least 40 words. Surrounding
+                    whitespace is trimmed.
       responses:
         '200':
           description: The evaluation.
@@ -1375,7 +1383,7 @@ paths:
         '422':
           description: |
             The CV is not a usable PDF (`invalid_pdf`): not a PDF, over 30
-            pages, or without readable text.
+            pages, or with fewer than 50 words of readable text.
           content:
             application/json:
               schema:
@@ -1407,7 +1415,7 @@ paths:
                     error:
                       type: rate_limit_error
                       code: rate_limited
-                      message: You have used your guest matches for now (at most 5 per hour). Create an account to keep matching.
+                      message: You have used your guest matches for now (at most 2 per hour). Create an account to keep matching.
                 busy:
                   summary: All guests' limit
                   value:

@@ -1253,7 +1253,7 @@ export const guestMatchErrors = {
     body: apiError(
       'rate_limit_error',
       'rate_limited',
-      'You have used your guest matches for now (at most 5 per hour). Create an account to keep matching.',
+      'You have used your guest matches for now (at most 2 per hour). Create an account to keep matching.',
     ),
   },
   busy: {
