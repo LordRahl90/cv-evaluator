@@ -42,6 +42,11 @@ const (
 // serve the results API: a user's (or one search's) results by best score
 // with unscored ones last, newest first, and counts by status. The trailing
 // id makes the order total for cursor pagination.
+//
+// Similarity is the cosine similarity (1 - cosine distance) between the
+// embeddings of SimilarityCVID and the job, nil when either embedding is
+// missing or empty. It is recorded for measurement and does not change
+// what is evaluated.
 type SearchResult struct {
 	ID               ulid.ULID `gorm:"type:bytea;primaryKey;index:idx_search_results_user_score,priority:3,sort:desc;index:idx_search_results_search_score,priority:3,sort:desc;index:idx_search_results_user_created,priority:3,sort:desc"`
 	CreatedAt        time.Time `gorm:"index:idx_search_results_user_created,priority:2,sort:desc"`
@@ -57,6 +62,8 @@ type SearchResult struct {
 	LastError        string     `gorm:"type:text"`
 	EvaluationID     *ulid.ULID `gorm:"type:bytea"`
 	OverallScore     *int       `gorm:"index:idx_search_results_user_score,priority:2,sort:desc nulls last;index:idx_search_results_search_score,priority:2,sort:desc nulls last"`
+	Similarity       *float64
+	SimilarityCVID   *ulid.ULID `gorm:"type:bytea"`
 }
 
 // SearchResultStatuses lists every valid SearchResult.Status value.

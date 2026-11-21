@@ -503,6 +503,10 @@ type evaluationOutcome struct {
 	resp     *matcher.Response
 	raw      string
 	matchErr error
+	// similarity is the CV-to-job embedding similarity, nil when it could
+	// not be computed; hasSimilarity says whether it was looked up at all.
+	similarity    *float64
+	hasSimilarity bool
 }
 
 // EvaluateOne claims one search result whose job is embedded and that
@@ -530,6 +534,7 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 			return err
 		}
 		out.cv = cv
+		out.similarity, out.hasSimilarity = p.recordSimilarity(ctx, cv.ID, job.ID)
 		out.resp, out.raw, out.matchErr = p.cfg.Evaluator.MatchJob(ctx, cv.ID, &job)
 		if out.matchErr != nil {
 			return fmt.Errorf("evaluate: %w", out.matchErr)
@@ -572,6 +577,10 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 		if !exists {
 			gone = true
 			return nil
+		}
+		if out.hasSimilarity {
+			updates["similarity"] = out.similarity
+			updates["similarity_cv_id"] = out.cv.ID
 		}
 		if out.cv != nil && (out.resp != nil || out.matchErr != nil) {
 			eval := p.evaluationRow(result, &out)
@@ -617,6 +626,7 @@ func (p *Pipeline) evaluationRow(result *models.SearchResult, out *evaluationOut
 		RawResponse:    out.raw,
 		Model:          p.cfg.Model,
 		PromptVersion:  p.cfg.PromptVersion,
+		Similarity:     out.similarity,
 		Strengths:      models.StringList{},
 		MissingSkills:  models.StringList{},
 	}
