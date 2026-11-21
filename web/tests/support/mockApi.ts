@@ -9,6 +9,7 @@ import type {
   ResultsSummary,
   SearchResult,
   SearchResultDetail,
+  WaitingReason,
 } from '../../src/api/resultTypes'
 
 export const TOKEN_KEY = 'cv-evaluator.token'
@@ -149,6 +150,11 @@ const [goSearch, backendSearch, contractSearch] = [
   { id: '01JA2B3C4D5E6F7G8H9J0KS003', name: 'Go contractor · Berlin' },
 ]
 
+function defaultWaitingReason(status: EvaluationStatus): WaitingReason | null {
+  if (status === 'held') return 'low_similarity'
+  return status === 'pending' ? 'queued' : null
+}
+
 function result(
   n: number,
   search: { id: string; name: string },
@@ -159,14 +165,18 @@ function result(
     evaluation?: EvaluationStatus
     missing?: string[]
     hoursAgo: number
+    /** Defaults to what the API says for the evaluation status. */
+    waiting?: WaitingReason
   },
 ): SearchResult {
   const found = hoursFromNow(-opts.hoursAgo)
+  const evaluationStatus = opts.evaluation ?? (opts.score === null ? 'pending' : 'done')
   return {
     object: 'search_result',
     id: `01JA2B3C4D5E6F7G8H9J0KR${String(n).padStart(3, '0')}`,
     status: opts.status ?? 'new',
-    evaluation_status: opts.evaluation ?? (opts.score === null ? 'pending' : 'done'),
+    evaluation_status: evaluationStatus,
+    waiting_reason: opts.waiting ?? defaultWaitingReason(evaluationStatus),
     created_at: found,
     updated_at: found,
     search,
@@ -282,6 +292,48 @@ export function unscoredResults(): SearchResult[] {
   ]
 }
 
+/**
+ * Jobs found but not scored yet, one per waiting reason: in the queue,
+ * held back by the daily scoring limit, and skipped as far from the CV.
+ */
+export function waitingResults(): SearchResult[] {
+  return [
+    result(
+      21,
+      goSearch,
+      {
+        title: 'Backend Engineer, Go',
+        company: 'Brightwave',
+        location: 'Copenhagen',
+        provider: 'linkedin',
+      },
+      { score: null, hoursAgo: 3 },
+    ),
+    result(
+      22,
+      backendSearch,
+      {
+        title: 'Platform Engineer',
+        company: 'Initech',
+        location: 'Remote (EU)',
+        provider: 'jobindex',
+      },
+      { score: null, waiting: 'daily_cap', hoursAgo: 4 },
+    ),
+    result(
+      23,
+      goSearch,
+      {
+        title: 'Marketing Coordinator',
+        company: 'Lindqvist Retail',
+        location: 'Copenhagen',
+        provider: 'jobindex',
+      },
+      { score: null, evaluation: 'held', hoursAgo: 6 },
+    ),
+  ]
+}
+
 /** The full view of a listed result, with a complete evaluation. */
 export function sampleDetail(r: SearchResult = sampleResults()[0]!): SearchResultDetail {
   return {
@@ -353,6 +405,10 @@ export function summarize(results: SearchResult[]): ResultsSummary {
     evaluating: results.filter((r) => ['pending', 'processing'].includes(r.evaluation_status))
       .length,
     failed_evaluation: results.filter((r) => r.evaluation_status === 'failed').length,
+    waiting: results.filter(
+      (r) => !r.evaluation && ['pending', 'held'].includes(r.evaluation_status),
+    ).length,
+    daily_cap_reached: results.some((r) => r.waiting_reason === 'daily_cap'),
     new_this_week: fresh.length,
     new_this_week_searches: new Set(fresh.map((r) => r.search.id)).size,
     strong_score: 80,
@@ -430,7 +486,12 @@ export async function mockResults(page: Page, options: ResultsMockOptions = {}) 
 
   const detailFor = (r: SearchResult): SearchResultDetail => {
     const base = details[r.id] ?? sampleDetail(r)
-    return { ...base, status: r.status, evaluation_status: r.evaluation_status }
+    return {
+      ...base,
+      status: r.status,
+      evaluation_status: r.evaluation_status,
+      waiting_reason: r.waiting_reason,
+    }
   }
 
   await page.route(
@@ -463,8 +524,12 @@ export async function mockResults(page: Page, options: ResultsMockOptions = {}) 
       if (details[id!]) details[id!] = { ...details[id!]!, status: body.status }
     } else if (req.method() === 'POST' && action) {
       writes.push({ method: 'POST', path: `/results/${id}/re-evaluate`, body: null })
+      // A requested evaluation skips the queue, the daily limit and the floor.
       r.evaluation_status = 'pending'
-      if (details[id!]) details[id!] = { ...details[id!]!, evaluation_status: 'pending' }
+      r.waiting_reason = 'queued'
+      if (details[id!]) {
+        details[id!] = { ...details[id!]!, evaluation_status: 'pending', waiting_reason: 'queued' }
+      }
       return json(route, 202, detailFor(r))
     }
     return json(route, 200, detailFor(r))

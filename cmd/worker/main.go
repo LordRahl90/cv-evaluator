@@ -142,7 +142,7 @@ func run(opts options) error {
 		PollInterval:      settings.pollInterval,
 		SchedulerInterval: settings.schedulerInterval,
 		ShutdownGrace:     settings.shutdownGrace,
-		EvalDailyCap:      settings.evalDailyCap,
+		EvalDailyCap:      evalDailyCap(cfg.EvalDailyCap),
 		SimilarityFloor:   settings.similarityFloor,
 		Observer:          opts.Observer,
 	})
@@ -161,7 +161,7 @@ func run(opts options) error {
 		"stale_timeout", settings.staleTimeout,
 		"scheduler_interval", settings.schedulerInterval,
 		"db_max_open_conns", settings.dbMaxOpenConns,
-		"eval_daily_cap", settings.evalDailyCap,
+		"eval_daily_cap", cfg.EvalDailyCap,
 		"similarity_floor", settings.similarityFloor,
 		"providers", fetcher.Providers())
 
@@ -186,9 +186,7 @@ type settings struct {
 	schedulerInterval time.Duration
 	shutdownGrace     time.Duration
 	dbMaxOpenConns    int
-	// evalDailyCap is passed to pipeline.Config: negative means no cap.
-	evalDailyCap    int
-	similarityFloor float64
+	similarityFloor   float64
 }
 
 // loadSettings reads the worker's tuning knobs from the environment.
@@ -205,11 +203,6 @@ func loadSettings() (settings, error) {
 	s.schedulerInterval = envDuration("SCHEDULER_INTERVAL", pipeline.DefaultSchedulerInterval, &errs)
 	s.shutdownGrace = envDuration("WORKER_SHUTDOWN_GRACE", pipeline.DefaultShutdownGrace, &errs)
 	s.dbMaxOpenConns = envInt("WORKER_DB_MAX_OPEN_CONNS", 10, &errs)
-	// 0 turns the cap off; the pipeline reads 0 as "use the default".
-	s.evalDailyCap = envNonNegativeInt("WORKER_EVAL_DAILY_CAP", pipeline.DefaultEvalDailyCap, &errs)
-	if s.evalDailyCap == 0 {
-		s.evalDailyCap = -1
-	}
 	s.similarityFloor = envFraction("WORKER_SIMILARITY_FLOOR", 0, &errs)
 	return s, errors.Join(errs...)
 }
@@ -240,19 +233,6 @@ func envDuration(key string, fallback time.Duration, errs *[]error) time.Duratio
 	return d
 }
 
-func envNonNegativeInt(key string, fallback int, errs *[]error) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		*errs = append(*errs, fmt.Errorf("%s must be 0 or a positive integer, got %q", key, v))
-		return fallback
-	}
-	return n
-}
-
 // envFraction reads a number from 0 to 1.
 func envFraction(key string, fallback float64, errs *[]error) float64 {
 	v := os.Getenv(key)
@@ -265,4 +245,13 @@ func envFraction(key string, fallback float64, errs *[]error) float64 {
 		return fallback
 	}
 	return f
+}
+
+// evalDailyCap maps WORKER_EVAL_DAILY_CAP to pipeline.Config.EvalDailyCap,
+// where 0 means the default and a negative value no cap.
+func evalDailyCap(n int) int {
+	if n == 0 {
+		return -1
+	}
+	return n
 }

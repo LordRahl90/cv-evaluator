@@ -1,6 +1,7 @@
 // Display helpers for matches (search results): score tiers, status and
 // evaluation labels, portal and criterion names.
-import type { EvaluationStatus, ResultStatus } from '../api/results'
+import { ApiError } from '../api/client'
+import type { EvaluationStatus, ResultStatus, WaitingReason } from '../api/results'
 
 /** Overall score from which a match counts as strong (the API's strong_score). */
 export const STRONG_SCORE = 80
@@ -45,13 +46,44 @@ export function isEvaluating(status: EvaluationStatus): boolean {
 }
 
 /**
+ * Whether a result has never been scored and is waiting for its turn (or
+ * held), so the user can ask for it to be scored now. A result being
+ * re-scored keeps its old score and is not "waiting".
+ */
+export function isWaiting(status: EvaluationStatus, hasScore: boolean): boolean {
+  return !hasScore && (status === 'pending' || status === 'held')
+}
+
+/** One line on why a result is not scored yet. */
+export const WAITING_REASONS: Record<WaitingReason, string> = {
+  queued: 'In the queue. Jobs closest to your CV are scored first.',
+  daily_cap: "Today's scoring limit is reached. It will be scored within 24 hours.",
+  low_similarity: "Skipped: this job looks far from your CV, so it isn't scored automatically.",
+}
+
+export function waitingText(reason: WaitingReason | null | undefined): string {
+  return WAITING_REASONS[reason ?? 'queued']
+}
+
+/**
  * What a row says about its evaluation, or null when there is nothing to
  * say (scored and settled). A result being re-scored keeps its old score.
  */
 export function evaluationLabel(status: EvaluationStatus, hasScore: boolean): string | null {
+  if (isWaiting(status, hasScore)) return 'Not scored yet'
   if (isEvaluating(status)) return hasScore ? 'Re-scoring…' : 'Scoring…'
   if (status === 'failed') return "Couldn't score"
   return null
+}
+
+/**
+ * The message for a failed "Score it" request: the API's own words for a
+ * 429 (it says how long to wait), otherwise a sentence around them.
+ */
+export function scoreItError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  if (err instanceof ApiError && err.status === 429) return message
+  return `We couldn't queue this job for scoring. ${message}`
 }
 
 const dateTimeFormat = new Intl.DateTimeFormat('en-GB', {

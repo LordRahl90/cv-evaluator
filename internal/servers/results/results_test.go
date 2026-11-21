@@ -127,7 +127,8 @@ const sampleDetailJSON = `{
 		"breakdown":[{"criterion":"skills","score":94,"reason":"Go"}],
 		"strengths":["Go"],"missing_skills":["Terraform"],"summary":"A close fit.",
 		"requirements":[{"requirement":"Go","importance":"must","met":"yes","evidence":"6 years"}],
-		"model":"deepseek-chat","prompt_version":"v4","evaluated_at":"2026-03-01T09:00:00Z"}
+		"model":"deepseek-chat","prompt_version":"v4","evaluated_at":"2026-03-01T09:00:00Z"},
+	"waiting_reason":null
 }`
 
 // ── GET /results ────────────────────────────────────────────────────────────
@@ -148,6 +149,7 @@ func TestList_Success(t *testing.T) {
 			{
 				ID: evalID, Status: "saved", EvaluationStatus: "pending", CreatedAt: found, UpdatedAt: found,
 				Search: resultsvc.SearchRef{ID: searchID, Name: "Senior Go"}, Job: job,
+				WaitingReason: resultsvc.WaitingDailyCap,
 			},
 		},
 	}
@@ -162,10 +164,12 @@ func TestList_Success(t *testing.T) {
 		{"object":"search_result","id":"01JRESXT000000000000000000","status":"new","evaluation_status":"done",
 		 "created_at":"2026-03-01T08:00:00Z","updated_at":"2026-03-01T08:00:00Z",
 		 "search":{"id":"01JSEARCH0000000000000000A","name":"Senior Go"},"job":`+jobJSON+`,
-		 "evaluation":{"overall_score":91,"top_missing_skills":["Terraform"],"evaluated_at":"2026-03-01T09:00:00Z"}},
+		 "evaluation":{"overall_score":91,"top_missing_skills":["Terraform"],"evaluated_at":"2026-03-01T09:00:00Z"},
+		 "waiting_reason":null},
 		{"object":"search_result","id":"01JEVA1000000000000000000A","status":"saved","evaluation_status":"pending",
 		 "created_at":"2026-03-01T08:00:00Z","updated_at":"2026-03-01T08:00:00Z",
-		 "search":{"id":"01JSEARCH0000000000000000A","name":"Senior Go"},"job":`+jobJSON+`,"evaluation":null}
+		 "search":{"id":"01JSEARCH0000000000000000A","name":"Senior Go"},"job":`+jobJSON+`,"evaluation":null,
+		 "waiting_reason":"daily_cap"}
 	]}`, w.Body.String())
 	svc.AssertExpectations(t)
 }
@@ -321,6 +325,8 @@ func TestGet_NoEvaluationOrRequirements(t *testing.T) {
 	svc.On("Get", mock.Anything, mock.Anything, resultID).Return(d, nil).Once()
 	pending := sampleDetail()
 	pending.Evaluation = nil
+	pending.EvaluationStatus = "held"
+	pending.WaitingReason = resultsvc.WaitingLowSimilarity
 	other := ulid.Make()
 	pending.ID = other
 	svc.On("Get", mock.Anything, mock.Anything, other).Return(pending, nil).Once()
@@ -338,6 +344,7 @@ func TestGet_NoEvaluationOrRequirements(t *testing.T) {
 	w = doRequest(router, http.MethodGet, "/results/"+other.String(), bearerJWT(t, ulid.Make()), "")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"evaluation":null`)
+	assert.Contains(t, w.Body.String(), `"waiting_reason":"low_similarity"`)
 }
 
 func TestGet_NotFoundAndBadID(t *testing.T) {
@@ -420,7 +427,7 @@ func TestSummary(t *testing.T) {
 	svc := new(MockService)
 	userID := ulid.Make()
 	svc.On("Summary", mock.Anything, userID).Return(&resultsvc.Summary{
-		WeekStart: found, Total: 84, Scored: 80, Evaluating: 3, FailedEvaluation: 1,
+		WeekStart: found, Total: 84, Scored: 80, Evaluating: 3, FailedEvaluation: 1, Waiting: 12, DailyCapReached: true,
 		NewThisWeek: 14, NewThisWeekSearches: 3, StrongMatches: 5, StrongMatchesNew: 2,
 		ByStatus: map[string]int64{"new": 70, "saved": 8, "applied": 4, "dismissed": 2},
 		BySearch: []resultsvc.SearchCount{{ID: searchID, Name: "Senior Go", Total: 23, NewThisWeek: 9}},
@@ -431,7 +438,7 @@ func TestSummary(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.JSONEq(t, `{
 		"object":"results_summary","week_start":"2026-03-01T08:00:00Z","total":84,"scored":80,"evaluating":3,
-		"failed_evaluation":1,"new_this_week":14,"new_this_week_searches":3,"strong_score":80,
+		"failed_evaluation":1,"waiting":12,"daily_cap_reached":true,"new_this_week":14,"new_this_week_searches":3,"strong_score":80,
 		"strong_matches":5,"strong_matches_new":2,
 		"by_status":{"new":70,"saved":8,"applied":4,"dismissed":2},
 		"by_search":[{"id":"01JSEARCH0000000000000000A","name":"Senior Go","total":23,"new_this_week":9}]

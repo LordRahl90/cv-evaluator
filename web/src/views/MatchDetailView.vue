@@ -29,9 +29,11 @@ import {
   evaluationLabel,
   formatDateTime,
   isEvaluating,
+  isWaiting,
   providerLabel,
   safePostingUrl,
   scoreTone,
+  waitingText,
 } from '../utils/matches'
 
 const DESCRIPTION_PREVIEW = 480
@@ -50,6 +52,7 @@ async function load() {
   error.value = null
   notFound.value = false
   actionError.value = ''
+  requested.value = false
   try {
     const [result, cvList] = await Promise.all([
       getResult(id.value),
@@ -102,6 +105,10 @@ async function setStatus(target: ResultStatus, key: Exclude<Busy, null>) {
   }
 }
 
+// Set once the user has asked for this job to be scored ("Score it"), so
+// the page stops offering it.
+const requested = ref(false)
+
 async function reEvaluate() {
   const current = detail.value
   if (!current || busy.value) return
@@ -112,14 +119,20 @@ async function reEvaluate() {
   announcement.value = ''
   try {
     detail.value = await reEvaluateResult(current.id)
+    requested.value = true
     announcement.value = 'Queued for scoring. The new score appears here when it is ready.'
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
       // Already queued or being scored: the optimistic state is right.
+      requested.value = true
       announcement.value = 'This job is already being scored.'
     } else {
       current.evaluation_status = previous
-      actionError.value = `We couldn't re-evaluate this match. ${(err as Error).message}`
+      // A 429 says how long to wait; show it as the API words it.
+      actionError.value =
+        err instanceof ApiError && err.status === 429
+          ? err.message
+          : `We couldn't re-evaluate this match. ${(err as Error).message}`
     }
   } finally {
     busy.value = null
@@ -136,8 +149,18 @@ const toggleDismissed = () =>
 
 const evaluation = computed(() => detail.value?.evaluation ?? null)
 const score = computed(() => evaluation.value?.overall_score ?? null)
-const evaluating = computed(() =>
-  detail.value ? isEvaluating(detail.value.evaluation_status) : false,
+// Waiting: never scored, and pending or held (it can be scored on request).
+// Evaluating: being scored now, or re-scored while the old score stays.
+const waiting = computed(() =>
+  detail.value ? isWaiting(detail.value.evaluation_status, score.value !== null) : false,
+)
+const evaluating = computed(
+  () => !!detail.value && !waiting.value && isEvaluating(detail.value.evaluation_status),
+)
+const waitingReason = computed(() =>
+  requested.value
+    ? 'Queued to be scored next. You can leave this page; the score appears here when it is ready.'
+    : waitingText(detail.value?.waiting_reason),
 )
 const evalBadge = computed(() =>
   detail.value ? evaluationLabel(detail.value.evaluation_status, score.value !== null) : null,
@@ -383,7 +406,27 @@ const visibleDescription = computed(() =>
               aria-labelledby="match-pending-title"
               data-testid="match-unscored"
             >
-              <template v-if="evaluating">
+              <template v-if="waiting">
+                <h2 id="match-pending-title" class="match-section-title">Not scored yet</h2>
+                <p class="match-muted" data-testid="match-waiting-reason">{{ waitingReason }}</p>
+                <div class="match-section-actions">
+                  <BusyButton
+                    v-if="!requested"
+                    type="button"
+                    variant="primary"
+                    :busy="busy === 'reevaluate'"
+                    busy-label="Queuing…"
+                    :disabled="busy !== null"
+                    @click="reEvaluate"
+                  >
+                    <AppIcon name="bolt" />Score it
+                  </BusyButton>
+                  <button v-else type="button" class="btn btn-secondary" @click="load">
+                    <AppIcon name="refresh" />Check again
+                  </button>
+                </div>
+              </template>
+              <template v-else-if="evaluating">
                 <h2 id="match-pending-title" class="match-section-title">Scoring in progress</h2>
                 <p class="match-muted">
                   This job is waiting to be scored against your CV. You can leave this page; the
@@ -436,6 +479,7 @@ const visibleDescription = computed(() =>
                 </div>
               </dl>
               <BusyButton
+                v-if="!waiting"
                 type="button"
                 variant="secondary"
                 :busy="busy === 'reevaluate'"

@@ -15,6 +15,7 @@ import {
   type ResultStatus,
   type ResultsSummary,
   type SearchResult,
+  type SearchResultDetail,
 } from '../api/results'
 import { isEvaluating } from '../utils/matches'
 
@@ -159,6 +160,16 @@ async function loadMore() {
 function refresh() {
   loadSummary()
   load()
+}
+
+// "Score it" on a row: show its new state (pending, first in the queue).
+function onQueued(detail: SearchResultDetail | null) {
+  if (!detail) return
+  const row = results.value.find((r) => r.id === detail.id)
+  if (row) {
+    row.evaluation_status = detail.evaluation_status
+    row.waiting_reason = detail.waiting_reason
+  }
 }
 
 onMounted(refresh)
@@ -341,6 +352,10 @@ const empty = computed<Empty | null>(() => {
           <p class="match-progress-text">
             You can leave this page. Matches appear here as each job is scored.
           </p>
+          <p v-if="summary?.daily_cap_reached" class="match-progress-text" data-testid="daily-cap">
+            Today's scoring limit is reached, so the rest are scored over the next 24 hours, closest
+            to your CV first. Use Score it on a job to score it now.
+          </p>
           <ol class="match-stages">
             <li class="match-stage">
               <span class="match-stage-dot is-done"><AppIcon name="check" /></span>
@@ -365,7 +380,7 @@ const empty = computed<Empty | null>(() => {
         </section>
 
         <section class="card match-list" aria-label="Matches">
-          <MatchRow v-for="r in results" :key="r.id" :result="r" />
+          <MatchRow v-for="r in results" :key="r.id" :result="r" @queued="onQueued" />
         </section>
 
         <AlertMessage v-if="moreError">

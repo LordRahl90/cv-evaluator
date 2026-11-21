@@ -456,6 +456,8 @@ The lists take `min_score`, `status` and `evaluation_status` (repeat them or sep
 curl "localhost:8080/results?min_score=70&status=new,saved&limit=10" -H "Authorization: Bearer $API_KEY"
 ```
 
+A result that is not scored yet says why in `waiting_reason`: `queued` (in the worker's queue, closest to the CV first), `daily_cap` (the user is at the worker's daily evaluation cap; it is scored as the 24-hour window moves on) or `low_similarity` (`held` below the similarity floor). It is `null` for every other `evaluation_status`. `POST /results/:id/re-evaluate` scores it regardless (the web app's "Score it" button). `GET /results/summary` adds `waiting` (results with no score that are `pending` or `held`) and `daily_cap_reached`. The API reads `WORKER_EVAL_DAILY_CAP` too, to know the cap, so set it to the same value on the API and the worker.
+
 So that filtering and sorting by score never scans evaluations, `search_results` keeps a pointer to its current evaluation (`evaluation_id`) and a copy of that evaluation's `overall_score` (null unless it completed). The worker sets both when it writes an evaluation, and migration backfills them for results evaluated before the columns existed. The composite indexes on `(user_id, overall_score DESC NULLS LAST, id DESC)`, `(job_search_id, overall_score DESC NULLS LAST, id DESC)`, `(user_id, created_at DESC, id DESC)` and `(user_id, status)` serve the two sort orders, per user and per search, and the counts.
 
 ## Background worker
@@ -502,7 +504,7 @@ Settings (all optional):
 | `SCHEDULER_INTERVAL`        | `1m`    | How often due searches are looked for                      |
 | `WORKER_SHUTDOWN_GRACE`     | `30s`   | Time in-flight steps get on shutdown                       |
 | `WORKER_DB_MAX_OPEN_CONNS`  | `10`    | Database pool size. No connection is held during slow work, so this need not match the concurrency |
-| `WORKER_EVAL_DAILY_CAP`     | `30`    | Results per user sent to the LLM in any 24 hours; `0` turns the cap off |
+| `WORKER_EVAL_DAILY_CAP`     | `30`    | Results per user sent to the LLM in any 24 hours; `0` turns the cap off. Set it on the API too (it reports `daily_cap` waiting reasons) |
 | `WORKER_SIMILARITY_FLOOR`   | `0`     | CV-to-job similarity (0 to 1) below which results are `held` instead of evaluated; `0` turns it off |
 
 The worker reads due searches from `job_searches` and fetches from every portal in `internal/providers` (adapter: `internal/pipeline/sources`). It never issues or checks tokens, so it doesn't need `JWT_SECRET`.

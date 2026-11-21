@@ -55,6 +55,24 @@ var (
 	ErrEvaluationInProgress = errors.New("evaluation already in progress")
 )
 
+// Waiting reasons: why a result that has no current score is not being
+// scored yet. A result waits while it is pending or held; otherwise its
+// waiting reason is empty.
+const (
+	// WaitingQueued means it is in the worker's queue and will be scored
+	// in turn (the most similar to the CV first).
+	WaitingQueued = "queued"
+	// WaitingDailyCap means the user's results have reached the worker's
+	// daily evaluation cap; it is scored once the 24-hour window moves on.
+	WaitingDailyCap = "daily_cap"
+	// WaitingLowSimilarity means it is held: the job is too far from the
+	// CV for the worker's similarity floor. It is scored only on request.
+	WaitingLowSimilarity = "low_similarity"
+)
+
+// dailyCapWindow is the period the worker's daily cap counts over.
+const dailyCapWindow = 24 * time.Hour
+
 // ValidationError describes an invalid or missing parameter.
 type ValidationError struct {
 	// Param is the name of the offending parameter, e.g. "status".
@@ -137,6 +155,9 @@ type Result struct {
 	// Evaluation is nil until the result has a completed evaluation. A
 	// result being re-evaluated keeps its previous one meanwhile.
 	Evaluation *EvaluationSummary
+	// WaitingReason says why a pending or held result is not being scored
+	// yet (Waiting*); empty otherwise.
+	WaitingReason string
 }
 
 // Page is one page of List.
@@ -185,6 +206,8 @@ type Detail struct {
 	Job              Job
 	// Evaluation is nil until the result has a completed evaluation.
 	Evaluation *Evaluation
+	// WaitingReason is as on Result.
+	WaitingReason string
 }
 
 // SearchCount is one search's share of a user's results.
@@ -206,6 +229,11 @@ type Summary struct {
 	Evaluating int64
 	// FailedEvaluation results could not be evaluated.
 	FailedEvaluation int64
+	// Waiting results have no score and are not being scored: pending or
+	// held. DailyCapReached says the user is at the worker's daily cap, so
+	// pending ones wait for the window to move on.
+	Waiting         int64
+	DailyCapReached bool
 	// NewThisWeek results were found since WeekStart, by
 	// NewThisWeekSearches different searches.
 	NewThisWeek         int64
@@ -224,10 +252,68 @@ type Summary struct {
 type Service struct {
 	db  *gorm.DB
 	now func() time.Time
+	// dailyCap is the worker's daily evaluation cap, 0 when off.
+	dailyCap int
 }
 
-func New(db *gorm.DB) *Service {
-	return &Service{db: db, now: time.Now}
+// Option configures a Service.
+type Option func(*Service)
+
+// WithDailyCap tells the service the worker's daily evaluation cap
+// (config.EvalDailyCap; 0 means none), so it can report results waiting
+// behind it.
+func WithDailyCap(n int) Option {
+	return func(s *Service) { s.dailyCap = max(n, 0) }
+}
+
+func New(db *gorm.DB, opts ...Option) *Service {
+	s := &Service{db: db, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// atDailyCap reports whether userID has reached the worker's daily cap:
+// results sent to the LLM in the window plus results being evaluated now,
+// as the worker counts them.
+func (s *Service) atDailyCap(ctx context.Context, userID ulid.ULID) (bool, error) {
+	if s.dailyCap <= 0 {
+		return false, nil
+	}
+	var used int64
+	if err := s.db.WithContext(ctx).Model(&models.SearchResult{}).
+		Where("user_id = ? AND (evaluated_at > ? OR evaluation_status = ?)",
+			userID, s.now().Add(-dailyCapWindow), models.EvaluationProcessing).
+		Count(&used).Error; err != nil {
+		return false, fmt.Errorf("count evaluations for the daily cap: %w", err)
+	}
+	return used >= int64(s.dailyCap), nil
+}
+
+// waitingReason says why a result with this evaluation status is not
+// being scored yet. A forced result is the user's own request, which the
+// cap does not hold back.
+func waitingReason(evaluationStatus string, forced, atCap bool) string {
+	switch {
+	case evaluationStatus == models.EvaluationHeld:
+		return WaitingLowSimilarity
+	case evaluationStatus != models.EvaluationPending:
+		return ""
+	case atCap && !forced:
+		return WaitingDailyCap
+	default:
+		return WaitingQueued
+	}
+}
+
+// capFor looks up whether userID is at the daily cap, only when some
+// result needs to know.
+func (s *Service) capFor(ctx context.Context, userID ulid.ULID, needed bool) (bool, error) {
+	if !needed {
+		return false, nil
+	}
+	return s.atDailyCap(ctx, userID)
 }
 
 // visible scopes a query on "search_results sr" to userID's results whose
@@ -245,6 +331,7 @@ type listRow struct {
 	ID               ulid.ULID
 	Status           string
 	EvaluationStatus string
+	Forced           bool
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	OverallScore     *int
@@ -303,7 +390,7 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (*Pa
 	}
 
 	q := filtered().
-		Select(`sr.id, sr.status, sr.evaluation_status, sr.created_at, sr.updated_at, sr.overall_score,
+		Select(`sr.id, sr.status, sr.evaluation_status, sr.forced, sr.created_at, sr.updated_at, sr.overall_score,
 			js.id AS search_id, js.name AS search_name,
 			j.id AS job_id, j.title, j.company, j.location, j.provider, j.details_url, j.posted_at,
 			e.missing_skills, e.updated_at AS evaluated_at`).
@@ -329,9 +416,17 @@ func (s *Service) List(ctx context.Context, userID ulid.ULID, p ListParams) (*Pa
 	if page.HasMore {
 		rows = rows[:p.Limit]
 	}
+	needCap := slices.ContainsFunc(rows, func(r listRow) bool {
+		return r.EvaluationStatus == models.EvaluationPending && !r.Forced
+	})
+	atCap, err := s.capFor(ctx, userID, needCap)
+	if err != nil {
+		return nil, err
+	}
 	page.Results = make([]Result, len(rows))
 	for i, r := range rows {
 		page.Results[i] = r.result()
+		page.Results[i].WaitingReason = waitingReason(r.EvaluationStatus, r.Forced, atCap)
 	}
 	return page, nil
 }
@@ -482,6 +577,7 @@ type detailRow struct {
 	ID               ulid.ULID
 	Status           string
 	EvaluationStatus string
+	Forced           bool
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	EvaluationID     *ulid.ULID
@@ -502,7 +598,7 @@ type detailRow struct {
 func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*Detail, error) {
 	var rows []detailRow
 	if err := s.visible(ctx, userID).
-		Select(`sr.id, sr.status, sr.evaluation_status, sr.created_at, sr.updated_at, sr.evaluation_id, sr.overall_score,
+		Select(`sr.id, sr.status, sr.evaluation_status, sr.forced, sr.created_at, sr.updated_at, sr.evaluation_id, sr.overall_score,
 			js.id AS search_id, js.name AS search_name,
 			j.id AS job_id, j.title, j.company, j.location, j.provider, j.details_url, j.posted_at, j.detail`).
 		Where("sr.id = ?", id).
@@ -539,6 +635,11 @@ func (s *Service) Get(ctx context.Context, userID, id ulid.ULID) (*Detail, error
 		}
 		d.Evaluation = eval
 	}
+	atCap, err := s.capFor(ctx, userID, r.EvaluationStatus == models.EvaluationPending && !r.Forced)
+	if err != nil {
+		return nil, err
+	}
+	d.WaitingReason = waitingReason(r.EvaluationStatus, r.Forced, atCap)
 	return d, nil
 }
 
@@ -674,6 +775,7 @@ func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (*Summary, erro
 		Scored              int64
 		Evaluating          int64
 		FailedEvaluation    int64
+		Waiting             int64
 		NewThisWeek         int64
 		NewThisWeekSearches int64
 		StrongMatches       int64
@@ -688,6 +790,7 @@ func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (*Summary, erro
 			count(*) FILTER (WHERE sr.overall_score IS NOT NULL) AS scored,
 			count(*) FILTER (WHERE sr.evaluation_status IN @evaluating) AS evaluating,
 			count(*) FILTER (WHERE sr.evaluation_status = @failed) AS failed_evaluation,
+			count(*) FILTER (WHERE sr.evaluation_status IN @waiting AND sr.overall_score IS NULL) AS waiting,
 			count(*) FILTER (WHERE sr.created_at >= @week) AS new_this_week,
 			count(DISTINCT sr.job_search_id) FILTER (WHERE sr.created_at >= @week) AS new_this_week_searches,
 			count(*) FILTER (WHERE sr.overall_score >= @strong AND sr.status <> @dismissed) AS strong_matches,
@@ -699,6 +802,7 @@ func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (*Summary, erro
 			map[string]any{
 				"evaluating": []string{models.EvaluationPending, models.EvaluationProcessing},
 				"failed":     models.EvaluationFailed,
+				"waiting":    []string{models.EvaluationPending, models.EvaluationHeld},
 				"week":       weekStart,
 				"strong":     StrongScore,
 				"new":        models.SearchResultNew,
@@ -725,12 +829,19 @@ func (s *Service) Summary(ctx context.Context, userID ulid.ULID) (*Summary, erro
 		bySearch = []SearchCount{}
 	}
 
+	atCap, err := s.capFor(ctx, userID, totals.Waiting > 0)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Summary{
 		WeekStart:           weekStart,
 		Total:               totals.Total,
 		Scored:              totals.Scored,
 		Evaluating:          totals.Evaluating,
 		FailedEvaluation:    totals.FailedEvaluation,
+		Waiting:             totals.Waiting,
+		DailyCapReached:     atCap,
 		NewThisWeek:         totals.NewThisWeek,
 		NewThisWeekSearches: totals.NewThisWeekSearches,
 		StrongMatches:       totals.StrongMatches,

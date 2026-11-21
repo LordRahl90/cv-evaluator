@@ -105,6 +105,12 @@
     align-self: flex-start;
   }
 
+  /* "Score it" on a job that is not scored yet. */
+  .match-section-actions {
+    @apply flex flex-wrap;
+    gap: 8px;
+  }
+
   .match-summary {
     margin: 0;
     font-size: 15px;

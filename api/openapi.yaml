@@ -998,6 +998,8 @@ paths:
                 scored: 80
                 evaluating: 3
                 failed_evaluation: 1
+                waiting: 0
+                daily_cap_reached: false
                 new_this_week: 14
                 new_this_week_searches: 3
                 strong_score: 80
@@ -2291,7 +2293,7 @@ components:
     SearchResult:
       type: object
       description: A job one of the user's searches found, with its score.
-      required: [object, id, status, evaluation_status, created_at, updated_at, search, job, evaluation]
+      required: [object, id, status, evaluation_status, created_at, updated_at, search, job, evaluation, waiting_reason]
       properties:
         object:
           type: string
@@ -2318,6 +2320,8 @@ components:
           oneOf:
             - $ref: '#/components/schemas/EvaluationSummary'
             - type: 'null'
+        waiting_reason:
+          $ref: '#/components/schemas/WaitingReason'
 
     SearchResultList:
       type: object
@@ -2413,7 +2417,7 @@ components:
     SearchResultDetail:
       type: object
       description: A result with the job's full description and its full evaluation.
-      required: [object, id, status, evaluation_status, created_at, updated_at, search, job, evaluation]
+      required: [object, id, status, evaluation_status, created_at, updated_at, search, job, evaluation, waiting_reason]
       properties:
         object:
           type: string
@@ -2440,6 +2444,23 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Evaluation'
             - type: 'null'
+        waiting_reason:
+          $ref: '#/components/schemas/WaitingReason'
+
+    WaitingReason:
+      type: [string, 'null']
+      description: |
+        Why a result that is `pending` or `held` is not being scored yet, and
+        `null` for every other `evaluation_status`:
+
+        - `queued`: in the queue; jobs closest to the CV are scored first.
+        - `daily_cap`: the caller already had the most evaluations allowed in
+          24 hours; it is scored as that window moves on.
+        - `low_similarity`: `held`; the job is too far from the CV to be
+          scored automatically.
+
+        Re-evaluating the result scores it regardless of the reason.
+      enum: [queued, daily_cap, low_similarity, null]
 
     SearchCount:
       type: object
@@ -2456,7 +2477,7 @@ components:
 
     ResultsSummary:
       type: object
-      required: [object, week_start, total, scored, evaluating, failed_evaluation, new_this_week, new_this_week_searches, strong_score, strong_matches, strong_matches_new, by_status, by_search]
+      required: [object, week_start, total, scored, evaluating, failed_evaluation, waiting, daily_cap_reached, new_this_week, new_this_week_searches, strong_score, strong_matches, strong_matches_new, by_status, by_search]
       properties:
         object:
           type: string
@@ -2475,6 +2496,15 @@ components:
           description: Results waiting for, or undergoing, evaluation.
         failed_evaluation:
           type: integer
+        waiting:
+          type: integer
+          description: Results with no score that are not being scored yet (`pending` or `held`).
+        daily_cap_reached:
+          type: boolean
+          description: |
+            Whether the caller has reached the daily evaluation cap while
+            results are waiting; they are scored as the 24-hour window moves
+            on.
         new_this_week:
           type: integer
           description: Results found since `week_start`.
@@ -2841,6 +2871,7 @@ components:
               overall_score: 91
               top_missing_skills: [Terraform]
               evaluated_at: '2026-10-16T07:04:40Z'
+            waiting_reason: null
           - object: search_result
             id: 01JA4D5E6F7G8H9J0K1M2N3P4S
             status: saved
@@ -2859,6 +2890,7 @@ components:
               details_url: https://www.jobindex.dk/vis-job/h1234567
               posted_at: '2026-10-15'
             evaluation: null
+            waiting_reason: queued
     SearchResultDetail:
       summary: A result
       value:
@@ -2915,3 +2947,4 @@ components:
           model: deepseek-chat
           prompt_version: v4
           evaluated_at: '2026-10-16T07:04:40Z'
+        waiting_reason: null

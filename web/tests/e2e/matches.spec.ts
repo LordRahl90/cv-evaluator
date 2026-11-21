@@ -176,7 +176,9 @@ test('in progress: jobs found but none scored yet', async ({ page }) => {
   await expect(progress).toContainText('Scoring in progress')
   await expect(progress).toContainText('2 jobs found')
   await expect(rows(page)).toHaveCount(2)
-  await expect(rows(page).first()).toContainText('Scoring…')
+  // Queued jobs say why they wait; the one being scored says so.
+  await expect(rows(page).first()).toContainText('Not scored yet')
+  await expect(rows(page).nth(1)).toContainText('Scoring…')
   await expect(rows(page).first().getByRole('img', { name: 'Not scored yet' })).toBeVisible()
 })
 

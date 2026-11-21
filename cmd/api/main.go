@@ -167,7 +167,7 @@ func run() error {
 	portals := providers.Default(providers.WithTransport(telemetry.NewJobBoardTransport(nil)))
 	jobsearchhttp.New(router, jobsearchsvc.New(dbase), portals, jwtSecret, authOpts...)
 	portalhttp.New(router, portalsvc.New(dbase, portalWebsites(portals)...), jwtSecret, authOpts...)
-	resulthttp.New(router, resultsvc.New(dbase), jwtSecret, authOpts...)
+	resulthttp.New(router, resultsvc.New(dbase, resultsvc.WithDailyCap(cfg.EvalDailyCap)), jwtSecret, authOpts...)
 
 	if err := lim.checkRoutes(router.Routes()); err != nil {
 		return err
