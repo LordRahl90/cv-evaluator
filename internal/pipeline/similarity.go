@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"cv-evaluator/internal/models"
+
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 )
@@ -46,4 +48,84 @@ func (p *Pipeline) recordSimilarity(ctx context.Context, cvID, jobID ulid.ULID) 
 		return nil, false
 	}
 	return sim, true
+}
+
+// rankSQL brings the similarity of up to @batch results waiting for
+// evaluation up to date with their user's newest CV: results never ranked,
+// and results ranked against another CV (the user uploaded a new one). A
+// held result ranked again goes back to pending, since a new CV may score
+// it above the floor; EvaluateOne holds it again if not. Results of users
+// with no CV, and results whose job is not embedded yet, are left alone.
+//
+// It picks the CV as LatestCVSelector does. Rows are locked with SKIP
+// LOCKED, so it never waits for, or races with, a claim.
+const rankSQL = `
+UPDATE search_results sr
+SET similarity = r.similarity, similarity_cv_id = r.cv_id, evaluation_status = @pending, updated_at = @now
+FROM (
+	SELECT sr.id, c.id AS cv_id, ` + similarityExpr + ` AS similarity
+	FROM search_results sr
+	JOIN jobs j ON j.id = sr.job_id AND j.deleted_at IS NULL AND j.status = @embedded
+	JOIN LATERAL (
+		SELECT id, full_embedding FROM cvs
+		WHERE user_id = sr.user_id AND deleted_at IS NULL
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	) c ON true
+	WHERE sr.evaluation_status IN (@pending, @held) AND sr.similarity_cv_id IS DISTINCT FROM c.id
+	LIMIT @batch
+	FOR UPDATE OF sr SKIP LOCKED
+) r
+WHERE sr.id = r.id`
+
+// releaseSQL sends up to @batch held results back to pending when the
+// floor no longer holds them: it was turned off or lowered below their
+// similarity.
+const releaseSQL = `
+UPDATE search_results SET evaluation_status = @pending, updated_at = @now
+WHERE id IN (
+	SELECT id FROM search_results
+	WHERE evaluation_status = @held AND (@floorOff OR similarity IS NULL OR similarity >= @floor)
+	LIMIT @batch
+	FOR UPDATE SKIP LOCKED
+)`
+
+// Rank updates the similarity of one batch of results waiting for
+// evaluation (see rankSQL) and releases one batch of held results the
+// floor no longer holds. It returns how many rows changed; a full batch
+// means more may be waiting.
+//
+// Ranking is its own loop rather than part of EvaluateOne: one UPDATE
+// covers a whole batch, it runs whether or not evaluation workers are busy
+// (so a new CV re-orders the queue before the next claims), and the claim
+// stays a short indexed lookup.
+func (p *Pipeline) Rank(ctx context.Context) (int, error) {
+	var changed int
+	err := observe(ctx, p.cfg.Observer, KindRankResults, func(ctx context.Context) error {
+		args := map[string]any{
+			"pending":  models.EvaluationPending,
+			"held":     models.EvaluationHeld,
+			"embedded": models.JobStatusEmbedded,
+			"now":      p.now(),
+			"batch":    p.cfg.RankBatch,
+			"floor":    p.cfg.SimilarityFloor,
+			"floorOff": p.cfg.SimilarityFloor <= 0,
+		}
+		db := p.db.WithContext(ctx)
+		ranked := db.Exec(rankSQL, args)
+		if ranked.Error != nil {
+			return fmt.Errorf("rank search results: %w", ranked.Error)
+		}
+		released := db.Exec(releaseSQL, args)
+		if released.Error != nil {
+			return fmt.Errorf("release held search results: %w", released.Error)
+		}
+		changed = int(ranked.RowsAffected + released.RowsAffected)
+		if changed > 0 {
+			slog.DebugContext(ctx, "search results ranked",
+				"ranked", ranked.RowsAffected, "released", released.RowsAffected)
+		}
+		return nil
+	})
+	return changed, err
 }

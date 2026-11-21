@@ -629,10 +629,13 @@ func (s *Service) UpdateStatus(ctx context.Context, userID, id ulid.ULID, status
 }
 
 // ReEvaluate queues one of userID's results for evaluation again, against
-// the CV the pipeline picks then. The current evaluation stays until the new
-// one replaces it. A result already waiting for its next attempt is made due
-// now. It returns ErrEvaluationInProgress while the result is being
-// evaluated or is already due.
+// the CV the pipeline picks then, or for its first evaluation now. The
+// request is forced: the worker takes it before other results and it skips
+// the daily cap and the similarity floor, so it also works on held results
+// and on results waiting behind the cap. The current evaluation stays until
+// the new one replaces it. A result already waiting for its next attempt is
+// made due now. It returns ErrEvaluationInProgress while the result is being
+// evaluated or a forced evaluation of it is already due.
 func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (*Detail, error) {
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
@@ -641,10 +644,12 @@ func (s *Service) ReEvaluate(ctx context.Context, userID, id ulid.ULID) (*Detail
 	now := s.now()
 	res := s.db.WithContext(ctx).Model(&models.SearchResult{}).
 		Where("id = ? AND user_id = ?", id, userID).
-		Where("(evaluation_status IN ? OR (evaluation_status = ? AND next_attempt_at > ?))",
-			[]string{models.EvaluationDone, models.EvaluationFailed}, models.EvaluationPending, now).
+		Where("(evaluation_status IN ? OR (evaluation_status = ? AND (NOT forced OR next_attempt_at > ?)))",
+			[]string{models.EvaluationDone, models.EvaluationFailed, models.EvaluationHeld},
+			models.EvaluationPending, now).
 		Updates(map[string]any{
 			"evaluation_status": models.EvaluationPending,
+			"forced":            true,
 			"attempts":          0,
 			"next_attempt_at":   nil,
 			"claimed_at":        nil,

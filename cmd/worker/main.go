@@ -142,6 +142,8 @@ func run(opts options) error {
 		PollInterval:      settings.pollInterval,
 		SchedulerInterval: settings.schedulerInterval,
 		ShutdownGrace:     settings.shutdownGrace,
+		EvalDailyCap:      settings.evalDailyCap,
+		SimilarityFloor:   settings.similarityFloor,
 		Observer:          opts.Observer,
 	})
 	if err != nil {
@@ -159,6 +161,8 @@ func run(opts options) error {
 		"stale_timeout", settings.staleTimeout,
 		"scheduler_interval", settings.schedulerInterval,
 		"db_max_open_conns", settings.dbMaxOpenConns,
+		"eval_daily_cap", settings.evalDailyCap,
+		"similarity_floor", settings.similarityFloor,
 		"providers", fetcher.Providers())
 
 	p.Run(ctx)
@@ -182,6 +186,9 @@ type settings struct {
 	schedulerInterval time.Duration
 	shutdownGrace     time.Duration
 	dbMaxOpenConns    int
+	// evalDailyCap is passed to pipeline.Config: negative means no cap.
+	evalDailyCap    int
+	similarityFloor float64
 }
 
 // loadSettings reads the worker's tuning knobs from the environment.
@@ -198,6 +205,12 @@ func loadSettings() (settings, error) {
 	s.schedulerInterval = envDuration("SCHEDULER_INTERVAL", pipeline.DefaultSchedulerInterval, &errs)
 	s.shutdownGrace = envDuration("WORKER_SHUTDOWN_GRACE", pipeline.DefaultShutdownGrace, &errs)
 	s.dbMaxOpenConns = envInt("WORKER_DB_MAX_OPEN_CONNS", 10, &errs)
+	// 0 turns the cap off; the pipeline reads 0 as "use the default".
+	s.evalDailyCap = envNonNegativeInt("WORKER_EVAL_DAILY_CAP", pipeline.DefaultEvalDailyCap, &errs)
+	if s.evalDailyCap == 0 {
+		s.evalDailyCap = -1
+	}
+	s.similarityFloor = envFraction("WORKER_SIMILARITY_FLOOR", 0, &errs)
 	return s, errors.Join(errs...)
 }
 
@@ -225,4 +238,31 @@ func envDuration(key string, fallback time.Duration, errs *[]error) time.Duratio
 		return fallback
 	}
 	return d
+}
+
+func envNonNegativeInt(key string, fallback int, errs *[]error) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		*errs = append(*errs, fmt.Errorf("%s must be 0 or a positive integer, got %q", key, v))
+		return fallback
+	}
+	return n
+}
+
+// envFraction reads a number from 0 to 1.
+func envFraction(key string, fallback float64, errs *[]error) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || !(f >= 0 && f <= 1) { // also rejects NaN
+		*errs = append(*errs, fmt.Errorf("%s must be a number from 0 to 1, got %q", key, v))
+		return fallback
+	}
+	return f
 }

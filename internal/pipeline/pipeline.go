@@ -38,6 +38,9 @@ const (
 	DefaultNoCVRetry         = time.Hour
 	DefaultShutdownGrace     = 30 * time.Second
 	DefaultStaleTimeout      = 5 * time.Minute
+	DefaultEvalDailyCap      = 30
+	DefaultRankBatch         = 500
+	DefaultRankInterval      = 30 * time.Second
 	DefaultModel             = "deepseek-chat"
 	// DefaultPromptVersion identifies the match prompt and criteria list
 	// recorded on each evaluation. Bump it when either changes.
@@ -103,6 +106,22 @@ type Config struct {
 	// released back to their ready state, without using up an attempt.
 	ShutdownGrace time.Duration
 
+	// EvalDailyCap is how many results per user may be sent to the LLM in
+	// 24 hours; more stay pending until the window moves on. A user's own
+	// re-evaluations are not held back by it but do count. Zero means
+	// DefaultEvalDailyCap; negative means no cap.
+	EvalDailyCap int
+	// SimilarityFloor, when above zero, holds results whose CV-to-job
+	// similarity is below it (status held) instead of sending them to the
+	// LLM. Results with no similarity are never held, and neither are the
+	// user's own re-evaluations.
+	SimilarityFloor float64
+	// RankBatch is how many results one ranking pass updates, and
+	// RankInterval how long the ranking loop waits after a pass that found
+	// nothing to do.
+	RankBatch    int
+	RankInterval time.Duration
+
 	// Model and PromptVersion are recorded on each evaluation.
 	Model         string
 	PromptVersion string
@@ -131,6 +150,10 @@ func (c Config) withDefaults() Config {
 	def(&c.MaxAttempts, DefaultMaxAttempts)
 	def(&c.PortalAttempts, DefaultPortalAttempts)
 	def(&c.SearchBatch, DefaultSearchBatch)
+	def(&c.RankBatch, DefaultRankBatch)
+	if c.EvalDailyCap == 0 {
+		c.EvalDailyCap = DefaultEvalDailyCap
+	}
 	defDur(&c.BaseBackoff, DefaultBaseBackoff)
 	defDur(&c.MaxBackoff, DefaultMaxBackoff)
 	defDur(&c.PortalBackoff, DefaultPortalBackoff)
@@ -140,6 +163,7 @@ func (c Config) withDefaults() Config {
 	defDur(&c.NoCVRetry, DefaultNoCVRetry)
 	defDur(&c.ShutdownGrace, DefaultShutdownGrace)
 	defDur(&c.StaleTimeout, DefaultStaleTimeout)
+	defDur(&c.RankInterval, DefaultRankInterval)
 	if c.Model == "" {
 		c.Model = DefaultModel
 	}
@@ -228,6 +252,12 @@ func (p *Pipeline) Run(ctx context.Context) {
 		p.loop(ctx, p.cfg.SchedulerInterval, func() (bool, error) {
 			n, err := p.Tick(work)
 			return n > 0, err
+		})
+	})
+	wg.Go(func() {
+		p.loop(ctx, p.cfg.RankInterval, func() (bool, error) {
+			n, err := p.Rank(work)
+			return n >= p.cfg.RankBatch, err
 		})
 	})
 	wg.Go(func() { p.pool(ctx, p.cfg.EmbedWorkers, func() (bool, error) { return p.EmbedOne(work) }) })
@@ -507,17 +537,26 @@ type evaluationOutcome struct {
 	// not be computed; hasSimilarity says whether it was looked up at all.
 	similarity    *float64
 	hasSimilarity bool
+	// held means the similarity is below the floor, so the LLM was not
+	// called.
+	held bool
 }
 
 // EvaluateOne claims one search result whose job is embedded and that
-// waits for evaluation (a short statement, see claimResult), then with no
-// transaction held evaluates it against the user's CV, then writes the
-// evaluation, its scores and the result's state in one short transaction.
-// It reports whether there was a result to handle. If the result was
-// deleted meanwhile (the user deleted their account), nothing is written.
+// waits for evaluation (a short transaction that applies the daily cap,
+// see claimResult), then with no transaction held evaluates it against the
+// user's CV, then writes the evaluation, its scores and the result's state
+// in one short transaction. A result below the similarity floor is held
+// instead, without calling the LLM. It reports whether there was a result
+// to handle. If the result was deleted meanwhile (the user deleted their
+// account), nothing is written.
 func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 	now := p.now()
-	result, err := claimResult(p.db.WithContext(ctx), now, now.Add(-p.cfg.StaleTimeout))
+	result, err := claimResult(p.db.WithContext(ctx), claimOptions{
+		now:      now,
+		stale:    now.Add(-p.cfg.StaleTimeout),
+		dailyCap: max(p.cfg.EvalDailyCap, 0),
+	})
 	if err != nil || result == nil {
 		return false, err
 	}
@@ -535,6 +574,10 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 		}
 		out.cv = cv
 		out.similarity, out.hasSimilarity = p.recordSimilarity(ctx, cv.ID, job.ID)
+		if p.belowFloor(result, out.similarity) {
+			out.held = true
+			return nil
+		}
 		out.resp, out.raw, out.matchErr = p.cfg.Evaluator.MatchJob(ctx, cv.ID, &job)
 		if out.matchErr != nil {
 			return fmt.Errorf("evaluate: %w", out.matchErr)
@@ -558,13 +601,23 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 		updates["attempts"] = result.Attempts - 1
 		updates["next_attempt_at"] = p.now().Add(p.cfg.NoCVRetry)
 		updates["last_error"] = "user has no CV"
+	case stepErr == nil && out.held:
+		// Not an attempt: the LLM was not called.
+		updates["evaluation_status"] = models.EvaluationHeld
+		updates["attempts"] = result.Attempts - 1
+		updates["next_attempt_at"] = nil
+		updates["last_error"] = ""
 	case stepErr == nil:
 		updates["evaluation_status"] = models.EvaluationDone
 		updates["next_attempt_at"] = nil
 		updates["last_error"] = ""
+		updates["forced"] = false
 	default:
 		p.applyFailure(updates, "evaluation_status", models.EvaluationPending, models.EvaluationFailed,
 			result.Attempts, stepErr)
+		if updates["evaluation_status"] == models.EvaluationFailed {
+			updates["forced"] = false
+		}
 		log.WarnContext(ctx, "evaluation failed", "attempt", result.Attempts, "error", stepErr)
 	}
 
@@ -590,6 +643,7 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 			// The evaluation just written is the result's current one; its
 			// score is copied only when it completed.
 			updates["evaluation_id"] = eval.ID
+			updates["evaluated_at"] = p.now()
 			updates["overall_score"] = nil
 			if eval.Status == models.StatusCompleted {
 				updates["overall_score"] = eval.OverallScore
@@ -607,7 +661,18 @@ func (p *Pipeline) EvaluateOne(ctx context.Context) (bool, error) {
 	if out.resp != nil {
 		log.InfoContext(ctx, "job evaluated", "cv_id", out.cv.ID.String(), "overall_score", out.resp.OverallScore)
 	}
+	if out.held {
+		log.InfoContext(ctx, "job held below the similarity floor", "cv_id", out.cv.ID.String(),
+			"similarity", *out.similarity, "floor", p.cfg.SimilarityFloor)
+	}
 	return true, nil
+}
+
+// belowFloor reports whether result should be held rather than evaluated:
+// the floor is on, the similarity is known and below it, and the user did
+// not ask for this evaluation.
+func (p *Pipeline) belowFloor(result *models.SearchResult, similarity *float64) bool {
+	return p.cfg.SimilarityFloor > 0 && !result.Forced && similarity != nil && *similarity < p.cfg.SimilarityFloor
 }
 
 func breakdown(resp *matcher.Response) []matcher.CriterionScore {

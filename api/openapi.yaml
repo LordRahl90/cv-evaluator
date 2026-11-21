@@ -1096,14 +1096,17 @@ paths:
       tags: [Results]
       summary: Re-evaluate a result
       description: |
-        Queues the result to be evaluated again, against the CV the
-        background worker picks when it gets to it (the caller's most recent
-        CV). The evaluation happens in the background, so the response is
-        `202 Accepted` with `evaluation_status` set to `pending`; the
-        previous `evaluation` stays until the new one replaces it. A result
-        that waits for a later retry (for example because the caller had no
-        CV) is made due now. A result that is already due or being evaluated
-        cannot be queued again.
+        Queues the result to be evaluated again, or for the first time now,
+        against the CV the background worker picks when it gets to it (the
+        caller's most recent CV). The worker takes requested evaluations
+        before any other, and they skip the daily evaluation cap and the
+        similarity floor, so this also scores a `held` result or one waiting
+        behind the cap. The evaluation happens in the background, so the
+        response is `202 Accepted` with `evaluation_status` set to
+        `pending`; the previous `evaluation` stays until the new one
+        replaces it. A result that waits for a later retry (for example
+        because the caller had no CV) is made due now. A result being
+        evaluated, or already requested and due, cannot be queued again.
       parameters:
         - name: id
           in: path
@@ -1781,7 +1784,7 @@ components:
                 enum: [new, saved, applied, dismissed]
               evaluation_status:
                 type: string
-                enum: [pending, processing, done, failed]
+                enum: [pending, processing, done, failed, held]
               created_at:
                 type: string
                 format: date-time
@@ -2216,8 +2219,11 @@ components:
         `pending` until the result is evaluated against the user's CV (and
         again after a re-evaluation is requested), `processing` while a
         worker evaluates it, `done` once evaluated, and `failed` once
-        evaluation has failed every retry.
-      enum: [pending, processing, done, failed]
+        evaluation has failed every retry. `held` means the worker's
+        similarity floor is on and the job's description is too far from the
+        CV to be worth evaluating; it is not evaluated unless re-evaluation
+        is requested (or a new CV or a lower floor releases it).
+      enum: [pending, processing, done, failed, held]
 
     UpdateSearchResultRequest:
       type: object

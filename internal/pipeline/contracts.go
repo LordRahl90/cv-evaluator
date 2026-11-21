@@ -10,7 +10,12 @@
 //	                              (upsert jobs, search results)
 //	jobs        new ─ fetch details ─▶ described ─ embed ─▶ embedded
 //	search      evaluation_status pending (job embedded) ─ evaluate ─▶ done
-//	results
+//	results     (ranked by CV-to-job similarity; held below the floor)
+//
+// Results are evaluated most similar to the user's CV first (Rank keeps the
+// similarity current), at most EvalDailyCap per user a day, and those below
+// SimilarityFloor are held rather than sent to the LLM. A user's own
+// re-evaluation request (forced) skips both limits.
 //
 // Failed steps increment attempts and set next_attempt_at with exponential
 // backoff; after MaxAttempts the row is marked failed. A crash rolls the
